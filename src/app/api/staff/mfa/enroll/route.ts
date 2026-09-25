@@ -57,7 +57,7 @@ export async function POST(request: Request) {
         httpOnly: true,
         sameSite: 'lax',
         secure: process.env.NODE_ENV === 'production',
-        path: '/staff',
+        path: '/',
         maxAge: STAFF_MFA_TTL_MS / 1000,
     });
     return json({ ok: true });
