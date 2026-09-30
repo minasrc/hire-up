@@ -104,7 +104,8 @@ const gotoStaff = async (page, url) => {
         { timeout: 90_000 },
     );
     await page.goto(url, { waitUntil: 'domcontentloaded' });
-    await summaryFetch;
+    const summary = await summaryFetch;
+    assert.equal(summary.status(), 200, await summary.text());
     await page.waitForLoadState('networkidle');
 };
 
@@ -879,21 +880,12 @@ test('staff workspace end-to-end in a real browser', async (t) => {
         await boardPage.evaluate(() => window.dispatchEvent(new Event('focus')));
         await listing;
     };
-    const withStaleBoard = async (action) => {
-        await boardPage.evaluate(() => {
-            Object.defineProperty(document, 'visibilityState', {
-                configurable: true,
-                value: 'hidden',
-            });
-        });
-        try {
-            await action();
-        } finally {
-            await boardPage.evaluate(() => {
-                delete document.visibilityState;
-            });
-        }
-    };
+    const clickIfPresent = (button) => button.evaluateAll((buttons) => {
+        if (buttons.length > 1) throw new Error('Expected at most one stale action');
+        if (buttons.length === 0) return false;
+        buttons[0].dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
+        return true;
+    });
 
     await t.test('the public board revalidates and gates stale actions', async () => {
         const anonymous = await browser.newContext();
@@ -918,27 +910,21 @@ test('staff workspace end-to-end in a real browser', async (t) => {
         await dialog.getByRole('button', { name: 'Close' }).click();
         await dialog.waitFor({ state: 'hidden' });
 
-        await withStaleBoard(async () => {
-            await gotoStaff(page, `${baseURL}/staff/jobs/${createdJobId}`);
-            const listing = page.waitForResponse(
-                (response) => response.url()
-                    .includes(`/api/staff/jobs/${createdJobId}/listing`)
-                    && response.request().method() === 'POST' && response.ok());
-            await page.getByRole('button', { name: 'Unlist job' }).click();
-            await listing;
+        await gotoStaff(page, `${baseURL}/staff/jobs/${createdJobId}`);
+        const unlisting = page.waitForResponse(
+            (response) => response.url()
+                .includes(`/api/staff/jobs/${createdJobId}/listing`)
+                && response.request().method() === 'POST' && response.ok());
+        await page.getByRole('button', { name: 'Unlist job' }).click();
+        await unlisting;
+        assert.ok(!(await publicJobTitles()).includes('Synthetic Browser Job Edited'));
 
-            await boardPage.evaluate(() => window.dispatchEvent(new Event('focus')));
-            await expect(card).toBeVisible();
-
-            const staleDetailFetch = boardListingResponse();
-            await card.getByRole('button', { name: 'Learn more' }).dispatchEvent('click');
-            await staleDetailFetch;
-            await boardPage
-                .getByText('This position is no longer available.').waitFor();
-            assert.equal(await boardPage.getByRole('dialog').count(), 0,
-                'a stale card must not open the detail modal');
-            await expect(card).toHaveCount(0);
-        });
+        await boardPage.evaluate(() => window.dispatchEvent(new Event('focus')));
+        const goneNotice = boardPage.getByText('This position is no longer available.');
+        const clickedDetail = await clickIfPresent(card.getByRole('button', { name: 'Learn more' }));
+        if (clickedDetail) await expect(goneNotice).toBeVisible();
+        await expect(card).toHaveCount(0);
+        await expect(boardPage.getByRole('dialog')).toHaveCount(0);
 
         await gotoStaff(page, `${baseURL}/staff/jobs/${createdJobId}`);
         const listing = page.waitForResponse(
@@ -951,30 +937,20 @@ test('staff workspace end-to-end in a real browser', async (t) => {
         const restored = boardCard('Synthetic Browser Job Edited');
         await restored.waitFor();
 
-        await withStaleBoard(async () => {
-            await gotoStaff(page, `${baseURL}/staff/jobs/${createdJobId}`);
-            const relisting = page.waitForResponse(
-                (response) => response.url()
-                    .includes(`/api/staff/jobs/${createdJobId}/listing`)
-                    && response.request().method() === 'POST' && response.ok());
-            await page.getByRole('button', { name: 'Unlist job' }).click();
-            await relisting;
+        await gotoStaff(page, `${baseURL}/staff/jobs/${createdJobId}`);
+        const relisting = page.waitForResponse(
+            (response) => response.url()
+                .includes(`/api/staff/jobs/${createdJobId}/listing`)
+                && response.request().method() === 'POST' && response.ok());
+        await page.getByRole('button', { name: 'Unlist job' }).click();
+        await relisting;
+        assert.ok(!(await publicJobTitles()).includes('Synthetic Browser Job Edited'));
 
-            await boardPage.evaluate(() => window.dispatchEvent(new Event('focus')));
-            await expect(restored).toBeVisible();
-
-            const staleApplyFetch = boardListingResponse();
-            await restored.getByRole('button', { name: /APPLY/ }).dispatchEvent('click');
-            await staleApplyFetch;
-            await boardPage
-                .getByText('This position is no longer available.').waitFor();
-            assert.equal(await boardPage.getByRole('dialog').count(), 0,
-                'a stale card must not open the application form');
-            await expect(restored).toHaveCount(0);
-        });
-        assert.equal(await boardPage.evaluate(
-            () => Object.prototype.hasOwnProperty.call(document, 'visibilityState'),
-        ), false);
+        await boardPage.evaluate(() => window.dispatchEvent(new Event('focus')));
+        const clickedApply = await clickIfPresent(restored.getByRole('button', { name: /APPLY/ }));
+        if (clickedApply) await expect(goneNotice).toBeVisible();
+        await expect(restored).toHaveCount(0);
+        await expect(boardPage.getByRole('dialog')).toHaveCount(0);
     });
 
     await t.test('an open application keeps entered data when the job vanishes', async () => {
@@ -1068,9 +1044,10 @@ test('staff workspace end-to-end in a real browser', async (t) => {
         let listing = page.waitForResponse(
             (response) => response.url()
                 .includes(`/api/staff/jobs/${createdJobId}/listing`)
-                && response.request().method() === 'POST' && response.ok());
+                && response.request().method() === 'POST');
         await page.getByRole('button', { name: 'Unlist job' }).click();
-        await listing;
+        const unlisted = await listing;
+        assert.equal(unlisted.status(), 200, await unlisted.text());
 
         const slug = psql(container, `
             select slug from app.jobs where id = '${createdJobId}'`).trim();
@@ -1094,9 +1071,10 @@ test('staff workspace end-to-end in a real browser', async (t) => {
         listing = page.waitForResponse(
             (response) => response.url()
                 .includes(`/api/staff/jobs/${createdJobId}/listing`)
-                && response.request().method() === 'POST' && response.ok());
+                && response.request().method() === 'POST');
         await page.getByRole('button', { name: 'List job' }).click();
-        await listing;
+        const relisted = await listing;
+        assert.equal(relisted.status(), 200, await relisted.text());
         await page.getByText('Listed', { exact: true }).first().waitFor();
     });
 

@@ -84,6 +84,33 @@ test('a listing outage keeps the last cards and fails closed on open actions', a
     await expect(page.getByRole('dialog')).toContainText('Signal Submission');
 });
 
+for (const action of ['Learn more', '[ APPLY ]']) {
+    test(`click preflight rejects a removed job through ${action}`, async ({ page }) => {
+        await mockSession(page);
+        await page.clock.install();
+        let available = true;
+        await page.route('**/api/public/jobs', (route) => route.fulfill({
+            json: { jobs: available ? [LISTED_JOB] : [] },
+        }));
+        await page.goto('/jobs');
+        const card = cardFor(page, LISTED_JOB.title);
+        await expect(card).toBeVisible();
+        await page.clock.pauseAt(await page.evaluate(() => Date.now() + 1000));
+
+        available = false;
+        const freshListing = page.waitForResponse((response) =>
+            new URL(response.url()).pathname === '/api/public/jobs'
+                && response.request().method() === 'GET');
+        await card.getByRole('button', { name: action, exact: true }).dispatchEvent('click');
+        const response = await freshListing;
+        expect(response.status()).toBe(200);
+        expect(await response.json()).toEqual({ jobs: [] });
+        await expect(page.getByText('This position is no longer available.', { exact: true })).toBeVisible();
+        await expect(card).toHaveCount(0);
+        await expect(page.getByRole('dialog')).toHaveCount(0);
+    });
+}
+
 test('the board polls while visible, skips hidden ticks, and recovers from a stalled request', async ({ page }) => {
     await mockSession(page);
     await page.clock.install();
