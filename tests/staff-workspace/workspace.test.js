@@ -105,7 +105,7 @@ const gotoStaff = async (page, url) => {
     );
     await page.goto(url, { waitUntil: 'domcontentloaded' });
     const summary = await summaryFetch;
-    assert.equal(summary.status(), 200, await summary.text());
+    assert.equal(summary.status(), 200, 'Workspace summary request failed');
     await page.waitForLoadState('networkidle');
 };
 
