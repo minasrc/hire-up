@@ -61,6 +61,8 @@ const MIGRATIONS = [
     '20260926140000_public_intake.sql',
     '20260928100000_staff_workspace.sql',
     '20260928220000_job_visibility.sql',
+    '20260930090000_candidate_profiles.sql',
+    '20260930090100_candidate_intake_serialization.sql',
 ];
 
 const NEXTAUTH_SECRET = 'synthetic-workspace-secret';
@@ -1569,6 +1571,381 @@ test('staff workspace end-to-end in a real browser', async (t) => {
         }
         await gotoStaff(page, `${baseURL}/staff`);
         await page.getByRole('link', { name: /^Candidates \d+$/ }).waitFor();
+    });
+
+    await t.test('a candidate profile is added, reloaded, edited and cleared', async () => {
+        await gotoStaff(page, `${baseURL}/staff/candidates`);
+        const addButton = page.getByRole('button', { name: 'Add candidate' });
+        await addButton.waitFor();
+        await clickUntil(
+            () => addButton.click(),
+            page.getByRole('dialog'),
+        );
+        const dialog = page.getByRole('dialog');
+        await fillWhenReady(
+            dialog.locator('#create-candidate-name'), 'Profile Persona');
+        await fillWhenReady(
+            dialog.locator('#create-candidate-email'), 'persona@example.test');
+        await fillWhenReady(
+            dialog.locator('#create-candidate-headline'), 'QA Engineer');
+        await fillWhenReady(
+            dialog.locator('#create-candidate-location'), 'Lisbon');
+        await fillWhenReady(
+            dialog.locator('#create-candidate-url'), 'persona.example.test');
+        await dialog.locator('#create-candidate-owner')
+            .selectOption({ label: 'Admin Two' });
+        await fillWhenReady(
+            dialog.locator('#create-candidate-summary'), 'Ships quality.');
+        const created = page.waitForResponse(
+            (response) => response.url().includes('/api/staff/candidates')
+                && response.request().method() === 'POST' && response.ok(),
+        );
+        await dialog.getByRole('button', { name: 'Add candidate' }).click();
+        await created;
+        await page.waitForURL(/\/staff\/candidates\/[0-9a-f-]{36}/, {
+            timeout: 90_000 });
+
+        const heading = page.getByRole('heading', {
+            name: 'Profile Persona', level: 1 });
+        await heading.waitFor();
+        await page.getByText('QA Engineer').waitFor();
+        await page.getByText('persona@example.test').waitFor();
+        await page.getByRole('link', { name: 'Profile' }).waitFor();
+        await page.getByText(/Lisbon/).waitFor();
+        await page.getByText('Ships quality.').waitFor();
+        await page.getByText(/Owner: Admin Two/).waitFor();
+
+        await page.reload({ waitUntil: 'domcontentloaded' });
+        await heading.waitFor();
+        await page.getByText('QA Engineer').waitFor();
+        await page.getByText('persona@example.test').waitFor();
+        await page.getByText('Ships quality.').waitFor();
+        await page.screenshot({
+            path: join(resultsDir, 'staff-workspace-candidate-profile.png'),
+            fullPage: true,
+        });
+
+        const editButton = page.getByRole('button', { name: 'Edit profile' });
+        await clickUntil(
+            () => editButton.click(),
+            page.getByRole('dialog'),
+        );
+        const editDialog = page.getByRole('dialog');
+        await fillWhenReady(
+            editDialog.locator('#edit-candidate-name'), 'Profile Persona Edited');
+        await fillWhenReady(editDialog.locator('#edit-candidate-email'), '');
+        await fillWhenReady(editDialog.locator('#edit-candidate-url'), '');
+        await fillWhenReady(
+            editDialog.locator('#edit-candidate-headline'), 'Senior QA');
+        await fillWhenReady(
+            editDialog.locator('#edit-candidate-location'), 'Porto');
+        await editDialog.locator('#edit-candidate-owner')
+            .selectOption({ label: 'Synthetic Recruiter B' });
+        await fillWhenReady(
+            editDialog.locator('#edit-candidate-summary'), 'Updated summary.');
+        const patched = page.waitForResponse(
+            (response) => response.url().includes('/api/staff/candidates/')
+                && response.request().method() === 'PATCH',
+        );
+        await editDialog.getByRole('button', { name: 'Save changes' }).click();
+        assert.equal((await patched).status(), 200);
+        await expect(editDialog).toBeHidden();
+        assert.match(
+            page.url(),
+            /\/staff\/candidates\/[0-9a-f-]{36}/,
+            'an edit must not navigate away from the candidate');
+
+        await page.getByRole('heading', {
+            name: 'Profile Persona Edited', level: 1 }).waitFor();
+        await page.getByText('Senior QA').waitFor();
+        await page.getByText('Updated summary.').waitFor();
+        await page.getByText(/Owner: Synthetic Recruiter B/).waitFor();
+        assert.equal(
+            await page.getByText('persona@example.test').count(), 0,
+            'the cleared email disappears from the header');
+        assert.equal(
+            await page.getByRole('link', { name: 'Profile' }).count(), 0,
+            'the cleared profile link disappears from the header');
+
+        await page.reload({ waitUntil: 'domcontentloaded' });
+        await page.getByRole('heading', {
+            name: 'Profile Persona Edited', level: 1 }).waitFor();
+        await page.getByText('Updated summary.').waitFor();
+        assert.equal(await page.getByText('persona@example.test').count(), 0);
+        assert.equal(await page.getByRole('link', { name: 'Profile' }).count(), 0);
+
+        await gotoStaff(page, `${baseURL}/staff/candidates`);
+        const row = page.getByRole('row', { name: /Profile Persona Edited/ });
+        await row.waitFor();
+        const rowText = await row.innerText();
+        assert.match(rowText, /Senior QA/);
+        assert.doesNotMatch(rowText, /persona@example\.test/,
+            'the directory shows the cleared contact, not the identifier');
+    });
+
+    await t.test('a duplicate email offers the existing record', async () => {
+        const seed = await fetch(`${baseURL}/api/staff/candidates`, {
+            method: 'POST',
+            headers: {
+                'content-type': 'application/json',
+                cookie: cookieHeader(staffCookies),
+            },
+            body: JSON.stringify({
+                action: 'createCandidate',
+                fields: {
+                    fullName: 'Duplicate Target',
+                    email: 'dupe-check@example.test',
+                },
+                operationId: randomUUID(),
+            }),
+        });
+        assert.equal(seed.status, 200);
+        const existing = (await seed.json()).result.candidateId;
+
+        await gotoStaff(page, `${baseURL}/staff/candidates`);
+        const addButton = page.getByRole('button', { name: 'Add candidate' });
+        await clickUntil(
+            () => addButton.click(),
+            page.getByRole('dialog'),
+        );
+        const dialog = page.getByRole('dialog');
+        await fillWhenReady(
+            dialog.locator('#create-candidate-name'), 'Duplicate Shadow');
+        await fillWhenReady(
+            dialog.locator('#create-candidate-email'), 'DUPE-CHECK@example.test');
+        const conflicted = page.waitForResponse(
+            (response) => response.url().includes('/api/staff/candidates')
+                && response.request().method() === 'POST'
+                && response.status() === 409,
+        );
+        await dialog.getByRole('button', { name: 'Add candidate' }).click();
+        await conflicted;
+        await dialog.getByText('A candidate with this email already exists.')
+            .waitFor();
+        const openExisting = dialog.getByRole('link', { name: 'Open existing' });
+        await openExisting.waitFor();
+        await openExisting.click();
+        await page.waitForURL(`${baseURL}/staff/candidates/${existing}`);
+        await page.getByRole('heading', {
+            name: 'Duplicate Target', level: 1 }).waitFor();
+        assert.equal(
+            await page.getByText('Duplicate Shadow').count(), 0,
+            'the duplicate attempt must not create another candidate');
+    });
+
+    await t.test('read-only staff cannot add or edit candidate profiles', async () => {
+        const context = await browser.newContext({
+            viewport: { width: 1440, height: 1000 },
+        });
+        try {
+            await context.addCookies(recruiterCookies);
+            const recruiter = await context.newPage();
+            recruiter.setDefaultTimeout(90_000);
+            await gotoStaff(recruiter, `${baseURL}/staff/candidates`);
+            await recruiter.getByRole('heading', { name: 'Candidates', level: 1 })
+                .waitFor();
+            assert.equal(
+                await recruiter.getByRole('button', { name: 'Add candidate' })
+                    .count(),
+                0,
+                'the add control is hidden without candidates.write',
+            );
+            await gotoStaff(
+                recruiter, `${baseURL}/staff/candidates/${CJ_ID.CANDIDATE_B}`);
+            await recruiter.getByRole('heading', {
+                name: 'Synthetic Candidate B', level: 1 }).waitFor();
+            assert.equal(
+                await recruiter.getByRole('button', { name: 'Edit profile' })
+                    .count(),
+                0,
+                'the edit control is hidden without candidates.write',
+            );
+
+            const denied = await fetch(`${baseURL}/api/staff/candidates`, {
+                method: 'POST',
+                headers: {
+                    'content-type': 'application/json',
+                    cookie: cookieHeader(recruiterCookies),
+                },
+                body: JSON.stringify({
+                    action: 'createCandidate',
+                    fields: { fullName: 'Denied Writer' },
+                    operationId: randomUUID(),
+                }),
+            });
+            assert.equal(denied.status, 403,
+                'the API must deny writes for read-only staff');
+            const deniedPatch = await fetch(
+                `${baseURL}/api/staff/candidates/${CJ_ID.CANDIDATE_B}`, {
+                    method: 'PATCH',
+                    headers: {
+                        'content-type': 'application/json',
+                        cookie: cookieHeader(recruiterCookies),
+                    },
+                    body: JSON.stringify({
+                        fields: { fullName: 'Denied Writer' },
+                        expectedVersion: '1',
+                        operationId: randomUUID(),
+                    }),
+                });
+            assert.equal(deniedPatch.status, 403);
+        } finally {
+            await context.close();
+        }
+    });
+
+    await t.test('mobile staff can add and edit a candidate profile', async () => {
+        const context = await browser.newContext({
+            viewport: { width: 390, height: 844 },
+        });
+        try {
+            await context.addCookies(staffCookies);
+            const mobile = await context.newPage();
+            mobile.setDefaultTimeout(90_000);
+            await gotoStaff(mobile, `${baseURL}/staff/candidates`);
+            const addButton = mobile.getByRole('button', { name: 'Add candidate' });
+            await addButton.waitFor();
+            await clickUntil(
+                () => addButton.click(),
+                mobile.getByRole('dialog'),
+            );
+            const dialog = mobile.getByRole('dialog');
+            await fillWhenReady(
+                dialog.locator('#create-candidate-name'), 'Mobile Persona');
+            await fillWhenReady(
+                dialog.locator('#create-candidate-headline'), 'Field Tester');
+            const created = mobile.waitForResponse(
+                (response) => response.url().includes('/api/staff/candidates')
+                    && response.request().method() === 'POST' && response.ok(),
+            );
+            await dialog.getByRole('button', { name: 'Add candidate' }).click();
+            await created;
+            await mobile.waitForURL(/\/staff\/candidates\/[0-9a-f-]{36}/, {
+                timeout: 90_000 });
+            await mobile.getByRole('heading', {
+                name: 'Mobile Persona', level: 1 }).waitFor();
+            assert.equal(
+                await mobile.evaluate(
+                    () => document.documentElement.scrollWidth
+                        - document.documentElement.clientWidth),
+                0,
+                'the candidate detail header must not overflow a 390px viewport',
+            );
+            await mobile.screenshot({
+                path: join(resultsDir, 'staff-workspace-candidate-profile-mobile.png'),
+                fullPage: true,
+            });
+            const editButton = mobile.getByRole('button', {
+                name: 'Edit profile' });
+            await clickUntil(
+                () => editButton.click(),
+                mobile.getByRole('dialog'),
+            );
+            const editDialog = mobile.getByRole('dialog');
+            await expect(
+                editDialog.locator('#edit-candidate-headline'),
+            ).toHaveValue('Field Tester');
+            await fillWhenReady(
+                editDialog.locator('#edit-candidate-headline'), 'Lead Tester');
+            const patched = mobile.waitForResponse(
+                (response) => response.url().includes('/api/staff/candidates/')
+                    && response.request().method() === 'PATCH',
+            );
+            await editDialog.getByRole('button', { name: 'Save changes' })
+                .click();
+            assert.equal((await patched).status(), 200);
+            await expect(editDialog).toBeHidden();
+            await mobile.getByText('Lead Tester').waitFor();
+        } finally {
+            await context.close();
+        }
+    });
+
+    await t.test('the profile dialog discards drafts and resists stale versions', async () => {
+        const seed = await fetch(`${baseURL}/api/staff/candidates`, {
+            method: 'POST',
+            headers: {
+                'content-type': 'application/json',
+                cookie: cookieHeader(staffCookies),
+            },
+            body: JSON.stringify({
+                action: 'createCandidate',
+                fields: { fullName: 'Dialog Guard', headline: 'First' },
+                operationId: randomUUID(),
+            }),
+        });
+        assert.equal(seed.status, 200);
+        const candidateId = (await seed.json()).result.candidateId;
+
+        await gotoStaff(page, `${baseURL}/staff/candidates/${candidateId}`);
+        const editButton = page.getByRole('button', { name: 'Edit profile' });
+        await clickUntil(
+            () => editButton.click(),
+            page.getByRole('dialog'),
+        );
+        let dialog = page.getByRole('dialog');
+        await fillWhenReady(
+            dialog.locator('#edit-candidate-headline'), 'Discarded draft');
+        await dialog.getByRole('button', { name: 'Cancel' }).click();
+        await expect(dialog).toBeHidden();
+        assert.equal(
+            await page.getByText('Discarded draft').count(), 0,
+            'a cancelled edit must not persist');
+
+        await clickUntil(
+            () => editButton.click(),
+            page.getByRole('dialog'),
+        );
+        dialog = page.getByRole('dialog');
+        await expect(dialog.locator('#edit-candidate-headline'))
+            .toHaveValue('First', {
+                timeout: 90_000,
+            });
+        await fillWhenReady(
+            dialog.locator('#edit-candidate-headline'), 'Mine now');
+
+        const external = await fetch(
+            `${baseURL}/api/staff/candidates/${candidateId}`, {
+                method: 'PATCH',
+                headers: {
+                    'content-type': 'application/json',
+                    cookie: cookieHeader(staffCookies),
+                },
+                body: JSON.stringify({
+                    fields: { fullName: 'Dialog Guard', headline: 'Second' },
+                    expectedVersion: '1',
+                    operationId: randomUUID(),
+                }),
+            });
+        assert.equal(external.status, 200);
+
+        const conflicted = page.waitForResponse(
+            (response) => response.url().includes(`/api/staff/candidates/${candidateId}`)
+                && response.request().method() === 'PATCH',
+        );
+        await dialog.getByRole('button', { name: 'Save changes' }).click();
+        const conflictResponse = await conflicted;
+        assert.equal(conflictResponse.status(), 409,
+            'submitting the open-time version after an external edit conflicts');
+        assert.equal(
+            conflictResponse.request().postDataJSON().expectedVersion, '1',
+            'the dialog submits the version captured when it opened');
+        await dialog.getByText('This profile changed since you opened it.')
+            .waitFor();
+        await expect(dialog.locator('#edit-candidate-headline'))
+            .toHaveValue('Mine now');
+
+        await page.reload({ waitUntil: 'domcontentloaded' });
+        await page.getByRole('heading', {
+            name: 'Dialog Guard', level: 1 }).waitFor();
+        await page.getByText('Second').waitFor();
+        const reopened = page.getByRole('button', { name: 'Edit profile' });
+        await clickUntil(
+            () => reopened.click(),
+            page.getByRole('dialog'),
+        );
+        await expect(page.getByRole('dialog')
+            .locator('#edit-candidate-headline')).toHaveValue('Second');
     });
 
     await t.test('revoked membership loses staff access', async () => {

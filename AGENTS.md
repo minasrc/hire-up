@@ -1,5 +1,7 @@
 # Agent verification notes
 
+- Keep PR descriptions short and in plain English: what changed, why it matters, and whether testing passed. Omit internal function names, database roles, and implementation jargon; explain any release requirements simply.
+- Deliver small, independently testable and reviewable chunks, with a working checkpoint and a focused PR for each user-visible workflow. Do not bundle a whole workspace rewrite into one change. Use separate worktrees for genuinely independent parallel chunks after shared interfaces are settled; give each its own ports, build output and test data. Keep shared database/auth changes coordinated. Run focused checks during iteration and the broader checks once before delivery, report blockers promptly, and do not start the next broad batch without showing the current chunk's result.
 - Node 22 is required (`.nvmrc`, `engines >=22 <23`); do not run checks under other majors.
 - `npm test` runs unit tests only (`tests/unit`). Playwright specs live in `tests/e2e` and need Chromium plus, for `E2E_REAL_BACKEND=1`, a local Supabase stack on `http://127.0.0.1:54321` guarded by `tests/support/nonproduction.js`.
 - `npm run test:db:foundation` runs `tests/database/foundation.test.js`. It needs a running Docker daemon and creates labeled, throwaway containers only. `FOUNDATION_TEST_MODE=supabase` instead spins an isolated Supabase CLI workdir under the OS temp dir with a unique project id; ports 54321 and 3000 must be free.

@@ -20,7 +20,7 @@
     "test:db:privacy-operations": "node --test tests/database/privacy-operations.test.js",
     "test:db:client-jobs": "node --test tests/database/client-job-workflows.test.js",
     "test:db:totp": "node --test tests/database/staff-totp.test.js",
-    "test:staff-workspace": "node --test tests/database/staff-workspace.test.js tests/staff-workspace/workspace.test.js",
+    "test:staff-workspace": "node --test tests/database/staff-workspace.test.js tests/database/candidate-profiles.test.js tests/staff-workspace/workspace.test.js",
     "test:e2e": "playwright test",
     "test:e2e:backend": "E2E_REAL_BACKEND=1 playwright test tests/e2e/application-backend.spec.js",
     "local:start": "supabase start",

@@ -2020,6 +2020,71 @@ test('supabase legacy upgrade without reset', { skip: mode !== 'supabase' }, asy
         );
     });
 
+    await t.test('candidate profile migrations apply on the provider stack', () => {
+        for (const file of [
+            '20260930090000_candidate_profiles.sql',
+            '20260930090100_candidate_intake_serialization.sql',
+        ]) {
+            copyFileSync(
+                join(migrationsDir, file),
+                join(tempMigrations, file),
+            );
+        }
+        runCli(['migration', 'up', '--local'], { timeout: 120_000, verifyDb: true });
+
+        assert.equal(supabasePsql(`
+            select count(*) from pg_proc p
+            join pg_namespace n on n.oid = p.pronamespace
+            join pg_roles r on r.oid = p.proowner
+            where n.nspname = 'app'
+                and p.proname in ('save_candidate_profile_v1',
+                    'get_candidate_profile_options_v1', 'get_candidate_profile_v1',
+                    'list_candidate_profiles_v1', 'submit_public_application_v1',
+                    'submit_public_application_core_v1')
+                and p.prosecdef and r.rolname = 'app_executor'`).trim(), '6');
+        assert.equal(supabasePsql(`
+            select count(*) from pg_proc p
+            join pg_namespace n on n.oid = p.pronamespace
+            join pg_roles r on r.oid = p.proowner
+            where n.nspname = 'app' and p.proname = 'candidate_contact_v1'
+                and not p.prosecdef and r.rolname = 'app_executor'`).trim(), '1');
+        for (const role of ['anon', 'authenticated', 'service_role', 'app_intake']) {
+            for (const fn of [
+                'app.get_candidate_profile_options_v1()',
+                `app.get_candidate_profile_v1('${randomUUID()}'::uuid)`,
+                'app.list_candidate_profiles_v1(null, 20)',
+            ]) {
+                assert.match(
+                    supabasePsqlError(`set role ${role}; select ${fn}`),
+                    /42501/,
+                    `${role} must not execute ${fn}`,
+                );
+            }
+            assert.match(
+                supabasePsqlError(
+                    `set role ${role}; select app.save_candidate_profile_v1(`
+                        + `'${randomUUID()}'::uuid, null, '{}'::jsonb, `
+                        + `'${randomUUID()}'::uuid, '${randomUUID()}'::uuid)`),
+                /42501/,
+                `${role} must not execute save_candidate_profile_v1`,
+            );
+            assert.match(
+                supabasePsqlError(
+                    `set role ${role}; select app.submit_public_application_core_v1(`
+                        + `'${randomUUID()}'::uuid, '${randomUUID()}'::uuid, `
+                        + `'${randomUUID()}'::uuid, '${randomUUID()}'::uuid, `
+                        + `'${randomUUID()}'::uuid, '${randomUUID()}'::uuid, `
+                        + `'${randomUUID()}'::uuid, '${randomUUID()}'::uuid, `
+                        + `'${randomUUID()}'::uuid, '${randomUUID()}'::uuid, `
+                        + `'${randomUUID()}'::uuid, 'x', 'AG-0123456789AB', 'x', `
+                        + `'x@x.example', null, null, null, null, null, null, `
+                        + `null, null, null)`),
+                /42501/,
+                `${role} must not execute submit_public_application_core_v1`,
+            );
+        }
+    });
+
     await t.test('existing backend browser suite still passes on the upgraded stack', () => {
         const statusOutput = runCli(['status', '-o', 'env'], { verifyDb: true });
         const envValue = (key) => statusOutput.match(new RegExp(`^${key}="([^"]*)"`, 'm'))?.[1] ?? '';
