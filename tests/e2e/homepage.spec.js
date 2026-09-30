@@ -1,5 +1,10 @@
 import { expect, test } from '@playwright/test';
 
+test.beforeAll(async ({ request }) => {
+    const response = await request.get('/');
+    expect(response.status()).toBe(200);
+});
+
 test('hydrates the homepage without client errors', async ({ page }) => {
     const browserErrors = [];
 
@@ -12,7 +17,16 @@ test('hydrates the homepage without client errors', async ({ page }) => {
 
     await page.goto('/');
     await expect(page.getByRole('heading', { name: /High-Fidelity Talent Infrastructure/ })).toBeVisible();
-    await page.waitForTimeout(500);
+    const faqs = page.locator('#faqs2');
+    const question = faqs.getByRole('button', {
+        name: 'What kind of companies do you work with?', exact: true,
+    });
+    await question.click();
+    await expect(question).toHaveAttribute('aria-expanded', 'true');
+    await expect(faqs.getByText(
+        'We partner with a curated portfolio of high-quality, well-funded companies, including: High-Growth Startups, Established Protocols, Web2 Innovators and funds that back the best in the business.',
+        { exact: true },
+    )).toBeVisible();
 
     expect(browserErrors).toEqual([]);
 });

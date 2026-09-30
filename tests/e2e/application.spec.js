@@ -1,9 +1,19 @@
 import { expect, test } from '@playwright/test';
 import { createSyntheticDocx } from '../support/cv-fixtures.js';
 
+const APPLICATION_JOB = {
+    id: 'gondor-founding-engineer', title: 'Founding Engineer', company: 'Synthetic Company',
+    type: 'Full-time', location: 'Remote', salary: 'Not specified',
+    description: 'Synthetic application test role.', tags: [], applicationOpen: true,
+};
+
 const openApplication = async (page) => {
     await page.route('**/api/auth/session', (route) => route.fulfill({ json: {} }));
-    await page.goto('/jobs');
+    await page.route('**/api/public/jobs', (route) => route.request().method() === 'GET'
+        ? route.fulfill({ json: { jobs: [APPLICATION_JOB] } })
+        : route.continue());
+    await page.goto('/jobs', { waitUntil: 'domcontentloaded' });
+    await expect(page.getByRole('button', { name: '[ APPLY ]', exact: true })).toHaveCount(1);
     await page.getByRole('button', { name: '[ APPLY ]', exact: true }).first().click();
     await expect(page.getByRole('dialog')).toContainText('Founding Engineer');
 };
