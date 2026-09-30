@@ -105,6 +105,7 @@ interface Workspace {
         createdAt: string;
         version: string;
         email?: string | null;
+        secondaryEmails?: string[];
         professionalUrl?: string | null;
         headline?: string | null;
         location?: string | null;
@@ -305,6 +306,7 @@ export function CandidateDetail({
     const email = candidate.email !== undefined
         ? candidate.email
         : identifiers.find((entry) => entry.kind === 'email')?.value;
+    const otherEmails = candidate.secondaryEmails ?? [];
     const professionalUrl = candidate.professionalUrl !== undefined
         ? candidate.professionalUrl
         : identifiers.find(
@@ -345,6 +347,7 @@ export function CandidateDetail({
                     ) : null}
                     <div className="flex flex-wrap items-center gap-2 text-sm text-muted-foreground">
                         {email ? <span>{email}</span> : null}
+                        {otherEmails.length > 0 ? <span>· Secondary emails: {otherEmails.join(', ')}</span> : null}
                         {professionalUrl ? (
                             <a
                                 href={professionalUrl}

@@ -26,7 +26,8 @@
     "local:start": "supabase start",
     "local:status": "supabase status",
     "local:reset": "supabase db reset",
-    "local:stop": "supabase stop"
+    "local:stop": "supabase stop",
+    "test:db:candidate-upload": "node --test tests/database/candidate-upload.test.js"
   },
   "dependencies": {
     "@heroui/accordion": "^2.2.25",

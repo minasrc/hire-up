@@ -1,4 +1,5 @@
 import { notFound } from 'next/navigation';
+import { getCandidateUploadDetails } from '@/lib/candidate-upload-operations';
 import {
     getCandidateProfile,
     isMissingProfileFunctionError,
@@ -69,12 +70,27 @@ export default async function StaffCandidatePage({
         }
     }
 
+    let uploadDetails = null;
+    try {
+        uploadDetails = await getCandidateUploadDetails(
+            gate.pool, gate.identity, gate.organizationId, { candidateId });
+    } catch (error) {
+        // Older deployments can still display existing profiles before rollout.
+        if ((error as { code?: string })?.code !== '42883') throw error;
+    }
+
     return (
         <section className="mx-auto w-full max-w-7xl">
             <CandidateDetail
-                workspace={workspace}
+                workspace={uploadDetails ? { ...workspace, candidate: { ...workspace.candidate, secondaryEmails: uploadDetails.secondaryEmails } } : workspace}
                 profileUnavailable={profileUnavailable}
             />
+            {uploadDetails?.compensationPreference ? (
+                <Card className="mt-6"><CardContent className="py-4">
+                    <h2 className="text-sm font-medium">Compensation preference</h2>
+                    <p className="mt-1 whitespace-pre-wrap text-sm text-muted-foreground">{uploadDetails.compensationPreference}</p>
+                </CardContent></Card>
+            ) : null}
         </section>
     );
 }

@@ -16,9 +16,9 @@ import {
     TableRow,
 } from '@/components/staff-ui/table';
 import {
-    AddCandidateDialog,
     type CandidateProfileOptions,
 } from './candidate-profile-dialog';
+import { CandidateUploadDialog } from './candidate-upload-dialog';
 
 export interface CandidateRow {
     candidateId: string;
@@ -104,7 +104,7 @@ export function CandidatesBrowser({
                     </Button>
                 ) : null}
                 {profileOptions?.canWrite === true ? (
-                    <AddCandidateDialog
+                    <CandidateUploadDialog
                         options={profileOptions}
                         onCreated={(candidateId) =>
                             router.push(`/staff/candidates/${candidateId}`)}
