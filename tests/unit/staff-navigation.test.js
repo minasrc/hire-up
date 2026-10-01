@@ -6,6 +6,7 @@ import * as React from 'react';
 import * as jsxRuntime from 'react/jsx-runtime';
 import { renderToStaticMarkup } from 'react-dom/server';
 import ts from 'typescript';
+import { createStaffRefresh } from '../../src/lib/staff-refresh.js';
 
 const { jsx } = jsxRuntime;
 
@@ -30,6 +31,7 @@ function loadShell() {
     const exports = {};
     const imports = {
         react: React,
+        '@/lib/staff-refresh': { createStaffRefresh },
         'react/jsx-runtime': jsxRuntime,
         'next/link': {
             default: ({ href, children, ...rest }) =>

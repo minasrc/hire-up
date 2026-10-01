@@ -1,5 +1,6 @@
 'use client';
 
+import { createStaffRefresh } from '@/lib/staff-refresh';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { signOut } from 'next-auth/react';
@@ -267,6 +268,9 @@ export function StaffShell({
     );
     const [loadError, setLoadError] = useState<'denied' | 'unavailable' | null>(null);
     const requestRef = useRef(0);
+    const summaryRefreshRef = useRef<ReturnType<typeof createStaffRefresh> | null>(null);
+    const previousPathRef = useRef(pathname);
+    const initialSummaryRef = useRef(initialSummary);
     const abortRef = useRef<AbortController | null>(null);
     const { section, detail } = useSection(pathname);
     const sectionLabel = section ? SECTION_LABELS[section] : null;
@@ -330,25 +334,35 @@ export function StaffShell({
     }, []);
 
     useEffect(() => {
-        void refreshSummary();
-    }, [pathname, refreshSummary]);
-
-    useEffect(() => {
+        const refresh = createStaffRefresh(refreshSummary);
+        summaryRefreshRef.current = refresh;
         const onFocus = () => {
-            if (document.visibilityState === 'visible') void refreshSummary();
+            if (document.visibilityState === 'visible') refresh.schedule();
         };
-        const interval = window.setInterval(() => {
-            if (document.visibilityState === 'visible') void refreshSummary();
-        }, 60_000);
-        const onUpdated = () => void refreshSummary();
+        const interval = window.setInterval(onFocus, 60_000);
+        const onUpdated = () => refresh.schedule();
         window.addEventListener('focus', onFocus);
         window.addEventListener('staff-workspace-updated', onUpdated);
         return () => {
+            refresh.dispose();
+            summaryRefreshRef.current = null;
             window.clearInterval(interval);
             window.removeEventListener('focus', onFocus);
             window.removeEventListener('staff-workspace-updated', onUpdated);
         };
     }, [refreshSummary]);
+
+    useEffect(() => {
+        const changedPath = previousPathRef.current !== pathname;
+        const freshServerSummary = initialSummaryRef.current !== initialSummary;
+        previousPathRef.current = pathname;
+        initialSummaryRef.current = initialSummary;
+        // Hydration already has an authorized server snapshot. Retain route
+        // revalidation when the persistent layout has not supplied a new one.
+        if (!initialSummary || (changedPath && !freshServerSummary)) {
+            summaryRefreshRef.current?.schedule();
+        }
+    }, [pathname, initialSummary]);
 
     const sidebar = (onNavigate?: () => void) => (
         <div className="flex h-full flex-col">

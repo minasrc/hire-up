@@ -55,6 +55,8 @@ export async function staffMutation(url: string, body: unknown) {
             },
         );
     }
-    window.dispatchEvent(new Event('staff-workspace-updated'));
+    window.dispatchEvent(new CustomEvent('staff-workspace-updated', {
+        detail: { scope: url === '/api/staff/tasks' ? 'tasks' : 'workspace' },
+    }));
     return payload;
 }

@@ -20,11 +20,8 @@ const load = (respond) => {
         exports,
         fetch: respond,
         window: { dispatchEvent: (event) => dispatched.push(event) },
-        Event: class Event {
-            constructor(type) {
-                this.type = type;
-            }
-        },
+        Event,
+        CustomEvent,
     });
     return { exports, dispatched };
 };
@@ -102,4 +99,15 @@ test('a success returns the payload and dispatches the update event', async () =
     assert.deepEqual({ ...payload }, { ok: true, result: { id: 'x' } });
     assert.equal(dispatched.length, 1);
     assert.equal(dispatched[0].type, 'staff-workspace-updated');
+    assert.equal(dispatched[0].detail.scope, 'workspace');
+});
+
+
+test('a task mutation identifies its scope without dropping the workspace event', async () => {
+    const { exports, dispatched } = load(
+        async () => jsonResponse(200, { ok: true, result: { id: 'task' } }));
+    await exports.staffMutation('/api/staff/tasks', { action: 'setCompleted' });
+    assert.equal(dispatched.length, 1);
+    assert.equal(dispatched[0].type, 'staff-workspace-updated');
+    assert.equal(dispatched[0].detail.scope, 'tasks');
 });
