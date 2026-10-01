@@ -45,6 +45,7 @@ function loadShell() {
         '@/components/staff-ui/separator': inertProxy,
         '@/components/staff-ui/sheet': inertProxy,
         './record-preview': inertProxy,
+        './staff-shell-summary': { StaffShellSummaryContext: React.createContext(null) },
         '@/lib/utils': { cn: (...parts) => parts.filter(Boolean).join(' ') },
     };
     runInNewContext(compiled, {
@@ -76,12 +77,22 @@ const ALL_HREFS = [
     '/staff/members',
 ];
 
-test('an unknown summary keeps the full navigation visible', () => {
+test('unavailable capabilities never reveal privileged navigation', () => {
     const { NavLinks } = loadShell();
     assert.deepEqual(
         renderAnchors(NavLinks, null).map((anchor) => anchor.href),
+        ['/staff'],
+        'unknown capabilities cannot authorize navigation',
+    );
+});
+
+test('authorized capabilities preserve the full navigation while summary is streaming', () => {
+    const { NavLinks } = loadShell();
+    assert.deepEqual(
+        renderAnchors(NavLinks, {
+            applications: true, candidates: true, jobs: true, clients: true, members: true,
+        }).map((anchor) => anchor.href),
         ALL_HREFS,
-        'a missing/unloaded summary must not collapse navigation to Overview only',
     );
 });
 
@@ -114,7 +125,7 @@ test('known capabilities hide only the sections they deny', () => {
 
 test('the matching section stays active on detail pages', () => {
     const { NavLinks } = loadShell();
-    const anchors = renderAnchors(NavLinks, null, '/staff/jobs/some-id');
+    const anchors = renderAnchors(NavLinks, { jobs: true }, '/staff/jobs/some-id');
     const jobs = anchors.find((anchor) => anchor.href === '/staff/jobs');
     const overview = anchors.find((anchor) => anchor.href === '/staff');
     assert.ok(jobs?.current, 'Jobs must carry aria-current on a job detail page');

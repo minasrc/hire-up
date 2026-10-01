@@ -29,6 +29,7 @@ import { Sheet, SheetContent, SheetTitle, SheetTrigger } from '@/components/staf
 import type { StaffWorkspaceSummary } from '@/lib/workspace-types';
 import { cn } from '@/lib/utils';
 import { RecordPreview } from './record-preview';
+import { StaffShellSummaryContext } from './staff-shell-summary';
 
 const NAV_ITEMS = [
     { href: '/staff', label: 'Overview', icon: LayoutDashboard, exact: true },
@@ -78,8 +79,7 @@ export function NavLinks({
             {NAV_ITEMS.filter(
                 (item) =>
                     !('capability' in item)
-                    || capabilities === null
-                    || (capabilities !== 'denied' && capabilities[item.capability]),
+                    || (capabilities !== null && capabilities !== 'denied' && capabilities[item.capability]),
             ).map((item) => {
                 const Icon = item.icon;
                 const active = 'exact' in item && item.exact
@@ -182,6 +182,10 @@ function AttentionBell({
                             Sign in again
                         </a>
                     </div>
+                ) : !summary && !loadError ? (
+                    <p role="status" className="px-4 py-6 text-sm text-muted-foreground">
+                        Loading workspace updates…
+                    </p>
                 ) : !summary ? (
                     <div className="flex flex-col gap-2 px-4 py-6">
                         <p className="text-sm text-muted-foreground">
@@ -252,29 +256,39 @@ function Initials({ name }: { name: string }) {
 export function StaffShell({
     userName,
     userEmail,
-    initialSummary,
+    initialSummary = null,
+    initialCapabilities = initialSummary?.capabilities ?? null,
+    summaryContent,
     children,
 }: {
     userName: string;
     userEmail: string;
-    initialSummary: StaffWorkspaceSummary | null;
+    initialSummary?: StaffWorkspaceSummary | null;
+    initialCapabilities?: StaffWorkspaceSummary['capabilities'] | null;
+    summaryContent?: ReactNode;
     children: ReactNode;
 }) {
     const pathname = usePathname();
     const [sheetOpen, setSheetOpen] = useState(false);
     const [summary, setSummary] = useState<StaffWorkspaceSummary | null>(initialSummary);
     const [navCaps, setNavCaps] = useState<StaffWorkspaceSummary['capabilities'] | null>(
-        initialSummary?.capabilities ?? null,
+        initialCapabilities,
     );
     const [loadError, setLoadError] = useState<'denied' | 'unavailable' | null>(null);
     const requestRef = useRef(0);
+    const receivedSeedRef = useRef(false);
+    const invalidatedRef = useRef(false);
     const summaryRefreshRef = useRef<ReturnType<typeof createStaffRefresh> | null>(null);
-    const previousPathRef = useRef(pathname);
-    const initialSummaryRef = useRef(initialSummary);
     const abortRef = useRef<AbortController | null>(null);
     const { section, detail } = useSection(pathname);
     const sectionLabel = section ? SECTION_LABELS[section] : null;
     const isDetail = detail.length > 0;
+
+    const [seenCapabilities, setSeenCapabilities] = useState(initialCapabilities);
+    if (seenCapabilities !== initialCapabilities) {
+        setSeenCapabilities(initialCapabilities);
+        setNavCaps(initialCapabilities);
+    }
 
     const [seenInitial, setSeenInitial] = useState(initialSummary);
     if (seenInitial !== initialSummary) {
@@ -317,7 +331,9 @@ export function StaffShell({
                 || response.status === 403
                 || response.status === 428
             ) {
+                invalidatedRef.current = true;
                 setLoadError('denied');
+                window.dispatchEvent(new Event('staff-session-invalidated'));
             } else {
                 setLoadError('unavailable');
             }
@@ -325,6 +341,8 @@ export function StaffShell({
             if (stale()) return;
             setSummary(null);
             setLoadError('unavailable');
+        } finally {
+            if (abortRef.current === controller) abortRef.current = null;
         }
     }, []);
 
@@ -352,17 +370,17 @@ export function StaffShell({
         };
     }, [refreshSummary]);
 
-    useEffect(() => {
-        const changedPath = previousPathRef.current !== pathname;
-        const freshServerSummary = initialSummaryRef.current !== initialSummary;
-        previousPathRef.current = pathname;
-        initialSummaryRef.current = initialSummary;
-        // Hydration already has an authorized server snapshot. Retain route
-        // revalidation when the persistent layout has not supplied a new one.
-        if (!initialSummary || (changedPath && !freshServerSummary)) {
-            summaryRefreshRef.current?.schedule();
-        }
-    }, [pathname, initialSummary]);
+    const seedSummary = useCallback((next: StaffWorkspaceSummary | null) => {
+        // Do not let the initial slow stream overwrite a client revalidation.
+        // Later router.refresh() seeds can update idle, still-valid sessions.
+        const initialSeed = !receivedSeedRef.current;
+        receivedSeedRef.current = true;
+        if ((initialSeed && requestRef.current > 0)
+            || abortRef.current || invalidatedRef.current) return;
+        setSummary(next);
+        if (next) setNavCaps(next.capabilities);
+        setLoadError(next ? null : 'unavailable');
+    }, []);
 
     const sidebar = (onNavigate?: () => void) => (
         <div className="flex h-full flex-col">
@@ -411,6 +429,8 @@ export function StaffShell({
     );
 
     return (
+        <StaffShellSummaryContext.Provider value={seedSummary}>
+        {summaryContent}
         <div className="flex min-h-screen bg-background">
             <aside className="sticky top-0 hidden h-screen w-60 shrink-0 border-r border-border bg-sidebar md:block">
                 {sidebar()}
@@ -520,5 +540,6 @@ export function StaffShell({
                 <RecordPreview key={pathname}>{children}</RecordPreview>
             </div>
         </div>
+        </StaffShellSummaryContext.Provider>
     );
 }

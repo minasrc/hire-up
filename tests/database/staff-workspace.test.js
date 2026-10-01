@@ -32,6 +32,7 @@ import {
 import {
     createStaffTask,
     getStaffWorkspace,
+    getStaffCapabilities,
     listStaffTasks,
     setStaffTaskCompleted,
 } from '../../src/lib/workspace-operations.js';
@@ -50,6 +51,7 @@ const migrationsDir = join(repoRoot, 'supabase', 'migrations');
 const WORKSPACE_MIGRATION = '20260928100000_staff_workspace.sql';
 const WORKSPACE_FUNCTIONS = [
     'get_staff_workspace_v1',
+    'get_staff_capabilities_v1',
     'list_staff_tasks_v1',
     'create_staff_task_v1',
     'set_staff_task_completed_v1',
@@ -71,6 +73,7 @@ const MIGRATIONS = [
     '20260926140000_public_intake.sql',
     WORKSPACE_MIGRATION,
     '20260928220000_job_visibility.sql',
+    '20261002110000_staff_shell_capabilities.sql',
 ];
 
 const readMigration = (name) => readFileSync(join(migrationsDir, name), 'utf8');
@@ -157,6 +160,15 @@ test('staff workspace on PostgreSQL 17', async (t) => {
     const recruiter = (fn, input) => fn(pool, identity(CJ_SUBJECTS.RECRUITER), ORG_B, input);
     const viewer = (fn, input) => fn(pool, identity(CJ_SUBJECTS.VIEWER), ORG_B, input);
     const orgA = (fn, input) => fn(pool, identity('1001'), ORG_A, input);
+
+    await t.test('lightweight capabilities match authorized summary and reject missing context', async () => {
+        for (const run of [admin, viewer]) {
+            const summary = await run(getStaffWorkspace);
+            assert.deepEqual(await run(getStaffCapabilities), summary.capabilities);
+        }
+        staffBad(pg17, '', ORG_B, 'select app.get_staff_capabilities_v1()', '42501');
+        staffBad(pg17, CJ_ID.USER_B_REC, '', 'select app.get_staff_capabilities_v1()', '42501');
+    });
 
     await t.test('workspace summary reports exact fixture baseline', async () => {
         const summary = await admin(getStaffWorkspace);
@@ -487,6 +499,7 @@ test('staff workspace on PostgreSQL 17', async (t) => {
         for (const role of ['app_intake', 'app_worker']) {
             for (const fn of [
                 'app.get_staff_workspace_v1()',
+                'app.get_staff_capabilities_v1()',
                 'app.list_staff_tasks_v1(false, null, 20, 0)',
                 `app.create_staff_task_v1('${randomUUID()}'::uuid, 'x', 'review',
                     '${randomUUID()}'::uuid, '${randomUUID()}'::uuid)`,

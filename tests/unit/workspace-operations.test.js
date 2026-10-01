@@ -6,6 +6,7 @@ import {
     StaffAuthorizationError,
     createStaffTask,
     getStaffWorkspace,
+    getStaffCapabilities,
     listStaffTasks,
     setStaffTaskCompleted,
 } from '../../src/lib/workspace-operations.js';
@@ -144,4 +145,8 @@ test('getStaffWorkspace rejects invalid context before touching the pool', async
         (error) => error instanceof StaffAuthorizationError
             && error.code === 'INVALID_CONTEXT',
     );
+});
+
+test('capabilities require a verified identity before acquiring a connection', async () => {
+    await assert.rejects(getStaffCapabilities(lockedPool, null, UUID), { code: 'INVALID_CONTEXT' });
 });

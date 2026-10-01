@@ -93,6 +93,19 @@ const run = (pool, verifiedIdentity, organizationId, permissions, sql, params) =
         },
     );
 
+export async function getStaffCapabilities(pool, verifiedIdentity, organizationId) {
+    return withStaffActor(
+        pool,
+        verifiedIdentity,
+        organizationId,
+        async ({ client }) => {
+            const result = await client.query(
+                'select app.get_staff_capabilities_v1() as result');
+            return result.rows[0]?.result ?? null;
+        },
+    );
+}
+
 export async function getStaffWorkspace(pool, verifiedIdentity, organizationId) {
     return withStaffActor(
         pool,

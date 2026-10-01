@@ -13,12 +13,13 @@ const compile = (path) => ts.transpileModule(
     { compilerOptions: { module: ts.ModuleKind.CommonJS, jsx: ts.JsxEmit.ReactJSX } },
 ).outputText;
 
-const div = (props) => jsxs('div', { ...props, children: props?.children });
+const div = (props) => jsx('div', { ...props, children: props?.children });
 
 function overviewPage({ requireStaffVerified, loadStaffWorkspace }) {
     const exports = {};
     const imports = {
         'react/jsx-runtime': jsxRuntime,
+        react: { Suspense: ({ children }) => children },
         '@/components/staff-ui/card': { Card: div, CardContent: div },
         '@/components/staff-preview/shared': {
             PageHeader: (props) => jsxs(Fragment, {
@@ -60,6 +61,13 @@ function overviewPage({ requireStaffVerified, loadStaffWorkspace }) {
     return exports.default;
 }
 
+async function resolveServerTree(node) {
+    if (node == null || typeof node !== 'object') return node;
+    if (Array.isArray(node)) return Promise.all(node.map(resolveServerTree));
+    if (typeof node.type === 'function') return resolveServerTree(await node.type(node.props));
+    return { ...node, props: { ...node.props, children: await resolveServerTree(node.props.children) } };
+}
+
 const verified = async () => ({ stage: 'verified' });
 
 const fullSummary = (overrides = {}) => ({
@@ -96,7 +104,7 @@ test('staff overview renders real workspace content for a verified member', asyn
             summary: fullSummary(),
         }),
     });
-    const html = renderToStaticMarkup(await Page());
+    const html = renderToStaticMarkup(await resolveServerTree(await Page()));
     assert.match(html, /Overview/);
     assert.match(html, /snapshot of your recruiting pipeline/i);
     assert.match(html, /metrics:\{&quot;candidates&quot;:4,&quot;applications&quot;:9,&quot;openRoles&quot;:2\}/);
@@ -116,7 +124,7 @@ test('staff overview shows the unavailable state when the summary fails', async 
             summary: null,
         }),
     });
-    const html = renderToStaticMarkup(await Page());
+    const html = renderToStaticMarkup(await resolveServerTree(await Page()));
     assert.match(html, /Workspace summary is temporarily unavailable/);
     assert.match(html, /retry-stub/);
     assert.doesNotMatch(html, /metrics:/);
@@ -132,7 +140,7 @@ test('staff overview explains missing task permission instead of a blank panel',
             }),
         }),
     });
-    const html = renderToStaticMarkup(await Page());
+    const html = renderToStaticMarkup(await resolveServerTree(await Page()));
     assert.match(html, /collaboration\.read permission/);
     assert.doesNotMatch(html, /todo:true/);
     assert.match(html, /review:0/);
@@ -147,4 +155,19 @@ test('staff overview still requires the full staff and MFA gate', async () => {
         },
     });
     await assert.rejects(Page(), (error) => error === denied);
+});
+
+test('overview returns its heading and loading boundary before summary data resolves', async () => {
+    let summaryReads = 0;
+    const Page = overviewPage({
+        requireStaffVerified: verified,
+        loadStaffWorkspace: () => { summaryReads++; return new Promise(() => {}); },
+    });
+    const tree = await Page();
+    assert.equal(summaryReads, 0, 'summary loads inside the suspended child, not the page gate');
+    const boundary = tree.props.children[1];
+    assert.ok(boundary.props.fallback);
+    const pending = boundary.props.children.type(boundary.props.children.props);
+    assert.equal(typeof pending.then, 'function');
+    assert.equal(summaryReads, 1);
 });
