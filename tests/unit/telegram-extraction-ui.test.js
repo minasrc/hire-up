@@ -20,13 +20,13 @@ test('manual edits and in-flight changes prevent proposal decisions; closed draf
     assert.equal(canResolveSuggestion({ ...state, terminal: true }, 'dismiss'), true);
 });
 
-test('model completion is distinguished from recruiter review acknowledgment', () => {
+test('model completion does not imply source context has been released', () => {
     assert.equal(extractionStatus({ status: 'completed', reviewedAt: null }), 'Ready for review');
-    assert.equal(extractionStatus({ status: 'completed', reviewedAt: '2026-01-01T00:00:00Z' }), 'Review acknowledged');
+    assert.equal(extractionStatus({ status: 'completed', sourceRetention: { state: 'purged' } }), 'Review complete');
     assert.equal(extractionStatus({ status: 'failed' }), 'Needs attention');
     assert.match(extractionGuidance('INVALID_RESULT'), /retained/);
-    assert.match(extractionGuidance('INPUT_TOO_LARGE'), /administrator/);
-    assert.match(extractionGuidance('INPUT_TOO_LARGE'), /not been skipped or deleted/);
+    assert.match(extractionGuidance('INPUT_TOO_LARGE'), /configuration/);
+    assert.match(extractionGuidance('INPUT_TOO_LARGE'), /full source is retained/);
     assert.equal(extractionGuidance('private provider response sentinel').includes('sentinel'), false);
 });
 

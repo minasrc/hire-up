@@ -1,12 +1,16 @@
 export function extractionStatus(job) {
-    if (job.status === 'completed') return job.reviewedAt ? 'Review acknowledged' : 'Ready for review';
+    if (job.status === 'completed') {
+        const retention = job.sourceRetention;
+        const noHolds = retention?.holds && retention.holds.openDrafts + retention.holds.pendingProposals + retention.holds.activeCv === 0;
+        return retention?.state === 'purged' || (retention?.state === 'release_pending' && noHolds) ? 'Review complete' : 'Ready for review';
+    }
     return ({ queued: 'Queued', leased: 'Extracting', waiting: 'Waiting to retry', failed: 'Needs attention' })[job.status] || 'Needs attention';
 }
 export function extractionGuidance(code) {
     return ({
         PROVIDER_UNAVAILABLE: 'The configured model is unavailable. Check the Mac extraction worker and model connection.',
         INVALID_RESULT: 'The model response did not pass validation. Source messages were retained; retry after checking the model configuration.',
-        INPUT_TOO_LARGE: 'A source message exceeds the extraction limit. Ask your administrator to review it before retrying; the message has not been skipped or deleted.',
+        INPUT_TOO_LARGE: 'The model could not accept this message. Check the model and worker configuration before retrying; the full source is retained.',
         WORKER_ERROR: 'The extraction worker could not finish this batch. Check the Mac worker before retrying.',
     })[code] || (code ? 'This extraction needs attention. Source messages were retained.' : '');
 }

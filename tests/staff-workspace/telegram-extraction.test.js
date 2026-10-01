@@ -243,8 +243,8 @@ test('Telegram extraction protects recruiter edits, reviews evidence and approve
         await page.goto(`${baseURL}/staff/telegram-intake/chats`);
         await expect(page.getByRole('heading', { name: 'Connect Telegram to import chats' })).toBeVisible();
         await page.getByLabel('Mark Synthetic candidate conversation', { exact: true }).check();
-        await waitForAction(page.getByRole('button', { name: 'Extract candidates from marked chats', exact: true }), 'enqueue');
-        await page.getByRole('link', { name: 'View extraction progress', exact: true }).click();
+        await waitForAction(page.getByRole('button', { name: 'Start automatic extraction', exact: true }).first(), 'setExtraction');
+        await page.getByRole('link', { name: 'Extraction progress', exact: true }).click();
         await expect(page.getByRole('heading', { name: 'Candidate extraction', exact: true })).toBeVisible();
         let job = (await extractWorker('claim')).job;
         const originalDigest = job.sourceDigest;
@@ -258,8 +258,12 @@ test('Telegram extraction protects recruiter edits, reviews evidence and approve
         const draftId = initial.draftIds[0];
         assert.equal(initial.nextQueued, true);
         await refreshProgress();
-        await waitForAction(page.getByRole('button', { name: 'Acknowledge completed review', exact: true }), 'reviewBatch', 422);
-        await expect(page.getByRole('alert').filter({ hasText: 'unresolved candidate decisions' })).toBeVisible();
+        const completedBatch = page.getByLabel('Extraction batch from Synthetic candidate conversation', { exact: true }).filter({ has: page.getByRole('link', { name: 'Review draft 1', exact: true }) });
+        await completedBatch.getByRole('button', { name: 'Review source messages', exact: true }).click();
+        await completedBatch.getByRole('checkbox', { name: 'I reviewed the entire batch and no longer need its remaining context.', exact: true }).check();
+        await waitForAction(page.getByRole('button', { name: 'Release after candidate review', exact: true }), 'sourceRetention');
+        await expect(page.getByText('Waiting for: 1 open draft.', { exact: true })).toBeVisible();
+        await waitForAction(page.getByRole('button', { name: 'Keep context', exact: true }), 'sourceRetention');
         await page.getByRole('link', { name: 'Review draft 1', exact: true }).click();
         await expect(panel.getByLabel('First name *', { exact: true })).toHaveValue('Ada');
         await expect(panel.getByLabel('Last name *', { exact: true })).toHaveValue('Lovelace');
@@ -346,19 +350,23 @@ test('Telegram extraction protects recruiter edits, reviews evidence and approve
         const empty = await completeExtraction(job, { subjects: [] });
         assert.deepEqual(empty.draftIds, []);
         await refreshProgress();
-        await expect(page.getByText(/The model suggested no candidates in this batch/)).toBeVisible();
+        await expect(page.getByText(/The model suggested no candidates/)).toBeVisible();
         await page.getByRole('button', { name: 'Review source messages', exact: true }).first().click();
         const sourcePanel = page.getByRole('region', { name: 'Private batch source', exact: true });
         await expect(sourcePanel.getByText('General recruiting discussion without a candidate profile.', { exact: true })).toHaveCount(40);
         await page.getByRole('button', { name: 'Hide source messages', exact: true }).click();
         for (let index = 0; index < 4; index += 1) {
-            await waitForAction(page.getByRole('button', { name: 'Acknowledge completed review', exact: true }).first(), 'reviewBatch');
-            await expect(page.getByRole('button', { name: 'Acknowledge completed review', exact: true })).toHaveCount(3 - index);
+            const batch = page.getByLabel('Extraction batch from Synthetic candidate conversation', { exact: true }).nth(index);
+            await batch.getByRole('button', { name: 'Review source messages', exact: true }).click();
+            await batch.getByRole('checkbox', { name: 'I reviewed the entire batch and no longer need its remaining context.', exact: true }).check();
+            await waitForAction(batch.getByRole('button', { name: 'Release after candidate review', exact: true }), 'sourceRetention');
+            await expect(batch.getByText('Release requested', { exact: true })).toBeVisible();
+            await batch.getByRole('button', { name: 'Hide source messages', exact: true }).click();
         }
         const finalQueue = await (await context.request.get(extractionURL)).json();
         assert.equal(finalQueue.counts.needsReview, 0);
         assert.equal(finalQueue.counts.completed, 4);
-        assert.equal(psql(db, `select count(*) from app.telegram_history_messages`).trim(), '160', 'Review does not delete retained sources');
+        assert.equal(psql(db, `select count(*) from app.telegram_history_messages`).trim(), '160', 'Release requests await scheduled cleanup');
         assert.deepEqual(pageErrors, []);
         mkdirSync(join(root, 'test-results'), { recursive: true });
         await page.evaluate(() => window.scrollTo(0, 0));
