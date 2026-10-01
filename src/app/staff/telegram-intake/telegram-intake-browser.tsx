@@ -45,6 +45,11 @@ export function TelegramIntakeBrowser({ initialResult }: { initialResult?: Intak
     const firstLoad = useRef(true);
 
     useEffect(() => {
+        // Cleanup is best effort and must never delay the inbox or expose private keys.
+        void fetch('/api/staff/telegram-intake/uploads/cleanup', { method: 'POST', cache: 'no-store' }).catch(() => {});
+    }, []);
+
+    useEffect(() => {
         if (firstLoad.current && initialResult) { firstLoad.current = false; return; }
         firstLoad.current = false;
         const controller = new AbortController();
@@ -106,7 +111,7 @@ export function TelegramIntakeBrowser({ initialResult }: { initialResult?: Intak
                 <div className="flex items-center justify-between border-t border-border px-4 py-3"><p className="text-xs text-muted-foreground">Page {result.page}</p><div className="flex gap-2"><Button variant="outline" size="sm" disabled={loading || page <= 1} onClick={() => setPage(value => value - 1)}>Previous</Button><Button variant="outline" size="sm" disabled={loading || !result.hasMore} onClick={() => setPage(value => value + 1)}>Next</Button></div></div>
             </Card>
             {notice ? <p role="status" className="text-sm">{notice}</p> : null}
-            <p className="text-xs text-muted-foreground">Drafts and source messages remain private to this intake inbox until approval. Approval creates a candidate from the reviewed profile and CV.</p>
+            <p className="text-xs text-muted-foreground">Only approved candidate records are shared. Drafts and source messages stay private.</p>
             <Sheet open={Boolean(selected)} onOpenChange={open => { if (!open) setSelected(null); }}>
                 <SheetContent className="w-full max-w-2xl gap-0 overflow-y-auto p-0 sm:w-full">
                     <SheetHeader className="border-b border-border p-6 pr-12"><SheetTitle>Review draft</SheetTitle><SheetDescription>Check the profile and CV before approving. Source evidence is private.</SheetDescription></SheetHeader>
@@ -151,7 +156,7 @@ function DraftEditor({ id, onUpdate, onNotice }: { id: string; onUpdate: (row: I
     }
 
     function accept(row: IntakeDraft, resetFields = true) {
-        setDraft(current => ({ ...row, evidence: row.evidence ?? current?.evidence }));
+        setDraft(current => ({ ...row, evidence: row.status === 'approved' || row.status === 'discarded' ? [] : row.evidence ?? current?.evidence }));
         if (resetFields) setFields(editableFields(row.fields));
         onUpdate(row);
     }
@@ -234,6 +239,7 @@ function DraftEditor({ id, onUpdate, onNotice }: { id: string; onUpdate: (row: I
         <section className="space-y-3 rounded-lg border border-border p-4" aria-labelledby="intake-cv-label">
             <h3 id="intake-cv-label" className="flex items-center gap-2 text-sm font-medium"><FileText className="h-4 w-4" />CV</h3>
             <p className="break-all text-sm text-muted-foreground">{draft.cv ? `${draft.cv.filename} · ${draft.cv.status}` : 'No CV attached'}</p>
+            {draft.cv && !terminal ? <a className="inline-block text-sm font-medium underline underline-offset-4" href={`${url}/cv`} target="_blank" rel="noopener noreferrer">Open CV</a> : null}
             {!terminal ? <><Label htmlFor="intake-cv">{draft.cv ? 'Replace CV' : 'Upload CV'}</Label><Input ref={fileInput} id="intake-cv" type="file" accept=".pdf,.docx,application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document" className="h-auto py-2" disabled={busy || conflict} onChange={event => setFile(event.target.files?.[0] ?? null)} aria-describedby="intake-cv-help" aria-invalid={Boolean(errors.cv)} /><p id="intake-cv-help" className="text-xs text-muted-foreground">PDF or DOCX, up to 4 MB.</p>{errors.cv ? <p className="text-xs font-medium">{errors.cv}</p> : null}<Button variant="outline" size="sm" disabled={!file || busy || conflict} onClick={() => void upload()}>Upload selected CV</Button></> : null}
         </section>
         <details className="rounded-lg border border-border p-4"><summary className="cursor-pointer text-sm font-medium">Private source evidence ({draft.evidence?.length ?? 0})</summary><p className="mt-3 text-xs text-muted-foreground">Source messages are for intake review only and are not added to the candidate profile.</p><div className="mt-4 space-y-4">{draft.evidence?.length ? draft.evidence.map(item => <article key={item.id} className="border-t border-border pt-3"><p className="text-xs text-muted-foreground">{item.senderName || 'Unknown sender'} · {dateLabel(item.sentAt)}</p><p className="mt-2 whitespace-pre-wrap break-words text-sm">{item.text}</p></article>) : <p className="text-sm text-muted-foreground">No source evidence attached.</p>}</div></details>
