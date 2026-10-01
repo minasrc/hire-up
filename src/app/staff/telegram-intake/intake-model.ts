@@ -16,6 +16,7 @@ export interface DraftFields {
 export interface IntakeDraft {
     id: string;
     version: number;
+    documentRevision?: number;
     status: 'pending' | 'snoozed' | 'duplicate' | 'approved' | 'discarded';
     fields: DraftFields;
     cv: { filename: string; status: string } | null;

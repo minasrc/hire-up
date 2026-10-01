@@ -85,6 +85,6 @@ export function ExtractionQueueBrowser() {
         </Card>)}</div>
         <div className="flex flex-wrap items-center justify-between gap-3"><p className="text-xs text-muted-foreground">Page {cursors.length} · Up to 50 batches per page</p><div className="flex gap-2"><Button variant="outline" size="sm" disabled={busy || loading || cursors.length === 1} onClick={() => { setCursors(stack => stack.slice(0, -1)); setLoading(true); }}>Previous</Button><Button variant="outline" size="sm" disabled={busy || loading || !snapshot?.nextAfter} onClick={() => { setCursors(stack => [...stack, snapshot!.nextAfter!]); setLoading(true); }}>Next</Button></div></div>
         {notice ? <p role="status" className="text-sm">{notice}</p> : null}
-        <p className="text-xs text-muted-foreground">Extraction creates private drafts and suggestions; only approved candidate records are shared. CV files still require manual upload and validation. Acknowledging review does not delete source messages: they remain private for further extraction and attachment processing. Semantic search is not part of this step.</p>
+        <p className="text-xs text-muted-foreground">Extraction creates private drafts and suggestions; only approved candidate records are shared. Choose a referenced Telegram CV or upload one manually; it must pass validation before approval. Acknowledging review does not delete source messages: they remain private for further extraction and attachment processing. Semantic search is not part of this step.</p>
     </section>;
 }

@@ -12,6 +12,8 @@ import { Label } from '@/components/staff-ui/label';
 import { Textarea } from '@/components/staff-ui/textarea';
 import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from '@/components/staff-ui/sheet';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/staff-ui/table';
+import { CvRetrieval } from './cv/cv-retrieval';
+import { classifyCvDraftRefresh } from './cv/cv-model';
 import { DraftSuggestions } from './extraction/draft-suggestions';
 import { draftName, draftStatus, editableFields, errorFields, fieldLabels, fieldsForSave, viewLabels } from './intake-model';
 import type { IntakeDraft, IntakeResult, IntakeView, MissingField } from './intake-model';
@@ -132,6 +134,7 @@ function DraftEditor({ id, onUpdate, onNotice }: { id: string; onUpdate: (row: I
     const [busy, setBusy] = useState(false);
     const [loading, setLoading] = useState(true);
     const [reload, setReload] = useState(0);
+    const [closedEdits, setClosedEdits] = useState<Record<string, string> | null>(null);
     const [candidateId, setCandidateId] = useState<string | null>(null);
     const [file, setFile] = useState<File | null>(null);
     const fileInput = useRef<HTMLInputElement>(null);
@@ -179,6 +182,27 @@ function DraftEditor({ id, onUpdate, onNotice }: { id: string; onUpdate: (row: I
         setMessage(error instanceof Error ? error.message : 'Unable to complete this request. Please retry.');
     }
 
+    function refreshRetrievedDraft(row: IntakeDraft) {
+        if (!draft || busy || conflict) return;
+        const mode = classifyCvDraftRefresh({ current: draft, incoming: row, baselineFields: editableFields(draft.fields), localFields: fields, nextFields: editableFields(row.fields) });
+        if (mode === 'ignore') return;
+        if (mode === 'conflict') { fail(new IntakeError('Draft changed', 409, {})); return; }
+        accept(row, mode === 'replace_fields');
+        setCandidateId(row.candidateId ?? null);
+        if (mode === 'closed') {
+            setErrors({});
+            const baseline = editableFields(draft.fields);
+            const unsaved = Object.fromEntries(Object.entries(fields).filter(([key, value]) => value !== baseline[key]));
+            setClosedEdits(Object.keys(unsaved).length ? unsaved : null);
+            setMessage(`This draft was ${row.status} in another session.${Object.keys(unsaved).length ? ' Your unsaved changes were not saved. Copy them below if needed.' : ''}`);
+            return;
+        }
+        if (row.cv?.status === 'validated') {
+            setErrors(current => { const next = { ...current }; delete next.cv; return next; });
+            setMessage('CV validated and attached. Your profile edits are preserved.');
+        }
+    }
+
     async function save() {
         const row = await request(url, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ expectedVersion: draft!.version, fields: fieldsForSave(fields) }) });
         accept(row); setErrors({});
@@ -222,6 +246,7 @@ function DraftEditor({ id, onUpdate, onNotice }: { id: string; onUpdate: (row: I
     return <div className="flex flex-col gap-6 p-6" aria-busy={busy}>
         <div className="flex items-start justify-between gap-3"><div><h2 className="font-semibold">{terminal ? draft.status === 'approved' ? 'Approved candidate draft' : 'Discarded draft' : draftName(draft)}</h2><p className="mt-1 text-xs text-muted-foreground">{draft.sourceTitle || 'Private draft'} · {dateLabel(draft.updatedAt)}</p></div><Badge variant="secondary">{draftStatus(draft)}</Badge></div>
         {message ? <div role={conflict || Object.keys(errors).length ? 'alert' : 'status'} className="space-y-3 rounded-lg border border-border bg-muted/30 p-3 text-sm"><p>{message}</p>{conflict ? <Button variant="outline" size="sm" onClick={refreshDraft}>Refresh draft{dirty ? ' (replace my edits)' : ''}</Button> : null}</div> : null}
+        {closedEdits ? <div className="space-y-2"><Label htmlFor="closed-draft-edits">Your unsaved changes</Label><Textarea id="closed-draft-edits" readOnly rows={6} value={Object.entries(closedEdits).map(([key, value]) => `${fieldLabels[key] ?? key}: ${value || '(cleared)'}`).join('\n')} /><p className="text-xs text-muted-foreground">These values are available to copy in this open review only. They were not added to the closed draft or candidate profile.</p></div> : null}
         {candidateId ? <Link className="text-sm font-medium underline underline-offset-4" href={`/staff/candidates/${encodeURIComponent(candidateId)}`}>Open {draft.status === 'duplicate' ? 'existing' : 'approved'} candidate</Link> : null}
         {Object.keys(errors).length ? <div role="alert" className="rounded-lg border border-border p-3 text-sm"><p className="font-medium">Resolve these issues before approval:</p><ul className="mt-2 list-disc space-y-1 pl-5">{Object.entries(errors).map(([key, error]) => <li key={key}><a className="underline underline-offset-4" href={`#intake-${key}`}>{key === 'proposals' ? 'Suggestions' : fieldLabels[key] ?? key}: {error}</a></li>)}</ul></div> : null}
         {!terminal && draft.missingFields.length ? <p className="text-sm text-muted-foreground">Still needed: {draft.missingFields.map(key => key === 'proposals' ? 'Suggestions' : fieldLabels[key] ?? key).join(', ')}.</p> : null}
@@ -241,8 +266,9 @@ function DraftEditor({ id, onUpdate, onNotice }: { id: string; onUpdate: (row: I
         <section className="space-y-3 rounded-lg border border-border p-4" aria-labelledby="intake-cv-label">
             <h3 id="intake-cv-label" className="flex items-center gap-2 text-sm font-medium"><FileText className="h-4 w-4" />CV</h3>
             <p className="break-all text-sm text-muted-foreground">{draft.cv ? `${draft.cv.filename} · ${draft.cv.status}` : terminal ? draft.status === 'approved' ? 'The CV is available on the approved candidate profile.' : 'No CV is retained on this closed draft.' : 'No CV attached'}</p>
-            {draft.cv && !terminal ? <a className="inline-block text-sm font-medium underline underline-offset-4" href={`${url}/cv`} target="_blank" rel="noopener noreferrer">Open CV</a> : null}
-            {!terminal ? <><Label htmlFor="intake-cv">{draft.cv ? 'Replace CV' : 'Upload CV'}</Label><Input ref={fileInput} id="intake-cv" type="file" accept=".pdf,.docx,application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document" className="h-auto py-2" disabled={busy || conflict} onChange={event => setFile(event.target.files?.[0] ?? null)} aria-describedby="intake-cv-help" aria-invalid={Boolean(errors.cv)} /><p id="intake-cv-help" className="text-xs text-muted-foreground">PDF or DOCX, up to 4 MB.</p>{errors.cv ? <p className="text-xs font-medium">{errors.cv}</p> : null}<Button variant="outline" size="sm" disabled={!file || busy || conflict} onClick={() => void upload()}>Upload selected CV</Button></> : null}
+            {draft.cv && !terminal ? <a className="block text-sm font-medium underline underline-offset-4" href={`${url}/cv`} target="_blank" rel="noopener noreferrer">Open CV</a> : null}
+            {!terminal ? <><Label className="block" htmlFor="intake-cv">{draft.cv ? 'Replace CV' : 'Upload CV'}</Label><Input ref={fileInput} id="intake-cv" type="file" accept=".pdf,.docx,application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document" className="h-auto py-2" disabled={busy || conflict} onChange={event => setFile(event.target.files?.[0] ?? null)} aria-describedby="intake-cv-help" aria-invalid={Boolean(errors.cv)} /><p id="intake-cv-help" className="text-xs text-muted-foreground">PDF or DOCX, up to 4 MB.</p>{errors.cv ? <p className="text-xs font-medium">{errors.cv}</p> : null}<Button variant="outline" size="sm" disabled={!file || busy || conflict} onClick={() => void upload()}>Upload selected CV</Button></> : null}
+            <CvRetrieval draft={draft} busy={busy} conflict={conflict} onDraft={refreshRetrievedDraft} />
         </section>
         {!terminal ? <details className="rounded-lg border border-border p-4"><summary className="cursor-pointer text-sm font-medium">Private source evidence ({draft.evidenceCount ?? draft.evidence?.length ?? 0})</summary><p className="mt-3 text-xs text-muted-foreground">Source messages are for intake review only and are not added to the candidate profile.</p>{draft.evidenceTruncated ? <p className="mt-2 text-xs text-muted-foreground">Showing the latest 100 source quotes. Earlier quotes remain private; pending suggestions include their own evidence.</p> : null}<div className="mt-4 space-y-4">{draft.evidence?.length ? draft.evidence.map(item => <article key={item.id} className="border-t border-border pt-3"><p className="text-xs text-muted-foreground">{item.senderName || 'Unknown sender'} · {dateLabel(item.sentAt)}</p><p className="mt-2 whitespace-pre-wrap break-words text-sm">{item.text}</p></article>) : <p className="text-sm text-muted-foreground">No source evidence attached.</p>}</div></details> : null}
         {!terminal ? <div className="space-y-3 border-t border-border pt-5"><p className="text-xs text-muted-foreground">Approval requires a first name, last name, primary email, and validated CV. Edited profile fields are saved when you approve.</p><div className="flex flex-wrap gap-2">
