@@ -6,6 +6,7 @@ export function searchStatusLabel(status, workerAvailable) {
 }
 export function searchGuidance(code) {
     return ({
+        INDEX_CHANGED: 'Our search index was updated. Run this search again.',
         CV_ACCESS_CHANGED: 'Your access to CV text changed. Previous results were cleared. Search profiles only, or start a new CV search after access is restored.',
         CV_RESULTS_CHANGED: 'A CV used by this search changed or became unavailable. Previous results were cleared. Run the search again for current results.',
         SEARCH_CAPACITY: 'CV search exceeds the supported search capacity. Search profiles only, or ask your administrator to review capacity.',
@@ -30,9 +31,9 @@ export function validResultHref(result) {
 export function hasIncompleteCoverage(coverage) {
     return coverage.pending > 0 || coverage.failed > 0 || (coverage.fullyIndexed ?? coverage.indexed) < coverage.eligible;
 }
-export const cvSearchInvalidated = code => code === 'CV_ACCESS_CHANGED' || code === 'CV_RESULTS_CHANGED';
+export const searchInvalidated = code => ['CV_ACCESS_CHANGED', 'CV_RESULTS_CHANGED', 'INDEX_CHANGED'].includes(code);
 export function safeSearchSnapshot(snapshot) {
-    if (!cvSearchInvalidated(snapshot.errorCode)) return snapshot;
+    if (!searchInvalidated(snapshot.errorCode)) return snapshot;
     return { ...snapshot, status: 'failed', results: [], nextAfter: null, capacity: null, coverage: { ...snapshot.coverage, cv: null } };
 }
 export function searchCvMode(scope, includeCv) { return scope !== 'my_drafts' && includeCv === true; }

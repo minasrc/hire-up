@@ -135,7 +135,7 @@ test('Approved CV search exposes coverage, explicit fallback and safe result inv
     }
     async function refresh() { await page.getByRole('button', { name: 'Refresh status', exact: true }).click(); await expect(page.getByText('Loading search status…', { exact: true })).toHaveCount(0); }
     const mockQueries = new Map(); const posted = []; const initialModes = [];
-    let mockAccess = true; let unsafe = false; let capacity = false;
+    let mockAccess = true; let unsafe = false; let indexChanged = false; let capacity = false;
     const sourceId = randomUUID();
     const mockCoverage = includeCv => ({ eligible: 3, indexed: 3, fullyIndexed: includeCv ? 2 : 3, pending: includeCv ? 1 : 0, failed: 0, retryable: 0, corpusChanged: false, cv: includeCv ? { attached: 3, withoutRetainedText: 1, eligible: 2, indexed: 1, pending: 1, failed: 0, retryable: 0 } : null });
     await page.route('**/api/staff/profile-search**', async route => {
@@ -151,7 +151,7 @@ test('Approved CV search exposes coverage, explicit fallback and safe result inv
         if (!queryId) { initialModes.push(includeCv); return json(base); }
         const result = { sourceType: 'candidate', sourceId, sourceRevision: '1', displayName: 'Mock CV candidate', headline: 'Engineer', location: 'London', hasCv: true, missingFields: [], score: 0.9, matchedComponent: includeCv ? 'cv' : 'profile', matchedDocument: includeCv ? { id: randomUUID(), filename: 'Reviewed-CV.pdf' } : null, matchedText: includeCv ? 'CV-only private excerpt sentinel' : 'Profile-only public excerpt', href: `/staff/candidates/${sourceId}` };
         // Deliberately include stale cached data on the error to verify the UI drops it defensively.
-        return json({ ...base, queryId, query: submitted.query, scope: submitted.scope, readyOnly: submitted.readyOnly, status: unsafe || capacity && includeCv ? 'failed' : 'completed', errorCode: unsafe ? 'CV_RESULTS_CHANGED' : capacity && includeCv ? 'SEARCH_CAPACITY' : null, results: capacity && includeCv ? [] : [result], nextAfter: unsafe ? 'stale-cursor' : url.searchParams.has('after') ? null : 'next-page', expiresAt: new Date(Date.now() + 900000).toISOString() });
+        return json({ ...base, queryId, query: submitted.query, scope: submitted.scope, readyOnly: submitted.readyOnly, status: unsafe || indexChanged || capacity && includeCv ? 'failed' : 'completed', errorCode: indexChanged ? 'INDEX_CHANGED' : unsafe ? 'CV_RESULTS_CHANGED' : capacity && includeCv ? 'SEARCH_CAPACITY' : null, results: capacity && includeCv ? [] : [result], nextAfter: unsafe || indexChanged ? 'stale-cursor' : url.searchParams.has('after') ? null : 'next-page', expiresAt: new Date(Date.now() + 900000).toISOString() });
     });
     try {
         await page.goto(`${baseURL}/staff/candidates/search`);
@@ -186,6 +186,22 @@ test('Approved CV search exposes coverage, explicit fallback and safe result inv
         await expect(page.getByText('Current search coverage: 3 of 3 accessible profiles indexed', { exact: true })).toBeVisible();
         await expect(page.getByLabel('Include approved CV text', { exact: true })).toHaveCount(0);
         await expect(page.getByText(/CV text:/)).toHaveCount(0);
+        // A global index update also invalidates profile-only searches without document permission.
+        const oldIndexQuery = await search('Profile-only query before index update');
+        await expect(page.getByText('Profile-only public excerpt', { exact: true })).toBeVisible();
+        await page.getByRole('button', { name: 'Next results', exact: true }).click();
+        await expect(page.getByText('Page 2 · Up to 25 results per page', { exact: true })).toBeVisible();
+        const oldOperation = posted.at(-1).operationId;
+        indexChanged = true; await refresh();
+        await expect(page.getByText('Our search index was updated. Run this search again.', { exact: true })).toBeVisible();
+        await expect(page.getByText('Profile-only public excerpt', { exact: true })).toHaveCount(0);
+        await expect(page.getByRole('button', { name: 'Next results', exact: true })).toHaveCount(0);
+        indexChanged = false;
+        await page.getByRole('button', { name: 'Run a new search', exact: true }).click();
+        await expect(page.getByText('Page 1 · Up to 25 results per page', { exact: true })).toBeVisible();
+        assert.notEqual(posted.at(-1).operationId, oldOperation);
+        assert.notEqual(new URL(page.url()).searchParams.get('queryId'), oldIndexQuery.queryId);
+        assert.equal(posted.at(-1).includeCv, false);
         await page.unroute('**/api/staff/profile-search**');
         if (process.env.CV_SEARCH_UI_MOCK_ONLY === '1') { assert.deepEqual(pageErrors, []); return; }
         assert.ok(migrations.some(name => name.includes('cv_search')), 'Approved CV search migration is required for real backend acceptance');
@@ -227,13 +243,13 @@ test('Approved CV search exposes coverage, explicit fallback and safe result inv
             }
             return worker('complete', { ...common, ...source, manifestSha256: job.manifestSha256, result: { embeddings: job.chunks.map(chunk => ({ ordinal: chunk.ordinal, embedding: vector(job.source.component === 'cv' ? chunk.ordinal === 1 ? 1 : 0.9 : 0.5) })) } });
         }
-        for (let count = 0; count < 100; count += 1) { const job = (await worker('claim', { capabilities: ['approved-cv-v1'] })).job; if (!job) break; await finish(job); if (count === 99) assert.fail('Index queue did not drain'); }
+        for (let count = 0; count < 100; count += 1) { const job = (await worker('claim', { capabilities: ['minilm-v1', 'approved-cv-v1'] })).job; if (!job) break; await finish(job); if (count === 99) assert.fail('Index queue did not drain'); }
         await page.goto(`${baseURL}/staff/candidates/search?scope=approved`);
         await expect(page.getByLabel('Include approved CV text', { exact: true })).toBeChecked();
         await expect(page.getByText('CV text: 1 of 1 available texts indexed', { exact: true })).toBeVisible();
-        await expect(page.getByText(/1 attached CV without retained text/)).toBeVisible();
+        await expect(page.getByText(/No searchable CV text: 1/)).toBeVisible();
         const searched = await search('Zero knowledge proof engineering in the CV tail');
-        await finish((await worker('claim', { capabilities: ['approved-cv-v1'] })).job); await refresh();
+        await finish((await worker('claim', { capabilities: ['minilm-v1', 'approved-cv-v1'] })).job); await refresh();
         await expect(page.getByText('CV excerpt · Retained-CV.pdf', { exact: true })).toBeVisible();
         await expect(page.getByText(/CV tail: led zero-knowledge/)).toBeVisible();
         await expect(page.getByRole('link', { name: 'Retained Engineer', exact: true })).toHaveCount(1);
@@ -246,7 +262,7 @@ test('Approved CV search exposes coverage, explicit fallback and safe result inv
         await refresh(); await expect(page.getByText(/Previous results were cleared/)).toBeVisible();
         await expect(page.getByText(/CV tail: led zero-knowledge/)).toHaveCount(0); await expect(page.getByText(/CV text:/)).toHaveCount(0);
         await page.getByLabel('Include approved CV text', { exact: true }).uncheck();
-        await search('Ordinary software systems'); await finish((await worker('claim', { capabilities: ['approved-cv-v1'] })).job); await refresh();
+        await search('Ordinary software systems'); await finish((await worker('claim', { capabilities: ['minilm-v1', 'approved-cv-v1'] })).job); await refresh();
         await expect(page.getByRole('link', { name: 'Retained Engineer', exact: true })).toBeVisible();
         await expect(page.getByText(/CV excerpt/)).toHaveCount(0);
         assert.deepEqual(pageErrors, []);

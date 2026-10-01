@@ -147,6 +147,7 @@ test('Profile search separates keyword lookup, private scopes and asynchronous r
     const otherRegistered = (await otherRegisteredResponse.json()).result;
     const vector = first => [first, Math.sqrt(1 - first * first), ...Array(382).fill(0)];
     async function worker(action, data = {}, token = registered.token, expectedStatus = 200) {
+        if (action === 'claim') data = { capabilities: ['minilm-v1'], ...data };
         const response = await fetch(`${baseURL}/api/profile-search/worker/${action}`, { method: 'POST', headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json' }, body: JSON.stringify(data) });
         assert.equal(response.status, expectedStatus, await response.clone().text()); return response.json();
     }
