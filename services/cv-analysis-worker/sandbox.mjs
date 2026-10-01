@@ -5,8 +5,13 @@ import { ParserError } from './errors.mjs';
 
 const execute = promisify(execFile);
 export const DEFAULT_PARSER_IMAGE = 'agora-cv-parser:v1';
-export function sandboxArguments(name, image, extension) {
-    return ['run', '--rm', '--pull=never', '--name', name, '--network=none', '--read-only', '--cap-drop=ALL', '--security-opt=no-new-privileges', '--pids-limit=64', '--memory=512m', '--memory-swap=512m', '--cpus=1', '--user=65534:65534', '--tmpfs=/tmp:rw,noexec,nosuid,size=32m', '-i', image, extension];
+export function parserLaunchLabel(value = process.env.AGORA_MAC_LAUNCH_ID) {
+    if (value === undefined) return [];
+    if (typeof value !== 'string' || !/^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/iu.test(value)) throw new ParserError('WORKER_ERROR');
+    return ['--label', `agora.mac-launch=${value}`];
+}
+export function sandboxArguments(name, image, extension, launchId = process.env.AGORA_MAC_LAUNCH_ID) {
+    return ['run', '--rm', '--pull=never', '--name', name, '--network=none', '--read-only', '--cap-drop=ALL', '--security-opt=no-new-privileges', '--pids-limit=64', '--memory=512m', '--memory-swap=512m', '--cpus=1', '--user=65534:65534', '--tmpfs=/tmp:rw,noexec,nosuid,size=32m', ...parserLaunchLabel(launchId), '-i', image, extension];
 }
 async function assertLocalEngine() {
     try {
@@ -20,13 +25,15 @@ export async function runIsolatedParser(bytes, { extension, signal, image = DEFA
     if (!['pdf', 'docx'].includes(extension) || !Buffer.isBuffer(bytes) && !(bytes instanceof Uint8Array) || !bytes.length || bytes.length > 4194304) throw new ParserError('INVALID_DOCUMENT');
     if (typeof image !== 'string' || !/^[a-zA-Z0-9][a-zA-Z0-9._/@:-]{0,240}$/u.test(image)) throw new ParserError('WORKER_ERROR');
     if (signal?.aborted) throw new ParserError('STOPPED');
-    await assertLocalEngine();
     const name = `agora-cv-parser-${randomUUID()}`;
+    // Validate ownership metadata before any Docker command or document transfer.
+    const args = sandboxArguments(name, image, extension);
+    await assertLocalEngine();
     let child; let timer; let abort; let forced;
     try {
         // Finish creation before sending any document bytes. A cancellation can
         // then always remove an existing named container instead of racing run.
-        const args = sandboxArguments(name, image, extension); args[0] = 'create';
+        args[0] = 'create';
         try { await execute('docker', args, { timeout: 5000, maxBuffer: 1024, ...(signal ? { signal } : {}) }); }
         catch { throw new ParserError(signal?.aborted ? 'STOPPED' : 'WORKER_ERROR'); }
         if (signal?.aborted) throw new ParserError('STOPPED');
