@@ -9,7 +9,7 @@ import { createPendingStore } from '../../services/semantic-worker/store.mjs';
 import { createLocalClient } from '../../services/semantic-worker/local.mjs';
 import { requestJson } from '../../services/semantic-worker/transport.mjs';
 import { validateConfig } from '../../services/semantic-worker/config.mjs';
-import { CHUNKER_VERSION, INDEX_VERSION, MODEL, PROJECTION_VERSION, SemanticWorkerError } from '../../services/semantic-worker/constants.mjs';
+import { CHUNKER_VERSION, CV_CAPABILITY, CV_PROJECTION_VERSION, INDEX_VERSION, MODEL, PROJECTION_VERSION, SemanticWorkerError } from '../../services/semantic-worker/constants.mjs';
 
 const hash = text => createHash('sha256').update(text).digest('hex');
 const embedding = [1, ...Array(383).fill(0)];
@@ -33,6 +33,7 @@ test('plan, query and passage contracts preserve versions, hashes and ordinals',
   for (const kind of ['plan', 'query', 'embed']) {
     const current = job(kind), { worker, calls } = setup(current);
     assert.equal((await worker.tick()).status, 'completed');
+    assert.deepEqual(calls[0].body, { capabilities: [CV_CAPABILITY] });
     const complete = calls[1].body;
     assert.equal(complete.jobId, current.id);
     assert.equal(complete.kind, kind);
@@ -138,15 +139,16 @@ test('actual CLI connects only to configured synthetic host/model and persists n
   const { promisify } = await import('node:util');
   const root = await mkdtemp(join(tmpdir(), 'semantic-cli-'));
   t.after(() => rm(root, { recursive: true, force: true }));
-  const current = job('plan'), calls = [];
+  const current = cvJob('plan'), calls = [];
   const server = createServer(async (request, response) => {
     let raw = ''; for await (const chunk of request) raw += chunk;
     const body = JSON.parse(raw); calls.push(request.url);
     assert.equal(request.headers.authorization, 'Bearer synthetic-worker-and-local-token');
     response.setHeader('Content-Type', 'application/json');
-    if (request.url === '/api/profile-search/worker/claim') response.end(JSON.stringify({ job: current }));
+    if (request.url === '/api/profile-search/worker/claim') { assert.deepEqual(body, { capabilities: [CV_CAPABILITY] }); response.end(JSON.stringify({ job: current })); }
     else if (request.url === '/v1/chunk-plan') { assert.equal(body.text, text); response.end(JSON.stringify(manifest(text))); }
     else if (request.url === '/api/profile-search/worker/complete') {
+      assert.equal(body.projectionVersion, CV_PROJECTION_VERSION);
       assert.equal(body.sourceSha256, hash(text)); assert.equal(body.result.byteLength, Buffer.byteLength(text));
       response.end(JSON.stringify({ ok: true, status: 'embedding' }));
     } else { response.statusCode = 404; response.end('{}'); }
@@ -162,4 +164,105 @@ test('actual CLI connects only to configured synthetic host/model and persists n
   for (const path of (await readdir(join(root, 'state'), { recursive: true })).filter(p => p.endsWith('.json'))) {
     assert.ok(!(await readFile(join(root, 'state', path), 'utf8')).includes(text));
   }
+});
+
+function cvJob(kind = 'plan') {
+  const current = job(kind);
+  current.projectionVersion = CV_PROJECTION_VERSION;
+  current.source = { ...current.source, sourceType: 'candidate', component: 'cv',
+    reviewedTextId: randomUUID(), document: { id: randomUUID(), sha256: hash('original document bytes') } };
+  return current;
+}
+
+test('approved CV stages bind namespace and preserve exact passages without routing metadata in completion', async () => {
+  for (const kind of ['plan', 'embed']) {
+    const current = cvJob(kind), { worker, calls } = setup(current);
+    assert.equal((await worker.tick()).status, 'completed');
+    const complete = calls[1].body;
+    assert.equal(complete.projectionVersion, CV_PROJECTION_VERSION);
+    assert.equal(complete.sourceRevision, current.source.revision);
+    assert.equal(complete.sourceSha256, hash(text));
+    for (const key of ['source', 'document', 'reviewedTextId', 'component']) assert.equal(Object.hasOwn(complete, key), false);
+  }
+  const current = job(); current.source.component = 'profile';
+  assert.equal((await setup(current).worker.tick()).status, 'completed');
+});
+
+test('CV namespace cannot be attached to profiles, queries, private drafts or malformed document bindings', async () => {
+  const mutations = [
+    j => { j.projectionVersion = PROJECTION_VERSION; },
+    j => { j.source.component = 'profile'; },
+    j => { delete j.source.component; },
+    j => { j.source.component = null; },
+    j => { j.source.sourceType = 'draft'; },
+    j => { delete j.source.reviewedTextId; },
+    j => { j.source.reviewedTextId = 'not-a-uuid'; },
+    j => { delete j.source.document; },
+    j => { j.source.document.sha256 = 'not-a-digest'; },
+    j => { j.source.document.id = 'not-a-uuid'; },
+    j => { j.source.document.objectKey = 'private-storage-path'; },
+    j => { j.source.sha256 = hash('substituted'); },
+  ];
+  for (const mutate of mutations) {
+    const current = cvJob(); mutate(current); const { worker, calls } = setup(current);
+    await assert.rejects(worker.tick(), { code: 'INVALID_RESULT' }); assert.equal(calls.length, 1);
+  }
+  const query = job('query'); query.projectionVersion = CV_PROJECTION_VERSION;
+  await assert.rejects(setup(query).worker.tick(), { code: 'INVALID_RESULT' });
+  const disguised = job(); disguised.source.document = cvJob().source.document;
+  await assert.rejects(setup(disguised).worker.tick(), { code: 'INVALID_RESULT' });
+});
+
+test('both CV stages survive lost ACK and encrypted restart with their original namespace', async t => {
+  const root = await mkdtemp(join(tmpdir(), 'semantic-cv-restart-')); t.after(() => rm(root, { recursive: true, force: true }));
+  for (const kind of ['plan', 'embed']) {
+    const config = { root: join(root, kind), server: 'https://demo.example', workerToken: 'synthetic-cv-owner-token' };
+    const current = cvJob(kind); let calls = 0, inference = 0, original;
+    const host = async (action, body) => {
+      if (action === 'claim') { assert.equal(calls, 0); return { job: current }; }
+      if (!calls++) { original = structuredClone(body); throw new SemanticWorkerError('HTTP_UNAVAILABLE', 503); }
+      assert.deepEqual(body, original); return { ok: true };
+    };
+    const options = { host,
+      plan: async ({ text: source }) => { inference++; return manifest(source); },
+      embed: async () => { inference++; return { indexVersion: INDEX_VERSION, embeddings: [embedding] }; } };
+    assert.equal((await setup(current, { ...options, vault: createPendingStore(config) }).worker.tick()).status, 'retry');
+    assert.equal(createPendingStore(config).load().body.projectionVersion, CV_PROJECTION_VERSION);
+    assert.equal((await setup(current, { ...options, vault: createPendingStore(config) }).worker.tick()).status, 'completed');
+    assert.equal(inference, 1); assert.equal(createPendingStore(config).load(), null);
+  }
+});
+
+test('revoked CV completion or fail receipt unblocks profiles;401 and profile403 preserve pending work', async () => {
+  for (const fail of [false, true]) {
+    const jobs = [cvJob(), job('query')], vault = memory(); let revoke = true;
+    const host = async action => {
+      if (action === 'claim') return { job: jobs.shift() };
+      if (revoke) throw new SemanticWorkerError('HTTP_UNAVAILABLE', 403);
+      return { ok: true };
+    };
+    const { worker } = setup(null, { host, vault, ...(fail ? { plan: async () => { throw new Error('model outage'); } } : {}) });
+    assert.equal((await worker.tick()).status, 'stale'); assert.equal(vault.load(), null);
+    revoke = false; assert.equal((await worker.tick()).status, 'completed');
+  }
+  for (const [current, status] of [[cvJob(), 401], [job(), 403]]) {
+    const { worker, vault } = setup(current, { host: async action => {
+      if (action === 'claim') return { job: current };
+      throw new SemanticWorkerError('HTTP_UNAVAILABLE', status);
+    } });
+    await assert.rejects(worker.tick(), { status }); assert.ok(vault.load());
+  }
+});
+
+test('CV validation rejection keeps fail namespace through restart and permission loss', async () => {
+  const current = cvJob(), vault = memory(); let stage = 0;
+  const host = async action => {
+    if (action === 'claim') return { job: current };
+    if (action === 'complete') throw new SemanticWorkerError('HTTP_UNAVAILABLE', 422);
+    throw new SemanticWorkerError('HTTP_UNAVAILABLE', stage++ ? 403 : 503);
+  };
+  assert.equal((await setup(current, { host, vault }).worker.tick()).status, 'retry');
+  assert.equal(vault.load().action, 'fail'); assert.equal(vault.load().projectionVersion, CV_PROJECTION_VERSION);
+  assert.equal((await setup(current, { host, vault }).worker.tick()).status, 'stale');
+  assert.equal(vault.load(), null);
 });
