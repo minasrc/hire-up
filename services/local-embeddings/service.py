@@ -2,6 +2,7 @@
 
 import hmac
 import os
+import stat
 import asyncio
 from contextlib import asynccontextmanager
 from pathlib import Path
@@ -27,6 +28,47 @@ from chunking import CHUNKER_VERSION, CV_CHUNKER_VERSION, chunk_plan
 from scheduler import PriorityScheduler
 
 ROOT = Path(__file__).resolve().parent
+
+
+def model_directory():
+    return Path(os.environ.get("LOCAL_EMBEDDINGS_MODEL_DIRECTORY", ROOT / ".runtime" / "model"))
+
+
+def read_token():
+    """Read an owner-only token without following a file or directory symlink."""
+    path = Path(os.path.abspath(os.environ.get("LOCAL_EMBEDDINGS_TOKEN_FILE", ROOT / ".runtime" / "token")))
+    directory_fd = token_fd = None
+    try:
+        directory_flags = os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW
+        directory_fd = os.open(path.anchor, directory_flags)
+        for component in path.parts[1:-1]:
+            next_fd = os.open(component, directory_flags, dir_fd=directory_fd)
+            os.close(directory_fd)
+            directory_fd = next_fd
+        parent = os.fstat(directory_fd)
+        if parent.st_uid != os.getuid() or parent.st_mode & 0o077:
+            raise ValueError()
+        token_fd = os.open(path.name, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK, dir_fd=directory_fd)
+        metadata = os.fstat(token_fd)
+        if (not stat.S_ISREG(metadata.st_mode) or metadata.st_uid != os.getuid()
+                or metadata.st_mode & 0o077 or metadata.st_nlink != 1 or metadata.st_size > 8192):
+            raise ValueError()
+        with os.fdopen(token_fd, "rb") as handle:
+            token_fd = None
+            value = handle.read(8193)
+        if len(value) > 8192:
+            raise ValueError()
+        token = value.decode("utf-8").strip()
+        if len(token) < 32 or any(ord(character) < 32 or ord(character) == 127 for character in token):
+            raise ValueError()
+        return token
+    except (OSError, ValueError, UnicodeError):
+        raise RuntimeError("Private embedding token unavailable or unsafe.") from None
+    finally:
+        if token_fd is not None:
+            os.close(token_fd)
+        if directory_fd is not None:
+            os.close(directory_fd)
 
 
 class EmbeddingRequest(BaseModel):
@@ -62,9 +104,10 @@ class Encoder:
 
         torch.set_num_threads(2)
         torch.set_num_interop_threads(1)
-        verify_model_assets(ROOT / ".runtime" / "model")
+        directory = model_directory()
+        verify_model_assets(directory)
         self.model = SentenceTransformer(
-            str(ROOT / ".runtime" / "model"), device="cpu",
+            str(directory), device="cpu",
             local_files_only=True, trust_remote_code=False,
             model_kwargs={"use_safetensors": True},
         )
@@ -186,6 +229,6 @@ def create_app(encoder, token):
 if __name__ == "__main__":
     import uvicorn
 
-    token = (ROOT / ".runtime" / "token").read_text().strip()
+    token = read_token()
     application = create_app(Encoder(), token)
     uvicorn.run(application, host="127.0.0.1", port=int(os.environ.get("LOCAL_EMBEDDINGS_PORT", "8817")), workers=1, access_log=False, log_level="warning")

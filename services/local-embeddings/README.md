@@ -87,3 +87,24 @@ The unchanged100-profile/40-query and100-CV/40-query English/Spanish fixtures mo
 ```
 
 This loads local safetensors only and asserts Recall@10>=0.85, MRR>=0.8 and CV tail recall>=0.85. Actual hosted authorization, pagination and capacity checks remain separate acceptance tests. No fixture or threshold is adjusted to make a model pass.
+
+## Foreground launcher paths
+
+`service.py` accepts `LOCAL_EMBEDDINGS_MODEL_DIRECTORY` and
+`LOCAL_EMBEDDINGS_TOKEN_FILE`. When omitted, they retain the existing
+`.runtime/model` and `.runtime/token` defaults beside this service. The foreground
+Mac launcher supplies absolute paths and its own `LOCAL_EMBEDDINGS_PORT`; the
+listener always binds `127.0.0.1`. It does not use the detached controller's PID or
+log files.
+
+The token must be a regular, single-link file owned by the current user, with no
+group/other permissions, inside a similarly private parent directory. Symlink
+files and symlink directory components are rejected. Token loading is bounded to
+8 KiB and errors never include the token or path. The usual generated token and
+an optional trailing newline remain supported. Do not place the token itself in
+environment variables or command arguments.
+
+Model files may be shared read-only. The same pinned revision checks, native token
+limit, safetensors-only loading and offline restrictions apply to an explicit
+model directory. Preserve its Hugging Face download metadata. These overrides do
+not prepare/download assets, change existing model files, or stop another service.
