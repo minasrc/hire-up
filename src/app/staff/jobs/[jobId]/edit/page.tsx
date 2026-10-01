@@ -40,7 +40,6 @@ export default async function StaffJobEditPage(
                 <PageHeader
                     eyebrow="Jobs"
                     title="Edit draft"
-                    description="Drafts, publication state and the public preview for this role."
                 />
                 <Card className="mt-6">
                     <CardContent className="py-8 text-center">

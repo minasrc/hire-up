@@ -21,7 +21,6 @@ const denied = (
         <PageHeader
             eyebrow="Workspace"
             title="Candidate"
-            description="Applications, documents and staff notes."
         />
         <Card className="mt-6">
             <CardContent className="py-8 text-center">

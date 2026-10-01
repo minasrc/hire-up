@@ -256,9 +256,6 @@ export function StaffTodoList({ writeEnabled }: { writeEnabled: boolean }) {
                         </Button>
                     </span>
                 </div>
-                <p className="text-sm text-muted-foreground">
-                    Your personal list — only you can see these tasks.
-                </p>
             </CardHeader>
             <CardContent className="flex flex-col gap-4">
                 {denied ? (

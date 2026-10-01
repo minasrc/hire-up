@@ -98,9 +98,6 @@ export function ReviewQueue({ summary }: { summary: StaffWorkspaceSummary }) {
                     </span>
                     Awaiting review
                 </CardTitle>
-                <p className="text-sm text-muted-foreground">
-                    Latest applications sitting on the initial stage.
-                </p>
             </CardHeader>
             <CardContent className="flex flex-col gap-3">
                 {!summary.capabilities.applications ? (
@@ -174,9 +171,6 @@ export function ClientsHiring({ summary }: { summary: StaffWorkspaceSummary }) {
                     </span>
                     Clients hiring
                 </CardTitle>
-                <p className="text-sm text-muted-foreground">
-                    Clients with published, open roles.
-                </p>
             </CardHeader>
             <CardContent className="flex flex-col gap-3">
                 {!summary.capabilities.jobs ? (

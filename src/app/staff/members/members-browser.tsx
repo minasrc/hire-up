@@ -120,7 +120,6 @@ export function MembersBrowser({
             <PageHeader
                 eyebrow="Workspace"
                 title="Members"
-                description="Staff accounts, roles and invitations for this organization."
             />
 
             <div className="flex flex-col gap-3 rounded-lg border border-border bg-card p-4 md:flex-row md:items-end">

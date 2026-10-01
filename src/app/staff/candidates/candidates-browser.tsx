@@ -78,9 +78,6 @@ export function CandidatesBrowser({
                     Workspace
                 </p>
                 <h1 className="text-[26px] leading-8 font-medium text-foreground">Candidates</h1>
-                <p className="max-w-2xl text-sm text-muted-foreground">
-                    People who have applied or been added to the workspace.
-                </p>
             </div>
 
             <div className="flex flex-wrap items-end gap-3 rounded-lg border border-border bg-card p-4">

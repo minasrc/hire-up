@@ -26,7 +26,6 @@ export default async function StaffClientNewPage() {
             <PageHeader
                 eyebrow="Clients"
                 title="New client"
-                description="Register a hiring organization. Jobs are drafted against clients."
             />
             <Card>
                 <CardContent className="pt-6">

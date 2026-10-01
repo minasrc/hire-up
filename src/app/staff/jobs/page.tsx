@@ -43,7 +43,6 @@ export default async function StaffJobsPage({
                 <PageHeader
                     eyebrow="Workspace"
                     title="Jobs"
-                    description="Drafts and published roles across your clients."
                 />
                 <Card className="mt-6">
                     <CardContent className="py-8 text-center">

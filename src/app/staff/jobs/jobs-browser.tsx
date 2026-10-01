@@ -183,7 +183,6 @@ export function JobsBrowser({
             <PageHeader
                 eyebrow="Workspace"
                 title="Jobs"
-                description="Drafts and published roles across your clients."
                 actions={
                     canCreate ? (
                         <Button asChild>

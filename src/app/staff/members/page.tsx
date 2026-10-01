@@ -31,7 +31,6 @@ export default async function StaffMembersPage() {
                 <PageHeader
                     eyebrow="Workspace"
                     title="Members"
-                    description="Staff accounts, roles and invitations for this organization."
                 />
                 <Card className="mt-6">
                     <CardContent className="py-8 text-center">

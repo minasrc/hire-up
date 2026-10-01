@@ -68,7 +68,6 @@ export default async function StaffCandidatesPage() {
                     <PageHeader
                         eyebrow="Workspace"
                         title="Candidates"
-                        description="People who have applied or been added to the workspace."
                     />
                     <Card className="mt-6">
                         <CardContent className="py-8 text-center">

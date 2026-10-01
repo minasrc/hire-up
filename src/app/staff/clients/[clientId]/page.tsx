@@ -48,7 +48,6 @@ export default async function StaffClientPage(
                 <PageHeader
                     eyebrow="Clients"
                     title="Client"
-                    description="Client profile, contact details and public-facing identity."
                 />
                 <Card className="mt-6">
                     <CardContent className="py-8 text-center">
@@ -82,7 +81,6 @@ export default async function StaffClientPage(
             <PageHeader
                 eyebrow="Clients"
                 title={client.name}
-                description="Client profile, contact details and public-facing identity."
                 actions={
                     <>
                         <StatusBadge
@@ -121,9 +119,6 @@ export default async function StaffClientPage(
             <Card>
                 <CardHeader>
                     <CardTitle className="text-base">Summary</CardTitle>
-                    <CardDescription>
-                        Contact details and how this client appears publicly.
-                    </CardDescription>
                 </CardHeader>
                 <CardContent>
                     <dl className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">

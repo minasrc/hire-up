@@ -66,7 +66,6 @@ export default async function StaffJobNewPage({
             <PageHeader
                 eyebrow="Jobs"
                 title="New job draft"
-                description="Draft a role for a client. Publish later once the preview checks out."
             />
             {!canWrite ? (
                 <Card>

@@ -106,7 +106,6 @@ test('staff overview renders real workspace content for a verified member', asyn
     });
     const html = renderToStaticMarkup(await resolveServerTree(await Page()));
     assert.match(html, /Overview/);
-    assert.match(html, /snapshot of your recruiting pipeline/i);
     assert.match(html, /metrics:\{&quot;candidates&quot;:4,&quot;applications&quot;:9,&quot;openRoles&quot;:2\}/);
     assert.match(html, /todo:true/);
     assert.match(html, /review:0/);

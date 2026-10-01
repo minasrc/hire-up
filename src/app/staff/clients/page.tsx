@@ -42,7 +42,6 @@ export default async function StaffClientsPage({
                 <PageHeader
                     eyebrow="Workspace"
                     title="Clients"
-                    description="Your client relationships and hiring activity."
                 />
                 <Card className="mt-6">
                     <CardContent className="py-8 text-center">

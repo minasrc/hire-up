@@ -83,7 +83,6 @@ export default async function StaffOverviewPage() {
             <PageHeader
                 eyebrow="Workspace"
                 title="Overview"
-                description="A snapshot of your recruiting pipeline for today."
             />
             <Suspense fallback={<OverviewLoading />}>
                 <OverviewContent />
