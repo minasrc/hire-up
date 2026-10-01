@@ -13,7 +13,7 @@ import { hasIncompleteCoverage, searchGuidance, searchIsActive, searchScopeLabel
 import { ProfileSearchError, searchAction, searchEndpoint, searchRequest } from './search-api';
 
 type Scope = 'approved' | 'my_drafts' | 'all';
-type Coverage = { eligible: number; indexed: number; pending: number; failed: number; corpusChanged: boolean };
+type Coverage = { eligible: number; indexed: number; pending: number; failed: number; retryable: number; corpusChanged: boolean };
 type Result = { sourceType: 'candidate' | 'draft'; sourceId: string; sourceRevision: string; displayName: string; headline: string | null; location: string | null; hasCv: boolean; missingFields: string[]; score: number; matchedText: string; href: string };
 type Snapshot = { coverage: Coverage; workerAvailable: boolean; queryId?: string; status?: string; query?: string; scope?: Scope; readyOnly?: boolean; results?: Result[]; nextAfter?: string | null; errorCode?: string | null; expiresAt?: string };
 const missingLabels: Record<string, string> = { firstName: 'first name', lastName: 'last name', primaryEmail: 'primary email', cv: 'CV', proposals: 'suggestion review' };
@@ -26,6 +26,7 @@ export function ProfileSearchBrowser({ initialScope = 'all', initialQueryId }: {
     const [snapshot, setSnapshot] = useState<Snapshot | null>(null);
     const [cursors, setCursors] = useState<string[]>(['']);
     const [error, setError] = useState('');
+    const [notice, setNotice] = useState('');
     const [busy, setBusy] = useState(false);
     const [loading, setLoading] = useState(true);
     const [denied, setDenied] = useState(false);
@@ -72,13 +73,13 @@ export function ProfileSearchBrowser({ initialScope = 'all', initialQueryId }: {
     }
     function clearSearch(nextScope = scope, nextReady = readyOnly) {
         read.current?.abort(); epoch.current += 1; resume.current = ''; operation.current = null;
-        setQueryId(''); setSnapshot(null); setCursors(['']); setScope(nextScope); setReadyOnly(nextReady); setError(''); setDenied(false); setLoading(true); updateUrl('', nextScope);
+        setNotice(''); setQueryId(''); setSnapshot(null); setCursors(['']); setScope(nextScope); setReadyOnly(nextReady); setError(''); setDenied(false); setLoading(true); updateUrl('', nextScope);
     }
     function refresh() { stickyError.current = false; setDenied(false); setLoading(true); setRevision(value => value + 1); }
     async function submit() {
         if (busy || active || !query.trim()) return;
         mutating.current = true; read.current?.abort(); epoch.current += 1; stickyError.current = false;
-        setBusy(true); setError('');
+        setBusy(true); setError(''); setNotice('');
         const body = { query: query.trim(), scope, readyOnly };
         const key = JSON.stringify(body);
         if (operation.current?.key !== key) operation.current = { key, id: crypto.randomUUID() };
@@ -97,6 +98,17 @@ export function ProfileSearchBrowser({ initialScope = 'all', initialQueryId }: {
         catch (failure) { stickyError.current = true; setError(failure instanceof Error ? failure.message : 'Unable to cancel this search.'); }
         finally { mutating.current = false; setBusy(false); setLoading(true); setRevision(value => value + 1); }
     }
+    async function retryIndex() {
+        if (busy || active || !snapshot?.coverage.retryable) return;
+        mutating.current = true; read.current?.abort(); epoch.current += 1; stickyError.current = false;
+        setBusy(true); setError(''); setNotice('');
+        try {
+            const result = await searchAction({ action: 'retryIndex', scope, readyOnly });
+            clearSearch();
+            setNotice(`${result.retried} profile${result.retried === 1 ? '' : 's'} queued for indexing.${result.remainingFailed > 0 ? ` ${result.remainingFailed} profiles still need a retry; use Retry failed indexing again.` : ''} Run the search again after indexing finishes for updated results.`);
+        } catch (failure) { stickyError.current = true; setError(failure instanceof Error ? failure.message : 'Unable to retry indexing.'); }
+        finally { mutating.current = false; setBusy(false); setLoading(true); setRevision(value => value + 1); }
+    }
     const coverage = snapshot?.coverage;
     return <section className="mx-auto flex w-full max-w-5xl flex-col gap-6">
         <PageHeader eyebrow="Candidate discovery" title="Search by meaning" description="Describe experience and preferences, then review the ranked profiles."
@@ -108,8 +120,9 @@ export function ProfileSearchBrowser({ initialScope = 'all', initialQueryId }: {
             <div className="flex flex-wrap gap-2"><Button type="submit" disabled={busy || active || !query.trim()}><Search />{busy ? 'Working…' : 'Search by meaning'}</Button>{active ? <Button type="button" variant="outline" disabled={busy} onClick={() => void cancel()}>Cancel search</Button> : null}<Button type="button" variant="ghost" disabled={busy || loading} onClick={refresh}>Refresh status</Button>{denied && queryId ? <Button type="button" variant="outline" disabled={busy} onClick={() => clearSearch()}>Start a new search</Button> : null}</div>
         </form></Card>
         {error ? <div role="alert" className="space-y-3 rounded-lg border border-border p-4 text-sm"><p>{error}</p><Button variant="outline" size="sm" disabled={busy} onClick={refresh}>Retry status</Button></div> : null}
+        {notice ? <p role="status" className="text-sm">{notice}</p> : null}
         {loading ? <p role="status" className="text-xs text-muted-foreground">Loading search status…</p> : null}
-        {coverage ? <div className="space-y-2 rounded-lg border border-border p-4"><p className="text-sm font-medium">{snapshot?.queryId ? 'Coverage for this search' : 'Current search coverage'}: {coverage.indexed.toLocaleString()} of {coverage.eligible.toLocaleString()} accessible profiles indexed</p><p className="text-xs text-muted-foreground">{coverage.pending.toLocaleString()} pending · {coverage.failed.toLocaleString()} need attention. Counts apply to your selected scope and readiness filter.</p>{hasIncompleteCoverage(coverage) ? <p className="text-xs text-muted-foreground">Coverage is incomplete. Some accessible profiles are not indexed yet.</p> : null}{!snapshot?.workerAvailable ? <p className="text-xs text-muted-foreground">The Mac search worker has not checked in recently. Keep it running or use name/email lookup.</p> : null}</div> : null}
+        {coverage ? <div className="space-y-2 rounded-lg border border-border p-4"><p className="text-sm font-medium">{snapshot?.queryId ? 'Coverage for this search' : 'Current search coverage'}: {coverage.indexed.toLocaleString()} of {coverage.eligible.toLocaleString()} accessible profiles indexed</p><p className="text-xs text-muted-foreground">{coverage.pending.toLocaleString()} pending · {coverage.failed.toLocaleString()} need attention. Counts apply to your selected scope and readiness filter.</p>{hasIncompleteCoverage(coverage) ? <p className="text-xs text-muted-foreground">Coverage is incomplete. Some accessible profiles are not indexed yet.</p> : null}{coverage.retryable > 0 ? <div className="flex flex-wrap items-center gap-3"><Button variant="outline" size="sm" disabled={busy || loading || active} onClick={() => void retryIndex()}>Retry failed indexing</Button><p className="text-xs text-muted-foreground">{coverage.retryable.toLocaleString()} profiles can be retried now.</p></div> : null}{!snapshot?.queryId && coverage.failed > coverage.retryable ? <p className="text-xs text-muted-foreground">Some profiles need attention before they can be indexed.</p> : null}{!snapshot?.workerAvailable ? <p className="text-xs text-muted-foreground">The Mac search worker has not checked in recently. Keep it running or use name/email lookup.</p> : null}</div> : null}
         {snapshot?.status ? <div role="status" className="space-y-2"><h2 className="font-medium">{searchStatusLabel(snapshot.status, snapshot.workerAvailable)}</h2>{active ? <p className="text-sm text-muted-foreground">You can cancel while this search waits or runs.</p> : null}{snapshot.status === 'expired' ? <p className="text-sm text-muted-foreground">This search is no longer available. Submit the description again for current results.</p> : null}{snapshot.status === 'cancelled' ? <p className="text-sm text-muted-foreground">Edit the description and search again when ready.</p> : null}{snapshot.errorCode ? <p className="text-sm text-muted-foreground">{searchGuidance(snapshot.errorCode)}</p> : null}</div> : null}
         {snapshot?.status === 'completed' ? <div className="space-y-4">
             <div className="space-y-2"><h2 className="font-medium">Ranked results</h2><p className="whitespace-pre-wrap break-words text-sm text-muted-foreground">{snapshot.query}</p><p className="text-xs text-muted-foreground">{searchScopeLabels[snapshot.scope ?? scope]}{snapshot.readyOnly ? ' · Only ready drafts' : ''}</p>{coverage?.corpusChanged ? <p className="rounded-lg border border-border p-3 text-sm">Profiles changed since this search. Run it again for current results.</p> : null}</div>

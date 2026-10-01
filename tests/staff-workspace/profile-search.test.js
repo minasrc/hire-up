@@ -195,7 +195,20 @@ test('Profile search separates keyword lookup, private scopes and asynchronous r
         await expect(page.getByRole('heading', { name: 'Search cancelled', exact: true })).toBeVisible();
         await finish(leased, registered.token, 409);
         await indexAll(); await indexAll(otherRegistered.token);
+        // A transient failure after durable planning can be retried without recreating the source.
+        psql(db, `update app.profile_search_chunks set embedding=null where source_id in(select id from app.profile_search_sources where source_id='${candidateIds[0]}');
+            update app.profile_search_sources set status='failed',error_code='ATTEMPTS_EXHAUSTED',attempts=5 where source_id='${candidateIds[0]}';`);
         await refresh();
+        const retryResponse = page.waitForResponse(response => response.url() === endpoint && response.request().method() === 'POST' && response.request().postDataJSON()?.action === 'retryIndex');
+        await page.getByRole('button', { name: 'Retry failed indexing', exact: true }).click();
+        const retryReceipt = await retryResponse; assert.equal(retryReceipt.status(), 200);
+        assert.deepEqual(await retryReceipt.json(), { ok: true, retried: 1, remainingFailed: 0 });
+        await expect(page.getByText(/1 profile queued for indexing/)).toBeVisible();
+        await expect(queryInput).toHaveValue('Private first query Solidity experience');
+        assert.equal(new URL(page.url()).searchParams.has('queryId'), false);
+        await expect(page.getByRole('button', { name: 'Retry failed indexing', exact: true })).toHaveCount(0);
+        await indexAll(); await refresh();
+        await expect(page.getByText('Current search coverage: 30 of 30 accessible profiles indexed', { exact: true })).toBeVisible();
         const result = await search('Solidity engineers with Ethereum protocol experience');
         const queryJob = (await worker('claim')).job; assert.equal(queryJob.kind, 'query'); await finish(queryJob);
         await refresh();
