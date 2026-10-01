@@ -182,3 +182,14 @@ document-structure validation. CV text extraction is a separate checkpoint.
 ```sh
 node --test tests/unit/telegram-cv-*.test.js
 ```
+
+## Browser-paired device credential
+
+The pairing CLI can create a shared private `credential.json`. Set `credentialFile`
+in this connector's private config (relative paths resolve beside that config), or
+`TELEGRAM_CONNECTOR_CREDENTIAL_FILE`, to use its server/workerId/token. Keep apiId,
+apiHash and stateDirectory in the existing connector configuration. Existing
+inline/env credentials still work; if supplied together with the paired file,
+identities must match. Pairing does not start this connector or authenticate
+Telegram. See `../worker-pairing/README.md` for the hidden invitation prompt and
+restart-safe enrollment workflow.

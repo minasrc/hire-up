@@ -9,6 +9,7 @@ import { createHistoryWorker } from './history-worker.mjs';
 import { createCvWorker } from './cv-worker.mjs';
 import { createCvHostClient } from './cv-http.mjs';
 import { createConnectedWork } from './connected-work.mjs';
+import { connectorCredential } from './paired-credential.mjs';
 
 // Teleproto contains a few direct console calls outside its logger. This standalone
 // process deliberately emits only fixed operational codes via process.stderr.
@@ -24,9 +25,7 @@ try {
   const configPath = process.env.TELEGRAM_CONNECTOR_CONFIG;
   const file = configPath ? JSON.parse(readPrivateFile(resolve(configPath))) : {};
   const config = {
-    server: process.env.TELEGRAM_CONNECTOR_SERVER ?? file.server,
-    workerId: process.env.TELEGRAM_CONNECTOR_WORKER_ID ?? file.workerId,
-    token: process.env.TELEGRAM_CONNECTOR_TOKEN ?? file.token,
+    ...connectorCredential(file, process.env, configPath),
     apiId: Number(process.env.TELEGRAM_API_ID ?? file.apiId),
     apiHash: process.env.TELEGRAM_API_HASH ?? file.apiHash,
     root: resolve(process.env.TELEGRAM_CONNECTOR_STATE_DIR ?? file.stateDirectory ?? join(dirname(fileURLToPath(import.meta.url)), '.runtime')),
@@ -57,7 +56,7 @@ try {
     }
   }
 } catch (error) {
-  const allowed = new Set(['NODE_22_REQUIRED', 'CONNECTOR_ALREADY_LOCKED', 'CONNECTOR_STILL_RUNNING', 'INVALID_LOCK', 'CANNOT_VERIFY_LOCK', 'UNSAFE_LOCAL_FILE', 'UNSAFE_LOCAL_DIRECTORY', 'INVALID_SERVER', 'INVALID_WORKER_TOKEN', 'INVALID_WORKER_ID', 'INVALID_TELEGRAM_CONFIG']);
+  const allowed = new Set(['PAIRED_CREDENTIAL_CONFLICT', 'NODE_22_REQUIRED', 'CONNECTOR_ALREADY_LOCKED', 'CONNECTOR_STILL_RUNNING', 'INVALID_LOCK', 'CANNOT_VERIFY_LOCK', 'UNSAFE_LOCAL_FILE', 'UNSAFE_LOCAL_DIRECTORY', 'INVALID_SERVER', 'INVALID_WORKER_TOKEN', 'INVALID_WORKER_ID', 'INVALID_TELEGRAM_CONFIG']);
   output(allowed.has(error.message) ? error.message : 'CONNECTOR_START_FAILED');
   process.exitCode = 1;
 } finally {
