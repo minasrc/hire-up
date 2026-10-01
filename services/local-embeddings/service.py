@@ -20,10 +20,10 @@ from starlette.middleware.trustedhost import TrustedHostMiddleware
 
 from model_config import (
     DIMENSIONS, INDEX_VERSION, MAX_BODY_BYTES, MAX_INPUTS, MAX_TOKENS,
-    MODEL_ID, MODEL_REVISION,
+    MODEL_ID, MODEL_REVISION, verify_model_assets,
 )
 
-from chunking import CHUNKER_VERSION, chunk_plan
+from chunking import CHUNKER_VERSION, CV_CHUNKER_VERSION, chunk_plan
 from scheduler import PriorityScheduler
 
 ROOT = Path(__file__).resolve().parent
@@ -33,7 +33,7 @@ class EmbeddingRequest(BaseModel):
     model_config = ConfigDict(extra="forbid", strict=True)
     model: Literal[MODEL_ID]
     input: str | list[str]
-    # Explicitly required: documents and queries need different E5 prefixes.
+    # Explicitly required: query scheduling must remain explicit even though the model uses no prefixes.
     input_type: Literal["query", "passage"]
     encoding_format: Literal["float"] = "float"
 
@@ -51,7 +51,7 @@ class EmbeddingRequest(BaseModel):
 class PlanRequest(BaseModel):
     model_config = ConfigDict(extra="forbid", strict=True)
     model: Literal[MODEL_ID]
-    chunker_version: Literal[CHUNKER_VERSION]
+    chunker_version: Literal[CHUNKER_VERSION, CV_CHUNKER_VERSION]
     text: str
 
 
@@ -62,6 +62,7 @@ class Encoder:
 
         torch.set_num_threads(2)
         torch.set_num_interop_threads(1)
+        verify_model_assets(ROOT / ".runtime" / "model")
         self.model = SentenceTransformer(
             str(ROOT / ".runtime" / "model"), device="cpu",
             local_files_only=True, trust_remote_code=False,
@@ -69,26 +70,27 @@ class Encoder:
         )
         if self.model.get_sentence_embedding_dimension() != DIMENSIONS:
             raise RuntimeError("Unexpected embedding dimensions.")
-        self.model.max_seq_length = MAX_TOKENS
+        if self.model.max_seq_length != MAX_TOKENS:
+            raise RuntimeError("Unexpected native model token limit.")
         self.encode(["local startup check"], "query")
 
-    def plan(self, text):
-        return chunk_plan(text, self.model.tokenizer)
+    def plan(self, text, chunker_version=CHUNKER_VERSION):
+        return chunk_plan(text, self.model.tokenizer, chunker_version)
 
     def encode(self, inputs, input_type):
-        prefixed = [f"{input_type}: {value}" for value in inputs]
+        prepared = inputs
         tokens = self.model.tokenizer(
-            prefixed, truncation=False, padding=False, add_special_tokens=True,
+            prepared, truncation=False, padding=False, add_special_tokens=True,
         )["input_ids"]
         too_long = [i for i, ids in enumerate(tokens) if len(ids) > MAX_TOKENS]
         if too_long:
             raise HTTPException(422, {
                 "code": "INPUT_TOO_LONG", "indexes": too_long,
-                "max_tokens_including_prefix": MAX_TOKENS,
+                "max_tokens_including_specials": MAX_TOKENS,
                 "message": "Split long documents before embedding; nothing was truncated.",
             })
         vectors = self.model.encode(
-            prefixed, batch_size=8, normalize_embeddings=True,
+            prepared, batch_size=8, normalize_embeddings=True,
             show_progress_bar=False, convert_to_numpy=True,
         )
         return vectors.tolist(), sum(len(ids) for ids in tokens)
@@ -121,7 +123,7 @@ def create_app(encoder, token):
             "status": "ready", "model": MODEL_ID, "revision": MODEL_REVISION,
             "index_version": INDEX_VERSION, "dimensions": DIMENSIONS,
             "device": "cpu", "max_inputs": MAX_INPUTS, "max_tokens": MAX_TOKENS,
-            "chunker_version": CHUNKER_VERSION, "chunk_tokens": 448, "microbatch_inputs": 8,
+            "chunker_version": CHUNKER_VERSION, "cv_chunker_version": CV_CHUNKER_VERSION, "chunk_tokens": MAX_TOKENS, "microbatch_inputs": 8,
         }
 
     async def read_payload(request, schema, maximum):
@@ -166,7 +168,7 @@ def create_app(encoder, token):
     @app.post("/v1/chunk-plan")
     async def plan(request: Request):
         payload = await read_payload(request, PlanRequest, 1024 * 1024)
-        return await wait_result(request, scheduler.submit(plan_text=payload.text))
+        return await wait_result(request, scheduler.submit(plan_text=payload.text, chunker_version=payload.chunker_version))
 
     @app.post("/v1/embeddings")
     async def embeddings(request: Request):

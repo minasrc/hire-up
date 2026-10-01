@@ -8,7 +8,7 @@ export function createLocalClient({ embeddingUrl, embeddingTokenFile, fetchImpl 
     return requestJson(`${embeddingUrl}${path}`, await readToken(embeddingTokenFile), body, { ...options, fetchImpl, timeoutMs: 60000, maxRequestBytes });
   }
   return {
-    plan: ({ text }, options) => request('/v1/chunk-plan', { model: MODEL, chunker_version: CHUNKER_VERSION, text }, options, 1048576),
+    plan: ({ text, chunkerVersion = CHUNKER_VERSION }, options) => request('/v1/chunk-plan', { model: MODEL, chunker_version: chunkerVersion, text }, options, 1048576),
     async embed({ texts, inputType }, options) {
       const embeddings = [];
       for (let offset = 0; offset < texts.length;) {

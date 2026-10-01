@@ -10,7 +10,8 @@ from urllib.request import Request, urlopen
 ROOT = Path(__file__).resolve().parent
 BASE = os.environ.get("EMBEDDING_ACCEPTANCE_URL", "http://127.0.0.1:8818")
 TOKEN = Path(os.environ.get("EMBEDDING_ACCEPTANCE_TOKEN_FILE", str(ROOT / ".runtime" / "token"))).read_text().strip()
-MODEL = "intfloat/multilingual-e5-small"
+from model_config import MODEL_ID as MODEL
+from chunking import CHUNKER_VERSION
 
 
 def post(path, body):
@@ -23,14 +24,14 @@ def post(path, body):
 
 def main():
     source = ("工程师开发智能合约和分布式系统。Résumé 👩🏽‍💻 é，" * 1000).encode()[:65000].decode("utf8", errors="ignore")
-    body = {"model": MODEL, "chunker_version": "e5-utf8-448-v1", "text": source}
+    body = {"model": MODEL, "chunker_version": CHUNKER_VERSION, "text": source}
     plan, plan_ms = post("/v1/chunk-plan", body)
     raw = source.encode()
     chunks, cursor = [], 0
     for ordinal, chunk in enumerate(plan["chunks"]):
         assert chunk["ordinal"] == ordinal and chunk["start_byte"] == cursor
         piece = raw[cursor:chunk["end_byte"]]
-        assert sha256(piece).hexdigest() == chunk["sha256"] and chunk["token_count"] <= 448
+        assert sha256(piece).hexdigest() == chunk["sha256"] and chunk["token_count"] <= 128
         chunks.append(piece.decode())
         cursor = chunk["end_byte"]
     assert cursor == len(raw) == plan["byte_length"]

@@ -6,7 +6,7 @@ from concurrent.futures import ThreadPoolExecutor
 from fastapi.testclient import TestClient
 
 from model_config import INDEX_VERSION, MAX_BODY_BYTES, MODEL_ID
-from service import create_app
+from service import create_app, Encoder
 
 TOKEN = "synthetic-test-token-" * 3
 HEADERS = {"Authorization": f"Bearer {TOKEN}"}
@@ -14,10 +14,10 @@ BODY = {"model": MODEL_ID, "input": ["Synthetic developer profile"], "input_type
 
 
 class FakeEncoder:
-    def plan(self, text):
+    def plan(self, text, chunker_version=None):
         from chunking import chunk_plan
         from test_chunking import CharacterTokenizer
-        return chunk_plan(text, CharacterTokenizer())
+        return chunk_plan(text, CharacterTokenizer(), chunker_version) if chunker_version else chunk_plan(text, CharacterTokenizer())
 
     def encode(self, inputs, input_type):
         return [[1.0] + [0.0] * 383 for _ in inputs], 8
@@ -98,6 +98,10 @@ class ServiceTests(unittest.TestCase):
         response = self.client.post("/v1/chunk-plan", json={**body, "chunker_version": "secret-wrong"}, headers=HEADERS)
         self.assertEqual(response.status_code, 422)
         self.assertNotIn("secret-wrong", response.text)
+        from chunking import CV_CHUNKER_VERSION
+        response = self.client.post("/v1/chunk-plan", json={**body, "chunker_version": CV_CHUNKER_VERSION}, headers=HEADERS)
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["chunker_version"], CV_CHUNKER_VERSION)
 
     def test_queries_preempt_remaining_passage_batches(self):
         entered, release = threading.Event(), threading.Event()
@@ -120,6 +124,51 @@ class ServiceTests(unittest.TestCase):
             self.assertEqual(second.result(timeout=5).status_code, 200)
         self.assertEqual(calls, [("passage", 8), ("query", 1), ("passage", 8), ("passage", 8)])
 
+
+    def test_old_model_assets_cannot_advertise_new_namespace(self):
+        from pathlib import Path
+        from tempfile import TemporaryDirectory
+        from model_config import verify_model_assets, MODEL_REVISION
+        files = ["config.json", "model.safetensors", "modules.json", "sentence_bert_config.json",
+                 "1_Pooling/config.json", "tokenizer.json", "tokenizer_config.json"]
+        with TemporaryDirectory() as directory:
+            root = Path(directory)
+            for name in files:
+                artifact = root / name; artifact.parent.mkdir(parents=True, exist_ok=True)
+                artifact.write_text("synthetic artifact")
+                metadata = root / ".cache" / "huggingface" / "download" / (name + ".metadata")
+                metadata.parent.mkdir(parents=True, exist_ok=True)
+                metadata.write_text(MODEL_REVISION + "\nsynthetic checksum\n")
+            verify_model_assets(root)
+            (root / ".cache/huggingface/download/model.safetensors.metadata").write_text("old-model-revision\n")
+            with self.assertRaises(RuntimeError): verify_model_assets(root)
+
+    def test_model_inputs_have_no_prefix_and_never_truncate(self):
+        from types import SimpleNamespace
+        calls = []
+        class Model:
+            def tokenizer(self, inputs, **kwargs):
+                self.assertions(inputs, kwargs)
+                return {"input_ids": [[0] * (len(value) + 2) for value in inputs]}
+            def assertions(self, inputs, kwargs):
+                calls.append((inputs, kwargs))
+            def encode(self, inputs, **kwargs):
+                calls.append((inputs, kwargs))
+                return SimpleNamespace(tolist=lambda: [[1.0] + [0.0] * 383 for _ in inputs])
+        encoder = object.__new__(Encoder)
+        encoder.model = Model()
+        for kind in ["query", "passage"]:
+            values = ["Exact résumé text"]
+            self.assertEqual(len(encoder.encode(values, kind)[0]), 1)
+            self.assertEqual(calls[-2][0], values)
+            self.assertFalse(calls[-2][1]["truncation"])
+            self.assertEqual(calls[-1][0], values)
+        count = len(calls)
+        with self.assertRaises(Exception) as error:
+            encoder.encode(["x" * 127], "query")
+        self.assertEqual(error.exception.status_code, 422)
+        self.assertEqual(error.exception.detail["max_tokens_including_specials"], 128)
+        self.assertEqual(len(calls), count + 1, "Over-limit input must not reach inference")
 
 if __name__ == "__main__":
     unittest.main()

@@ -2,6 +2,7 @@
 
 import json
 import math
+import os
 import statistics
 import time
 from pathlib import Path
@@ -16,7 +17,7 @@ TOKEN = (ROOT / ".runtime" / "token").read_text().strip()
 
 def embed(texts, kind):
     body = json.dumps({"model": MODEL_ID, "input": texts, "input_type": kind}).encode()
-    request = Request("http://127.0.0.1:8817/v1/embeddings", data=body, headers={
+    request = Request(f"http://127.0.0.1:{int(os.environ.get('LOCAL_EMBEDDINGS_PORT', '8817'))}/v1/embeddings", data=body, headers={
         "Authorization": f"Bearer {TOKEN}", "Content-Type": "application/json",
     })
     started = time.perf_counter()

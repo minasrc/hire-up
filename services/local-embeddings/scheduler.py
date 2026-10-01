@@ -17,7 +17,7 @@ class PriorityScheduler:
         self.thread = Thread(target=self._run, name="local-embedding-model", daemon=True)
         self.thread.start()
 
-    def submit(self, inputs=None, input_type="passage", plan_text=None):
+    def submit(self, inputs=None, input_type="passage", plan_text=None, chunker_version=None):
         count = len(inputs) if inputs is not None else 1
         with self.condition:
             if self.closed:
@@ -26,7 +26,7 @@ class PriorityScheduler:
                 raise HTTPException(429, "Embedding queue full; retry later.", headers={"Retry-After": "1"})
             future = Future()
             item = {"future": future, "inputs": inputs, "kind": input_type, "plan": plan_text,
-                    "offset": 0, "vectors": [], "tokens": 0, "count": count}
+                    "chunker_version": chunker_version, "offset": 0, "vectors": [], "tokens": 0, "count": count}
             self.requests += 1
             self.inputs += count
             (self.queries if input_type == "query" else self.passages).append(item)
@@ -56,7 +56,7 @@ class PriorityScheduler:
             try:
                 if not future.cancelled():
                     if item["plan"] is not None:
-                        result = self.encoder.plan(item["plan"])
+                        result = self.encoder.plan(item["plan"], item["chunker_version"]) if item["chunker_version"] is not None else self.encoder.plan(item["plan"])
                         done = True
                     else:
                         batch = item["inputs"][item["offset"]:item["offset"] + 8]

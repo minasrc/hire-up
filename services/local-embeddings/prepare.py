@@ -30,7 +30,7 @@ def main():
         local_dir=RUNTIME / "model",
         allow_patterns=[
             "config.json", "model.safetensors", "modules.json",
-            "sentence_bert_config.json", "1_Pooling/config.json",
+            "sentence_bert_config.json", "config_sentence_transformers.json", "1_Pooling/config.json",
             "sentencepiece.bpe.model", "special_tokens_map.json",
             "tokenizer.json", "tokenizer_config.json",
         ],
