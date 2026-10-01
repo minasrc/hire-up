@@ -287,3 +287,28 @@ test('retired E5 jobs never reach inference and old saved receipts are fenced be
   assert.equal((await upgraded.tick()).status, 'stale');
   assert.equal((await upgraded.tick()).status, 'completed');
 });
+
+test('source token and chunk budgets are terminal source errors while query overflow stays actionable', async () => {
+  for (const kind of ['plan', 'embed', 'query']) {
+    for (const inputCode of ['INPUT_TOO_LONG', 'SOURCE_TOO_LARGE']) {
+      const current = kind === 'query' ? job(kind) : cvJob(kind);
+      const fail = async () => { throw new SemanticWorkerError(inputCode, 422); };
+      const { worker, calls } = setup(current, { plan: fail, embed: fail });
+      assert.equal((await worker.tick()).status, 'failed');
+      assert.equal(calls[1].action, 'fail');
+      assert.equal(calls[1].body.code, kind === 'query' ? inputCode : 'SOURCE_TOO_LARGE');
+    }
+  }
+});
+
+test('transport preserves only allowlisted source size error codes without provider detail', async () => {
+  for (const [status, providerCode, expected] of [
+    [422, 'SOURCE_TOO_LARGE', 'SOURCE_TOO_LARGE'],
+    [422, 'private source text', 'HTTP_UNAVAILABLE'],
+    [503, 'SOURCE_TOO_LARGE', 'HTTP_UNAVAILABLE'],
+  ]) {
+    await assert.rejects(requestJson('http://127.0.0.1', 'token', {}, {
+      fetchImpl: async () => new Response(JSON.stringify({ detail: { code: providerCode, text: 'private source text' } }), { status }),
+    }), { code: expected, message: expected, status });
+  }
+});

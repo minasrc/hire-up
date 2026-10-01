@@ -17,7 +17,7 @@ export async function requestJson(url, token, body, { fetchImpl = fetch, signal,
     } catch (error) { if (error instanceof SemanticWorkerError) throw error; throw new SemanticWorkerError(response.ok ? 'INVALID_RESULT' : 'HTTP_UNAVAILABLE', response.ok ? 0 : response.status); }
     finally { await reader.cancel().catch(() => {}); reader.releaseLock(); }
     if (!response.ok || response.redirected) {
-      const code = response.status === 422 && data?.detail?.code === 'INPUT_TOO_LONG' ? 'INPUT_TOO_LONG' : 'HTTP_UNAVAILABLE';
+      const code = response.status === 422 && ['INPUT_TOO_LONG', 'SOURCE_TOO_LARGE'].includes(data?.detail?.code) ? data.detail.code : 'HTTP_UNAVAILABLE';
       throw new SemanticWorkerError(code, response.status);
     }
     return data;

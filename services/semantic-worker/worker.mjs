@@ -119,7 +119,8 @@ export function createSemanticWorker({ host, embed, plan, vault, now = Date.now 
         } catch (error) {
           if (signal?.aborted || error.code === 'CANCELLED') return { status: 'retry' };
           if (error.code === 'LEASE_EXPIRED' || deadline.aborted) return { status: 'stale' };
-          const code = ['INPUT_TOO_LONG', 'INVALID_RESULT'].includes(error.code) ? error.code : 'EMBEDDING_UNAVAILABLE';
+          let code = ['INPUT_TOO_LONG', 'SOURCE_TOO_LARGE', 'INVALID_RESULT'].includes(error.code) ? error.code : 'EMBEDDING_UNAVAILABLE';
+          if (code === 'INPUT_TOO_LONG' && job.kind !== 'query') code = 'SOURCE_TOO_LARGE';
           receipt = { action: 'fail', body: { jobId: job.id, leaseToken: job.leaseToken, kind: job.kind, code, retryAfterSeconds: 5 } };
         }
         if (job.projectionVersion === CV_PROJECTION_VERSION) receipt.projectionVersion = CV_PROJECTION_VERSION;
