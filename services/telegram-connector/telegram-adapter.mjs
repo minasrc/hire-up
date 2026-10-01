@@ -1,3 +1,5 @@
+import { createHistoryAdapter } from './history-adapter.mjs';
+
 // Loaded only by the Mac CLI, never imported into the hosted application bundle.
 export async function createTelegramFactory({ apiId, apiHash }, runtime) {
   const [{ TelegramClient, Api }, { StringSession }, { computeCheck }, { Logger }] = runtime ?? await Promise.all([
@@ -7,6 +9,14 @@ export async function createTelegramFactory({ apiId, apiHash }, runtime) {
   return async (session = '', checkpointSession = () => {}) => {
     const client = new TelegramClient(new StringSession(session), apiId, apiHash, { connectionRetries: 1, requestRetries: 1, floodSleepThreshold: 0, autoReconnect: false, baseLogger: new Logger('none') });
     client._errorHandler = async () => {};
+    const switchDC = client._switchDC.bind(client);
+    client._switchDC = async (dcId) => {
+      const result = await switchDC(dcId);
+      // Both explicit QR migration and the SDK's internal RPC migration must
+      // persist the new auth key before a subsequent request can authorize it.
+      await checkpointSession(client.session.save());
+      return result;
+    };
     let refresh = true; let expiresAt = 0; let passwordNeeded = false;
     const handler = (update) => { if (update instanceof Api.UpdateLoginToken) refresh = true; };
     client.addEventHandler(handler);
@@ -19,14 +29,12 @@ export async function createTelegramFactory({ apiId, apiHash }, runtime) {
       if (result instanceof Api.auth.LoginTokenSuccess && result.authorization instanceof Api.auth.Authorization) return { status: 'connected', profile: profile(result.authorization.user) };
       if (result instanceof Api.auth.LoginTokenMigrateTo && depth < 2) {
         await client._switchDC(result.dcId);
-        // Import can authorize remotely even when its response is lost. Save the
-        // migrated auth key first so recovery can still revoke that session.
-        await checkpointSession(client.session.save());
         return tokenResult(await client.invoke(new Api.auth.ImportLoginToken({ token: result.token })), depth + 1);
       }
       throw new Error('AUTH_FAILED');
     }
     return {
+      history: createHistoryAdapter({ client, Api }),
       session: () => client.session.save(),
       close: async () => { client.removeEventHandler(handler); await client.destroy(); },
       profile: async () => {

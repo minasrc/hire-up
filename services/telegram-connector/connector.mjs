@@ -5,11 +5,12 @@ function validateTask(task, now) {
   if (!task || !uuid.test(task.id) || !uuid.test(task.leaseToken) || !uuid.test(task.challengeId) || !Number.isSafeInteger(task.generation) || task.generation < 1 || !states.has(task.status) || !Number.isFinite(Date.parse(task.leaseExpiresAt)) || Date.parse(task.leaseExpiresAt) <= now || Date.parse(task.leaseExpiresAt) > now + 125000) throw new Error('INVALID_HOST_RESPONSE');
   return task;
 }
-export function createConnector({ host, vault, createTelegram, now = Date.now, operationTimeoutMs = 15000 }) {
+export function createConnector({ host, vault, createTelegram, now = Date.now, operationTimeoutMs = 15000, onConnectedTick }) {
   let task = null; let client = null; let saved = null; let epoch = 0; let stopped = false;
   let nextHeartbeat = 0; let nextClaim = 0; let nextKeepalive = 0; let pendingReport = null; let busy = false;
+  let connectedProfile = null; let clientAbort = new AbortController();
   let seenCiphertext = null; let nextLogout = 0; let logoutFailures = 0;
-  const close = async () => { const previous = client; client = null; if (previous) await previous.close().catch(() => {}); };
+  const close = async () => { clientAbort.abort(); connectedProfile = null; const previous = client; client = null; if (previous) await previous.close().catch(() => {}); };
   const active = (version) => !stopped && version === epoch && task && Date.parse(task.leaseExpiresAt) > now();
   async function operation(fn, version) {
     let timer;
@@ -24,6 +25,7 @@ export function createConnector({ host, vault, createTelegram, now = Date.now, o
     await host('update', { connectionId: task.id, generation: task.generation, leaseToken: task.leaseToken, ...fields, ...(['qr_pending', 'awaiting_password'].includes(fields.status) ? { challengeId: task.challengeId } : {}) });
     if (!active(version)) throw new Error('STALE_TASK');
     task = { ...task, status: fields.status };
+    if (fields.status === 'connected') connectedProfile = fields.profile;
     pendingReport = null;
   }
   function persist(state) {
@@ -38,6 +40,7 @@ export function createConnector({ host, vault, createTelegram, now = Date.now, o
       vault.save(task.id, saved);
     }).then(async (value) => { if (!active(version)) { await value.close().catch(() => {}); throw new Error('STALE_TASK'); } return value; });
     client = await operation(() => created, version);
+    clientAbort = new AbortController();
   }
   async function work() {
     const version = epoch;
@@ -76,6 +79,7 @@ export function createConnector({ host, vault, createTelegram, now = Date.now, o
         }
         await report({ status: 'disconnected' }, version);
         vault.remove(task.id);
+        vault.removeHistory?.(task.id);
         saved = null; logoutFailures = 0;
       } catch (error) {
         if (error.message === 'STALE_TASK' || error.status) throw error;
@@ -115,7 +119,8 @@ export function createConnector({ host, vault, createTelegram, now = Date.now, o
       persist('pending');
     }
     if (task.status === 'connected') {
-      if (now() >= nextKeepalive) { await operation(() => client.profile(), version); nextKeepalive = now() + 60000; }
+      if (now() >= nextKeepalive) { connectedProfile = await operation(() => client.profile(), version); nextKeepalive = now() + 60000; }
+      if (onConnectedTick && connectedProfile) await onConnectedTick({ connectionId: task.id, generation: task.generation, connectionLeaseToken: task.leaseToken, connectionLeaseExpiresAt: task.leaseExpiresAt, accountUserId: connectedProfile.telegramUserId, telegram: client.history, signal: clientAbort.signal, isActive: () => active(version) && task.status === 'connected' });
       return;
     }
     if (task.status === 'awaiting_password') {

@@ -14,7 +14,7 @@ function fakeRuntime() {
   class LogOut {}
   class GetPassword {}
   class UpdateLoginToken {}
-  const Api = { auth: { Authorization, LoginToken, LoginTokenMigrateTo, LoginTokenSuccess, ExportLoginToken, ImportLoginToken, CheckPassword, LogOut }, account: { GetPassword }, UpdateLoginToken };
+  const Api = { messages: { GetHistory: ObjectValue }, InputPeerChat: ObjectValue, auth: { Authorization, LoginToken, LoginTokenMigrateTo, LoginTokenSuccess, ExportLoginToken, ImportLoginToken, CheckPassword, LogOut }, account: { GetPassword }, UpdateLoginToken };
   const queue = []; const calls = []; const clients = [];
   class TelegramClient {
     constructor(session, apiId, apiHash, options) { this.session = session; this.options = options; clients.push(this); }
@@ -22,7 +22,7 @@ function fakeRuntime() {
     async destroy() { this.destroyed = true; }
     addEventHandler(handler) { this.handler = handler; }
     removeEventHandler() { this.handler = null; }
-    async _switchDC(id) { this.dcId = id; }
+    async _switchDC(id) { this.dcId = id; if (this.migrationSession) this.session.value = this.migrationSession; }
     async getMe() { return { id: 123, firstName: 'Synthetic', lastName: 'Recruiter', username: 'example' }; }
     async invoke(request) { calls.push(request); const result = queue.shift(); if (result instanceof Error) throw result; return result; }
   }
@@ -71,10 +71,25 @@ test('DC migration checkpoints the new auth key before importing an authorizatio
   const f = fakeRuntime(); const checkpoints = [];
   const create = await createTelegramFactory({ apiId: 123, apiHash: 'synthetic' }, f.runtime);
   const client = await create('', async (session) => { checkpoints.push({ session, calls: f.calls.length }); });
-  f.clients[0]._switchDC = async () => { f.clients[0].session.value = 'new-dc-session'; };
+  f.clients[0].migrationSession = 'new-dc-session';
   f.queue.push(new f.Api.auth.LoginTokenMigrateTo({ dcId: 4, token: 'migration-token' }), new Error('lost authorized response'));
   await assert.rejects(client.poll(), /^Error: TELEGRAM_UNAVAILABLE$/);
   assert.deepEqual(checkpoints, [{ session: 'new-dc-session', calls: 1 }]);
   assert.ok(f.calls[1] instanceof f.Api.auth.ImportLoginToken);
+  await client.close();
+});
+
+test('SDK-internal migration checkpoints a new key before a failing history retry', async () => {
+  const f = fakeRuntime(); const checkpoints = [];
+  const create = await createTelegramFactory({ apiId: 123, apiHash: 'synthetic' }, f.runtime);
+  const client = await create('', async (session) => checkpoints.push(session));
+  f.clients[0].migrationSession = 'new-dc-session';
+  f.clients[0].invoke = async () => {
+    await f.clients[0]._switchDC(4);
+    assert.deepEqual(checkpoints, ['new-dc-session']);
+    throw new Error('lost migrated history response');
+  };
+  await assert.rejects(client.history.history({ peer: { kind: 'chat', id: '123' }, cursor: { beforeMessageId: null, upperMessageId: null }, limit: 1, accountUserId: '999', readPeer: () => null, cachePeer: () => {} }), /TELEGRAM_UNAVAILABLE/);
+  assert.deepEqual(checkpoints, ['new-dc-session']);
   await client.close();
 });

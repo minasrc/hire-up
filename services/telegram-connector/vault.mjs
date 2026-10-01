@@ -1,5 +1,5 @@
 import { createHash, generateKeyPairSync, randomBytes, createCipheriv, createDecipheriv, privateDecrypt, constants } from 'node:crypto';
-import { mkdirSync, readFileSync, writeFileSync, renameSync, unlinkSync, existsSync, lstatSync, chmodSync, openSync, closeSync } from 'node:fs';
+import { mkdirSync, readFileSync, writeFileSync, renameSync, unlinkSync, existsSync, lstatSync, chmodSync, openSync, closeSync, rmSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 
 const idPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -8,10 +8,10 @@ export function privateDirectory(path) {
   if (!lstatSync(path).isDirectory() || lstatSync(path).isSymbolicLink()) throw new Error('UNSAFE_LOCAL_DIRECTORY');
   chmodSync(path, 0o700);
 }
-export function readPrivateFile(path) {
+export function readPrivateFile(path, maxBytes = 65536) {
   const stat = lstatSync(path);
   if (!stat.isFile() || stat.isSymbolicLink() || (stat.mode & 0o077) !== 0 || stat.uid !== process.getuid()) throw new Error('UNSAFE_LOCAL_FILE');
-  if (stat.size > 65536) throw new Error('LOCAL_FILE_TOO_LARGE');
+  if (stat.size > maxBytes) throw new Error('LOCAL_FILE_TOO_LARGE');
   return readFileSync(path, 'utf8');
 }
 function atomicWrite(path, value) {
@@ -56,8 +56,40 @@ export function createVault({ root, server, workerId }) {
   const identity = JSON.parse(readPrivateFile(identityPath));
   const encryptionKey = Buffer.from(identity.encryptionKey, 'base64');
   const file = (id) => { if (!idPattern.test(id)) throw new Error('INVALID_CONNECTION_ID'); return join(directory, `${id}.json`); };
+  const historyFile = (connectionId, accountId, key, create = false) => {
+    if (!idPattern.test(connectionId) || !/^[1-9][0-9]{0,29}$/.test(accountId) || !/^[a-zA-Z0-9:_-]{1,200}$/.test(key)) throw new Error('INVALID_HISTORY_SCOPE');
+    const connectionDirectory = join(directory, 'history', connectionId);
+    const accountDirectory = join(connectionDirectory, createHash('sha256').update(accountId).digest('hex'));
+    if (create) { privateDirectory(join(directory, 'history')); privateDirectory(connectionDirectory); privateDirectory(accountDirectory); }
+    return join(accountDirectory, `${createHash('sha256').update(key).digest('hex')}.json`);
+  };
   return {
     publicKeySpki: identity.publicKeySpki,
+    saveHistory(connectionId, accountId, key, record) {
+      const json = JSON.stringify(record);
+      if (Buffer.byteLength(json) > 524288) throw new Error('HISTORY_CACHE_TOO_LARGE');
+      const iv = randomBytes(12);
+      const cipher = createCipheriv('aes-256-gcm', encryptionKey, iv);
+      cipher.setAAD(Buffer.from(`${scope}:history:${connectionId}:${accountId}:${key}`));
+      const ciphertext = Buffer.concat([cipher.update(json, 'utf8'), cipher.final()]);
+      atomicWrite(historyFile(connectionId, accountId, key, true), JSON.stringify({ iv: iv.toString('base64'), tag: cipher.getAuthTag().toString('base64'), ciphertext: ciphertext.toString('base64') }));
+    },
+    loadHistory(connectionId, accountId, key) {
+      const path = historyFile(connectionId, accountId, key);
+      if (!existsSync(path)) return null;
+      const record = JSON.parse(readPrivateFile(path, 750000));
+      const decipher = createDecipheriv('aes-256-gcm', encryptionKey, Buffer.from(record.iv, 'base64'));
+      decipher.setAAD(Buffer.from(`${scope}:history:${connectionId}:${accountId}:${key}`));
+      decipher.setAuthTag(Buffer.from(record.tag, 'base64'));
+      return JSON.parse(Buffer.concat([decipher.update(Buffer.from(record.ciphertext, 'base64')), decipher.final()]).toString('utf8'));
+    },
+    removeHistoryRecord(connectionId, accountId, key) {
+      try { unlinkSync(historyFile(connectionId, accountId, key)); } catch (error) { if (error.code !== 'ENOENT') throw error; }
+    },
+    removeHistory(connectionId) {
+      if (!idPattern.test(connectionId)) throw new Error('INVALID_CONNECTION_ID');
+      rmSync(join(directory, 'history', connectionId), { recursive: true, force: true });
+    },
     save(id, record) {
       const iv = randomBytes(12);
       const cipher = createCipheriv('aes-256-gcm', encryptionKey, iv);

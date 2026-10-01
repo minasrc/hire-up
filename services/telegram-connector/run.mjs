@@ -5,6 +5,7 @@ import { setTimeout as delay } from 'node:timers/promises';
 import { acquireLock, unlockStoppedProcess, readPrivateFile, createVault } from './vault.mjs';
 import { createHostClient } from './http.mjs';
 import { createConnector } from './connector.mjs';
+import { createHistoryWorker } from './history-worker.mjs';
 
 // Teleproto contains a few direct console calls outside its logger. This standalone
 // process deliberately emits only fixed operational codes via process.stderr.
@@ -35,7 +36,8 @@ try {
     release = acquireLock(config.root);
     const vault = createVault(config);
     const { createTelegramFactory } = await import('./telegram-adapter.mjs');
-    connector = createConnector({ host, vault, createTelegram: await createTelegramFactory(config) });
+    const history = createHistoryWorker({ host: createHostClient({ ...config, service: 'history' }), vault });
+    connector = createConnector({ host, vault, createTelegram: await createTelegramFactory(config), onConnectedTick: (context) => history.tick(context) });
     process.once('SIGINT', stop); process.once('SIGTERM', stop);
     watchdog = setInterval(() => { void connector.checkLease().catch(() => output('LEASE_CLOSED')); }, 1000);
     let failures = 0;

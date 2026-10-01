@@ -2,8 +2,9 @@
 
 This separately installed process connects Agora's private Telegram connection
 screen to Teleproto. It supports QR login, Telegram's optional two-step password,
-restart recovery, connection status and acknowledged logout. It does **not**
-import chats or messages. The hosted application never imports this package.
+restart recovery, connection status, acknowledged logout, private chat discovery
+and resumable full available history for selected chats. This stage imports text
+and attachment metadata; it does not download CV/media bytes or extract drafts. The hosted application never imports this package.
 
 The Mac sends outbound HTTPS requests to Agora and outbound connections to
 Telegram. It opens no listener or tunnel and needs no database/storage password.
@@ -100,3 +101,43 @@ required QR/SRP/session APIs were inspected against the installed package and
 covered with injected adapter tests. The separate lockfile pins transitive code. A real
 account smoke test still requires operator-supplied API credentials, worker token
 and a deliberate QR scan; no account was connected by these tests.
+
+
+## Private history imports
+
+After connecting, use Agora's chat screen to discover both regular and archived
+chats, then select the conversations to import. A reconnect to the same Telegram
+account preserves private history; Resume explicitly binds an interrupted import
+to the new connection generation. A different account has separate selection,
+messages and cursors. Migrated basic groups remain discoverable so their older
+history is not silently lost; select both legacy and current conversations when
+both contain relevant history.
+
+Each connected tick performs at most one Telegram read, with a 10-second native
+RPC deadline and cancellation signal. The connector renews its control lease and
+heartbeat between pages. Dialogs and history are read in bounded pages of at most
+100 entries; request bodies have a 256 KiB cap and larger pages are retried with a
+smaller page size. One oversized message pauses its chat instead of truncating or
+skipping it. An empty raw page confirms completion. New messages after the initial
+snapshot and edits to previously imported messages need a later incremental-sync
+feature; deleted/inaccessible Telegram content cannot be recovered by this import.
+
+The server schedules selected chats fairly, enforces private storage quotas, and
+shows explicit pauses for quota, peer access and large-message problems. Flood
+waits become server-side account cooldowns; the Mac never sleeps while holding a
+job lease. No requests send messages, join chats, download attachments, or mark
+conversations as read.
+
+Access hashes stay in encrypted, account-scoped peer-cache files. Usernames are
+only metadata; they are never used to resolve a hosted job to a different person.
+Only necessary chat locators are cached, not every message author's access hash.
+If the local peer cache is missing, discover chats again and Resume the paused
+import. Pending completed pages are encrypted before posting to the server and
+retained until an acknowledgement, allowing exact retries after a network outage
+or process restart. Successful disconnect removes this local history cache.
+
+History checks use synthetic Telegram responses and disposable local caches:
+
+```sh
+node --test tests/unit/telegram-history-runtime.test.js tests/unit/telegram-connector*.test.js
+```
