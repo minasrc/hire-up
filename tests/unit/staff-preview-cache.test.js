@@ -95,6 +95,45 @@ test('an old authorization error cannot clear a newer authorized record', async 
     cache.clear();
     await cache.load('candidate:1', async () => 'fresh');
     request.reject(Object.assign(new Error('Old denial'), { status: 401 }));
-    await assert.rejects(pending, /Old denial/);
+    await assert.rejects(pending, { name: 'AbortError' });
     assert.equal(cache.peek('candidate:1'), 'fresh');
+});
+
+
+test('a record denial evicts cached data without aborting another preview authorization check', async (t) => {
+    const cache = setup(t);
+    await cache.load('candidate:cached', async () => 'cached');
+    const first = deferred();
+    const second = deferred();
+    let secondSignal;
+    const firstLoad = cache.load('candidate:denied', () => first.promise);
+    const secondLoad = cache.load('job:current', (signal) => {
+        secondSignal = signal;
+        return second.promise;
+    });
+    await Promise.resolve();
+    first.reject(Object.assign(new Error('Record denied'), { status: 403 }));
+    await assert.rejects(firstLoad, /Record denied/);
+    assert.equal(cache.peek('candidate:cached'), undefined);
+    assert.equal(secondSignal.aborted, false);
+    second.resolve('authorized current preview');
+    assert.equal(await secondLoad, 'authorized current preview');
+    assert.equal(cache.peek('job:current'), 'authorized current preview');
+});
+
+test('session loss still aborts unrelated preview reads', async (t) => {
+    const cache = setup(t);
+    const other = deferred();
+    let otherSignal;
+    const pending = cache.load('job:other', (signal) => {
+        otherSignal = signal;
+        return other.promise;
+    });
+    await Promise.resolve();
+    await assert.rejects(cache.load('candidate:expired', async () => {
+        throw Object.assign(new Error('Session expired'), { status: 401 });
+    }), /Session expired/);
+    assert.equal(otherSignal.aborted, true);
+    other.resolve('stale');
+    await assert.rejects(pending, { name: 'AbortError' });
 });

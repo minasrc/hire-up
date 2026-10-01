@@ -45,10 +45,23 @@ export function createStaffPreviewCache({ ttl = 15_000, limit = 5 } = {}) {
                     entry.timer = setTimeout(() => remove(key), ttl);
                     return value;
                 }).catch((error) => {
-                    // A stale failure must not invalidate a later authorized read.
-                    if (entries.get(key) === entry) {
-                        if ([401, 403, 428].includes(error?.status)) clear();
-                        else remove(key);
+                    // A response from an invalidated session/request must not
+                    // report auth loss against a newer authorized preview.
+                    if (entries.get(key) !== entry || entry.controller.signal.aborted) {
+                        throw new DOMException('Preview request superseded', 'AbortError');
+                    }
+                    if ([401, 428].includes(error?.status)) {
+                        clear();
+                    } else {
+                        remove(key);
+                        if (error?.status === 403) {
+                            // A record denial can reflect narrower permissions.
+                            // Drop cached data but let other pending reads finish
+                            // their own authorization checks.
+                            for (const [cachedKey, cached] of entries) {
+                                if (cached.value !== undefined) remove(cachedKey);
+                            }
+                        }
                     }
                     throw error;
                 });

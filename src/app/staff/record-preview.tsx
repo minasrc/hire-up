@@ -275,11 +275,6 @@ export function RecordPreview({ children }: { children: ReactNode }) {
                           ? 'Your session expired. Sign in again.'
                           : 'This record could not be loaded.',
                 ), { status: response.status });
-                if ([401, 403, 428].includes(response.status)) {
-                    cache.clear();
-                    setLoaded(null);
-                    setError(failure.message);
-                }
                 throw failure;
             }
             const payload = await response.json();
@@ -289,7 +284,11 @@ export function RecordPreview({ children }: { children: ReactNode }) {
             if (current && cache.peek(selectionKey) === value) {
                 setLoaded({ cache, key: selectionKey, value });
             }
-        }).catch((reason: Error) => {
+        }).catch((reason: Error & { status?: number }) => {
+            if ([401, 428].includes(reason.status)) {
+                window.dispatchEvent(new Event('staff-session-invalidated'));
+                return;
+            }
             if (current && reason.name !== 'AbortError') {
                 setLoaded(null);
                 setError(reason.message);
