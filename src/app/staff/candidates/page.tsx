@@ -80,6 +80,7 @@ export default async function StaffCandidatesPage() {
             ) : (
                 <CandidatesBrowser
                     candidates={candidates}
+                    semanticSearchEnabled={process.env.TELEGRAM_INTAKE_ENABLED === '1'}
                     capped={candidates.length >= LIST_LIMIT}
                     canReviewDuplicates={profileOptions?.canReviewDuplicates === true}
                     profileOptions={profileOptions}

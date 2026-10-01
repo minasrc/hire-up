@@ -501,7 +501,9 @@ export function StaffShell({
                                             aria-current="page"
                                             className="truncate font-medium text-foreground"
                                         >
-                                            {section === 'telegram-intake'
+                                            {section === 'candidates' && detail[detail.length - 1] === 'search'
+                                                ? 'Search by meaning'
+                                                : section === 'telegram-intake'
                                                 ? TELEGRAM_PAGE_LABELS[detail[detail.length - 1]] ?? 'Details'
                                                 : detail[detail.length - 1] === 'new'
                                                 ? `New ${sectionLabel.slice(0, -1)}`

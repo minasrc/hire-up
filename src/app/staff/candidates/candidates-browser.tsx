@@ -44,12 +44,14 @@ export function CandidatesBrowser({
     canReviewDuplicates = false,
     profileOptions = null,
     profileUnavailable = false,
+    semanticSearchEnabled = false,
 }: {
     candidates: CandidateRow[];
     capped?: boolean;
     canReviewDuplicates?: boolean;
     profileOptions?: CandidateProfileOptions | null;
     profileUnavailable?: boolean;
+    semanticSearchEnabled?: boolean;
 }) {
     const router = useRouter();
     const searchParams = useSearchParams();
@@ -82,7 +84,7 @@ export function CandidatesBrowser({
 
             <div className="flex flex-wrap items-end gap-3 rounded-lg border border-border bg-card p-4">
                 <div className="flex flex-1 flex-col gap-1.5">
-                    <Label htmlFor="candidate-search">Search</Label>
+                    <Label htmlFor="candidate-search">Name/email lookup</Label>
                     <div className="relative">
                         <Search
                             className="absolute top-1/2 left-3 h-4 w-4 -translate-y-1/2 text-muted-foreground"
@@ -103,6 +105,7 @@ export function CandidatesBrowser({
                         Clear
                     </Button>
                 ) : null}
+                {semanticSearchEnabled && profileOptions?.canWrite === true ? <><Button asChild variant="outline"><Link href="/staff/telegram-intake">Telegram intake</Link></Button><Button asChild variant="outline"><Link href="/staff/candidates/search">Search by meaning</Link></Button></> : null}
                 {canReviewDuplicates ? (
                     <Button asChild variant="outline">
                         <Link href="/staff/candidates/duplicates">Review matches</Link>
