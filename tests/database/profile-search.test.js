@@ -12,7 +12,7 @@ import { withStaffTransaction } from '../../src/lib/staff-authorization.js';
 import { createTelegramDraft, updateTelegramDraft, decideTelegramDraft } from '../../src/lib/telegram-intake-operations.js';
 import { profileSearchAction, profileSearchStatus, profileSearchWorkerOperation } from '../../src/lib/profile-search-operations.js';
 const dir = fileURLToPath(new URL('../../supabase/migrations/', import.meta.url));
-const migrations = readdirSync(dir).filter(f => f >= '20260922090000_foundation_roles.sql' && f <= '20261002180000_profile_search.sql' && f.endsWith('.sql')).sort();
+const migrations = readdirSync(dir).filter(f => f >= '20260922090000_foundation_roles.sql' && f <= '20261002210000_cv_search.sql' && f.endsWith('.sql')).sort();
 const identity = subject => ({ provider: 'google', issuer: 'https://accounts.google.com', subject });
 const sha = s => createHash('sha256').update(s).digest('hex');
 const vector = Array.from({ length: 384 }, (_, i) => i === 0 ? 1 : 0);
@@ -31,7 +31,7 @@ test('profile search current authorization, complete chunks and durable query ra
     const owner = identity(CJ_SUBJECTS.ADMIN); const other = identity(CJ_SUBJECTS.RECRUITER);
     const staff = (who, sql, args = []) => withStaffTransaction(pool, who, ORG_B, ['candidates.read', 'candidates.write'], async ({ client }) => (await client.query(sql, args)).rows[0]?.result);
     const token = randomBytes(48).toString('base64url'); await staff(owner, 'select app.telegram_register_worker_v1($1,$2) as result', ['Semantic worker', token]);
-    const call = (a, b = {}) => profileSearchWorkerOperation(workerPool, token, a, b);
+    const call = (a, b = {}) => profileSearchWorkerOperation(workerPool, token, a, a === 'claim' ? { capabilities: ['minilm-v1'] } : b);
     const complete = j => ({ jobId: j.id, leaseToken: j.leaseToken, kind: j.kind, indexVersion: j.indexVersion, projectionVersion: j.projectionVersion, chunkerVersion: j.chunkerVersion });
     const plan = j => {
         const b = Buffer.from(j.source.text); const text = j.source.text; const midpoint = Math.floor([...text].length / 2); const split = Buffer.byteLength([...text].slice(0, midpoint).join(''));

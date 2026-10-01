@@ -4,12 +4,12 @@ import { ClientJobContractError } from './client-job-contracts.js';
 import { profileSearchScope, profileSearchStaffInput, profileSearchWorkerInput, profileSearchCursor, validateProfileManifest } from './profile-search-contracts.js';
 const staff = (pool, identity, org, fn) => withStaffTransaction(pool, identity, org, ['candidates.read', 'candidates.write'], fn);
 const result = async (client, sql, args) => (await client.query(sql, args)).rows[0].result;
-export function profileSearchStatus(pool, identity, org, { scope = 'approved', readyOnly = false, queryId = null, after = null } = {}) {
-    profileSearchScope(scope); if (typeof readyOnly !== 'boolean') throw new ClientJobContractError({ readyOnly: 'Choose a valid filter.' });
+export function profileSearchStatus(pool, identity, org, { scope = 'approved', readyOnly = false, includeCv = false, queryId = null, after = null } = {}) {
+    profileSearchScope(scope); if (typeof readyOnly !== 'boolean' || typeof includeCv !== 'boolean') throw new ClientJobContractError({ readyOnly: 'Choose a valid filter.' });
     if (queryId) assertUuid(queryId, 'queryId');
     const cursor = profileSearchCursor(after, queryId);
     return staff(pool, identity, org, async ({ client }) => {
-        const response = await result(client, 'select app.profile_search_status_v1($1,$2,$3,$4::jsonb) as result', [scope, readyOnly, queryId, cursor && JSON.stringify(cursor)]);
+        const response = await result(client, 'select app.cv_search_status_v1($1,$2,$3,$4::jsonb,$5) as result', [scope, readyOnly, queryId, cursor && JSON.stringify(cursor), includeCv]);
         if (response.nextAfter) response.nextAfter = Buffer.from(JSON.stringify(response.nextAfter)).toString('base64url'); return response;
     });
 }
@@ -29,9 +29,9 @@ export async function profileSearchWorkerOperation(pool, token, action, input = 
     if (!/^[A-Za-z0-9_-]{64}$/.test(token ?? '')) { const error = new Error('Unauthorized'); error.code = '42501'; throw error; }
     const parsed = profileSearchWorkerInput(action, input);
     const output = await workerTransaction(pool, async client => {
-        if (action === 'claim') return result(client, 'select app.profile_search_worker_claim_v1($1) as result', [token]);
+        if (action === 'claim') return result(client, 'select app.profile_search_worker_claim_v1($1,$2,$3) as result', [token, parsed.capabilities?.includes('approved-cv-v1') ?? false, parsed.capabilities?.includes('minilm-v1') ?? false]);
         if (action === 'complete' && parsed.kind === 'plan') {
-            const text = await result(client, 'select app.profile_search_worker_source_v1($1,$2,$3,$4) as result', [token, parsed.jobId, parsed.sourceRevision, parsed.sourceSha256]);
+            const text = await result(client, 'select app.profile_search_worker_source_v1($1,$2,$3,$4,$5) as result', [token, parsed.jobId, parsed.sourceRevision, parsed.sourceSha256, parsed.projectionVersion]);
             // SQL independently repeats coverage/hash checks for the restricted role.
             if (text != null) validateProfileManifest(text, parsed.result);
         }

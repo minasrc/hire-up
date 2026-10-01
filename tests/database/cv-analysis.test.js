@@ -16,7 +16,7 @@ import { profileSearchAction, profileSearchStatus } from '../../src/lib/profile-
 import { createPrivacyRequest, reviewPrivacySubject, verifyPrivacyRequest, restrictPrivacySubject } from '../../src/lib/privacy-operations.js';
 import { CV_ANALYSIS_PARSER_VERSION, CV_ANALYSIS_PROMPT_VERSION } from '../../src/lib/cv-analysis-contracts.js';
 const dir = fileURLToPath(new URL('../../supabase/migrations/', import.meta.url));
-const migrations = readdirSync(dir).filter(f => f >= '20260922090000_foundation_roles.sql' && f <= '20261002200000_cv_analysis.sql' && f.endsWith('.sql')).sort();
+const migrations = readdirSync(dir).filter(f => f >= '20260922090000_foundation_roles.sql' && f <= '20261002210000_cv_search.sql' && f.endsWith('.sql')).sort();
 const identity = subject => ({ provider: 'google', issuer: 'https://accounts.google.com', subject });
 const hash = b => createHash('sha256').update(b).digest('hex');
 const bytes = createSyntheticPdf();
@@ -137,7 +137,7 @@ test('CV analysis preserves document evidence, human review and private lifecycl
         psql(container, `update app.telegram_drafts set document=document||'{"filename":"Renamed CV.pdf"}'::jsonb where id='${d.id}'`);
         d = await draft(d.id);
         const sid = psql(container, `select id from app.profile_search_sources where source_id='${d.id}'`).trim();
-        psql(container, `update app.profile_search_sources set status='ready',projection_text='Ready Person',source_sha256=encode(sha256('Ready Person'),'hex') where id='${sid}';
+        psql(container, `select set_config('app.organization_id','${ORG_B}',false),set_config('app.actor_id','${user}',false);update app.profile_search_sources set status='ready',projection_text='Ready Person',source_sha256=encode(sha256('Ready Person'),'hex') where id='${sid}';
           insert into app.profile_search_chunks(source_id,organization_id,owner_user_id,revision,ordinal,start_byte,end_byte,sha256,token_count,embedding) select id,organization_id,owner_user_id,revision,0,0,12,encode(sha256('Ready Person'),'hex'),3,array[1::real]||array_fill(0::real,array[383]) from app.profile_search_sources where id='${sid}';`);
         const q = await profileSearchAction(pool, owner, ORG_B, { action: 'search', operationId: randomUUID(), query: 'Ready', scope: 'my_drafts', readyOnly: true });
         psql(container, `update app.profile_search_queries set status='completed' where id='${q.queryId}';insert into app.profile_search_results(query_id,source_id,organization_id,owner_user_id,source_revision,score,ordinal,source_type,public_source_id) select '${q.queryId}',id,organization_id,owner_user_id,revision,1,0,source_type,source_id from app.profile_search_sources where id='${sid}';`);
