@@ -10,6 +10,7 @@ import { AUTHZ_ID, SUBJECTS, installStaffFixture, staffPoolOptions } from '../su
 import { CJ_ID, CJ_SUBJECTS, clientJobFixtureSql } from '../support/client-job-workflows.js';
 import { withStaffTransaction } from '../../src/lib/staff-authorization.js';
 import { normalizeTelegramDraftFields } from '../../src/lib/telegram-intake-contracts.js';
+import { telegramWorkerOperation } from '../../src/lib/telegram-worker-operations.js';
 
 const migrationsDir = fileURLToPath(new URL('../../supabase/migrations/', import.meta.url));
 const telegramMigration = '20261002130000_telegram_intake_foundation.sql';
@@ -35,7 +36,8 @@ test('Telegram private drafts and scoped embedding worker PostgreSQL boundaries'
     psql(container, clientJobFixtureSql);
     psql(container, `insert into app.role_permissions(organization_id,role_id,permission_key)
         values('${ORG_B}','${CJ_ID.ROLE_B_RECRUITER}','candidates.write'),
-            ('${ORG_B}','${CJ_ID.ROLE_B_RECRUITER}','documents.write');`);
+            ('${ORG_B}','${CJ_ID.ROLE_B_RECRUITER}','documents.write'),
+            ('${ORG_B}','${CJ_ID.ROLE_B_RECRUITER}','documents.download');`);
     pool = new pg.Pool(staffPoolOptions(container, password, 4));
     const workerPassword = randomUUID();
     psql(container, `create role ${workerRole} login noinherit nosuperuser nocreatedb nocreaterole nobypassrls password '${workerPassword}';
@@ -64,6 +66,7 @@ test('Telegram private drafts and scoped embedding worker PostgreSQL boundaries'
     const create = (fields = {}, context) => staff('select app.telegram_create_draft_v1($1,$2::jsonb,$3) as result',
         [randomUUID(), JSON.stringify(normalizeTelegramDraftFields(fields)), 'Synthetic manual draft'], context);
     const get = (draft, context) => staff('select app.telegram_get_draft_v1($1) as result', [draft.id], context);
+    const getCv = (draft, context) => staff('select app.telegram_cv_document_v1($1) as result', [draft.id], context);
     const update = (draft, fields) => staff('select app.telegram_update_draft_v1($1,$2,$3::jsonb) as result',
         [draft.id, draft.version, JSON.stringify(normalizeTelegramDraftFields(fields))]);
     const list = (context) => staff('select app.telegram_list_drafts_v1($1,$2,$3,$4) as result', ['all', null, '', 1], context);
@@ -119,11 +122,16 @@ test('Telegram private drafts and scoped embedding worker PostgreSQL boundaries'
     await t.test('validated CV approval creates candidate and Telegram identifiers exactly once', async () => {
         let draft = await create({ firstName: 'Ada', lastName: 'Lovelace', primaryEmail: 'telegram@example.test',
             secondaryEmails: ['secondary@example.test'], compensationPreference: 'EUR 100k', telegramUsername: 'Sample_User', telegramUserId: '9007199254740993123456789' });
+        await assert.rejects(getCv(draft), { code: 'P0002' });
         const candidateId = await staff('select app.telegram_cv_target_v1($1) as result', [draft.id]);
         const document = await documentFor(draft);
         draft = await attach(draft, document);
         assert.deepEqual(draft.cv, { filename: document.filename, status: 'validated' });
         assert.deepEqual(draft.missingFields, []);
+        assert.deepEqual(await getCv(draft), document);
+        for (const context of [{ subject: CJ_SUBJECTS.RECRUITER }, { subject: SUBJECTS.ADMIN2, organizationId: ORG_A }]) {
+            await assert.rejects(getCv(draft, context), { code: 'P0002' });
+        }
         const operation = randomUUID();
         const approved = await decide(draft, 'approve', operation);
         assert.deepEqual(approved, { status: 'approved', candidateId });
@@ -138,6 +146,7 @@ test('Telegram private drafts and scoped embedding worker PostgreSQL boundaries'
         assert.deepEqual(cleared.fields, {});
         assert.equal(cleared.cv, null);
         assert.equal(cleared.candidateId, candidateId);
+        await assert.rejects(getCv(draft), { code: 'P0002' });
     });
 
     await t.test('abandoned upload reservations honor grace, owner scope, retries and late-attachment fencing', async () => {
@@ -319,6 +328,22 @@ test('Telegram private drafts and scoped embedding worker PostgreSQL boundaries'
         assert.deepEqual(await complete(credential, lease), { status: 'cancelled' });
         assert.equal(scalar(`select count(*) from app.telegram_draft_embeddings where draft_id='${draft.id}'`), '0');
         assert.equal(scalar(`select payload::text from app.telegram_jobs where id='${lease.id}'`), '{}');
+    });
+
+    await t.test('hosted worker operation switches the restricted connection role for a complete job cycle', async () => {
+        const credential = token();
+        await register(credential);
+        const draft = await create();
+        const { jobId } = await enqueue(draft);
+        // NOINHERIT login cannot execute worker procedures without SET ROLE.
+        await assert.rejects(workerPool.query('select app.telegram_claim_job_v1($1)', [credential]), { code: '42501' });
+        const lease = await telegramWorkerOperation(workerPool, credential, 'claim');
+        assert.equal(lease.id, jobId);
+        assert.deepEqual(await telegramWorkerOperation(workerPool, credential, 'complete', {
+            jobId: lease.id, leaseToken: lease.leaseToken, result,
+        }), { status: 'completed' });
+        assert.equal((await workerPool.query('select current_user as role')).rows[0].role, workerRole, 'transaction-local worker role is reset');
+        assert.equal(scalar(`select cardinality(embedding) from app.telegram_draft_embeddings where draft_id='${draft.id}'`), '384');
     });
 
     await t.test('worker and staff runtime roles have no direct private-table access', async () => {
