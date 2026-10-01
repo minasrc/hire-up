@@ -191,7 +191,7 @@ test('Mac pairing confirms fingerprints, recovers refreshes and manages scoped d
     await expect(page.getByLabel('One-time invitation')).toBeVisible();
     readsOffline = true;
     await expect(page.getByLabel('One-time invitation')).toHaveCount(0);
-    await expect(pairingPanel.getByText('expired', { exact: true })).toBeVisible();
+    await expect(pairingPanel.getByText('Expired', { exact: true })).toBeVisible();
     readsOffline = false;
     denied = true; await refresh();
     await expect(pairingPanel.getByRole('alert')).toContainText('no longer have access');

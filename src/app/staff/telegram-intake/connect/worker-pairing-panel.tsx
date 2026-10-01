@@ -14,6 +14,7 @@ type Organization = { id: string; name: string };
 type Listing = { devices: Device[]; pairings: Pairing[]; nextAfter: string | null; organization?: Organization };
 type Invitation = Awaited<ReturnType<typeof createInvitation>> & { name: string; pairingId?: string };
 const endpoint = '/api/staff/worker-devices';
+const pairingLabels: Record<string, string> = { invited: 'Waiting for Mac', claimed: 'Ready to confirm', approved: 'Paired', expired: 'Expired', cancelled: 'Cancelled' };
 const date = (value: string | null) => value ? new Date(value).toLocaleString() : 'No activity recorded';
 class PairingFailure extends Error {
     constructor(public status: number, public code: string, public retryAfterSeconds?: number) { super(pairingError(code, retryAfterSeconds)); }
@@ -98,7 +99,7 @@ export function WorkerPairingPanel({ workspaceId, onDeviceChange }: { workspaceI
             const result = await request(url, { method, ...(method === 'POST' ? { headers: { 'content-type': 'application/json' }, body: JSON.stringify({ operationId: operation.current.id, ...body }) } : {}) });
             operation.current = null;
             if (body.action === 'invite') { const next = { ...secret.current!, pairingId: result.pairingId }; secret.current = next; setInvitation(next); setSelected(result.pairingId); setPairing(result); }
-            if (body.action === 'approve') { clearSecret(); setPairing(current => current ? { ...current, ...result } : result); setNotice('Mac paired. Start its Telegram connector to sign in below. Pairing alone does not start Telegram or other services.'); onDeviceChange(); }
+            if (body.action === 'approve') { clearSecret(); setPairing(current => current ? { ...current, ...result } : result); setNotice('Mac paired. Start its Telegram connector to sign in above.'); onDeviceChange(); }
             if (body.action === 'cancel') { clearSecret(); setPairing(current => current ? { ...current, ...result } : result); setNotice('Invitation cancelled.'); }
             if (body.action === 'renew') { setNotice('Device access renewed for 30 days. Its existing credential and saved work are preserved.'); onDeviceChange(); }
             if (method === 'DELETE') { setRevoke(''); setNotice('Device access revoked. Telegram logout and deletion of local files are not confirmed.'); onDeviceChange(); }
@@ -124,7 +125,7 @@ export function WorkerPairingPanel({ workspaceId, onDeviceChange }: { workspaceI
     const live = pairing && ['invited', 'claimed'].includes(pairing.status) && Date.parse(pairing.expiresAt) > now;
     const fingerprint = pairing?.status === 'claimed' ? pairing.deviceFingerprint : null;
     return <Card className="space-y-5 p-6" aria-label="Mac device pairing">
-        <div><h2 className="font-semibold">Pair your Mac</h2><p className="mt-1 text-sm text-muted-foreground">Give your Mac access to this workspace, then start the Telegram connector. Pairing does not set up Telegram, parsing or search services.</p></div>
+        <div><h2 className="font-semibold">Pair your Mac</h2><p className="mt-1 text-sm text-muted-foreground">Give your Mac access to this workspace, then start its Telegram connector.</p></div>
         <p className="break-words text-sm">Workspace: <strong>{listing?.organization?.name || workspaceId}</strong></p>
         {error ? <p role="alert" className="text-sm">{error}</p> : null}{notice ? <p role="status" className="text-sm">{notice}</p> : null}
         <div className="flex flex-wrap gap-2"><Button variant="outline" size="sm" disabled={busy || loading} onClick={refresh}>Refresh devices</Button>{loading ? <span className="text-xs text-muted-foreground">Loading devices…</span> : null}</div>
@@ -132,7 +133,7 @@ export function WorkerPairingPanel({ workspaceId, onDeviceChange }: { workspaceI
             {!live && !invitation?.pairingId ? <div className="space-y-2"><Label htmlFor="pairing-device-name">Device name</Label><Input id="pairing-device-name" value={name} maxLength={80} disabled={busy || !!invitation} onChange={event => setName(event.target.value)} /><Button disabled={busy || !name.trim()} onClick={() => void invite()}>{busy ? 'Working…' : invitation ? 'Retry invitation' : 'Pair this Mac'}</Button></div> : null}
             {listing?.pairings.filter(item => item.pairingId !== selected).map(item => <div key={item.pairingId} className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-border p-3"><span className="text-sm">{item.name} · {item.status === 'claimed' ? 'Awaiting confirmation' : 'Invitation pending'}</span><Button size="sm" variant="outline" disabled={busy} onClick={() => resume(item)}>Resume pairing</Button></div>)}
             {pairing ? <div className="space-y-3 rounded-lg border border-border p-4">
-                <div className="flex flex-wrap items-center gap-2"><h3 className="font-medium">{pairing.name}</h3><Badge variant="secondary">{!live && ['invited', 'claimed'].includes(pairing.status) ? 'expired' : pairing.status}</Badge></div>
+                <div className="flex flex-wrap items-center gap-2"><h3 className="font-medium">{pairing.name}</h3><Badge variant="secondary">{!live && ['invited', 'claimed'].includes(pairing.status) ? 'Expired' : pairingLabels[pairing.status] || 'Status unavailable'}</Badge></div>
                 {live ? <p className="text-xs text-muted-foreground">Invitation expires {date(pairing.expiresAt)}.</p> : null}
                 {live && pairing.status === 'invited' ? <>
                     {invitation?.pairingId === pairing.pairingId ? <><p className="text-sm">In the app’s checked-out folder on your Mac, run this command. Replace the directory with your private, absolute folder path.</p>{command ? <code className="block break-all rounded-lg bg-muted p-3 text-xs">{command}</code> : null}<p className="text-sm">Paste the invitation only when the command asks for it. It expires in ten minutes and disappears from this browser on refresh.</p><Label htmlFor="pairing-invitation">One-time invitation</Label><Input id="pairing-invitation" readOnly autoComplete="off" value={`${invitation.pairingId}.${invitation.secret}`} className="font-mono text-xs" /><Button size="sm" variant="outline" onClick={() => void copyInvitation()}>Copy invitation</Button></>
