@@ -232,10 +232,14 @@ begin
  if (chunk->>'ordinal')::integer<>n or (chunk->>'startByte')::integer<>boundary or (chunk->>'endByte')::integer<=boundary or (chunk->>'endByte')::integer-boundary>16384 or (chunk->>'tokenCount')::integer not between 1 and 128 then raise exception 'Invalid chunk bounds' using errcode='22023'; end if;
  piece:=substring(bytes from boundary+1 for (chunk->>'endByte')::integer-boundary); text_piece:=convert_from(piece,'UTF8');
  if char_length(text_piece)>16000 or encode(sha256(piece),'hex') is distinct from chunk->>'sha256' then raise exception 'Invalid chunk hash' using errcode='22023'; end if;
- insert into app.profile_search_chunks(source_id,ordinal,organization_id,owner_user_id,revision,start_byte,end_byte,sha256,token_count) values(s.id,n,s.organization_id,s.owner_user_id,s.revision,boundary,(chunk->>'endByte')::integer,chunk->>'sha256',(chunk->>'tokenCount')::integer);
  boundary:=(chunk->>'endByte')::integer; n:=n+1;
  end loop;
  if boundary<>octet_length(bytes) then raise exception 'Incomplete source coverage' using errcode='22023'; end if;
+ -- Validate the complete manifest first; one statement shares the unchanged
+ -- RLS authorized-source set across all bounded chunks.
+ insert into app.profile_search_chunks(source_id,ordinal,organization_id,owner_user_id,revision,start_byte,end_byte,sha256,token_count)
+ select s.id,(c.value->>'ordinal')::integer,s.organization_id,s.owner_user_id,s.revision,(c.value->>'startByte')::integer,(c.value->>'endByte')::integer,c.value->>'sha256',(c.value->>'tokenCount')::integer
+ from jsonb_array_elements(p#>'{result,chunks}') c(value);
  manifest:=encode(sha256(convert_to((p->'result')::text,'UTF8')),'hex');
  v_receipt:=jsonb_build_object('ok',true,'status','embedding','manifestSha256',manifest);
  update app.profile_search_sources set status='embedding',error_code=null,manifest_sha256=manifest,attempts=0,lease_token=null,lease_expires_at=null,receipt_token=(p->>'leaseToken')::uuid,receipt_digest=digest,receipt=v_receipt,available_at=now() where id=s.id;
@@ -243,7 +247,11 @@ begin
  if s.manifest_sha256 is distinct from p->>'manifestSha256' or jsonb_typeof(p#>'{result,embeddings}')<>'array' or jsonb_array_length(p#>'{result,embeddings}') not between 1 and 8 then raise exception 'Invalid embedding batch' using errcode='22023'; end if;
  select array_agg((value->>'ordinal')::integer order by (value->>'ordinal')::integer) into ordinals from jsonb_array_elements(p#>'{result,embeddings}');
  if ordinals is distinct from s.lease_ordinals then raise exception 'Embedding batch changed' using errcode='40001'; end if;
- for chunk in select value from jsonb_array_elements(p#>'{result,embeddings}') loop update app.profile_search_chunks set embedding=app.profile_search_vector_v1(chunk->'embedding') where source_id=s.id and ordinal=(chunk->>'ordinal')::integer and revision=s.revision; end loop;
+ update app.profile_search_chunks c set embedding=app.profile_search_vector_v1(e.value->'embedding')
+ from jsonb_array_elements(p#>'{result,embeddings}') e(value)
+ where c.source_id=s.id and c.ordinal=(e.value->>'ordinal')::integer and c.revision=s.revision;
+ get diagnostics n=row_count;
+ if n<>cardinality(ordinals) then raise exception 'Embedding batch changed' using errcode='40001';end if;
  v_receipt:=jsonb_build_object('ok',true,'status',case when exists(select 1 from app.profile_search_chunks where source_id=s.id and embedding is null) then 'embedding' else 'ready' end);
  update app.profile_search_sources set status=v_receipt->>'status',error_code=null,attempts=0,lease_token=null,lease_expires_at=null,receipt_token=(p->>'leaseToken')::uuid,receipt_digest=digest,receipt=v_receipt,available_at=now() where id=s.id;
  if v_receipt->>'status'='ready' then if s.component='cv' then perform app.cv_search_growth_v1();else perform app.profile_search_epoch_v1(s.organization_id,s.owner_user_id);end if; end if;

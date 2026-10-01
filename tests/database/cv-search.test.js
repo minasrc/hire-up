@@ -98,6 +98,23 @@ test('approved CV search preserves profile parity, document access and cached sa
         await assert.rejects(call('complete', { jobId: embed.id, leaseToken: embed.leaseToken, kind: 'embed', indexVersion: embed.indexVersion, projectionVersion: 'candidate-profile-v1', chunkerVersion: 'minilm-utf8-128-v1', sourceRevision: embed.source.revision, sourceSha256: embed.source.sha256, manifestSha256: embed.manifestSha256, result: { embeddings: embed.chunks.map(c => ({ ordinal: c.ordinal, embedding: vector(1) })) } }), { code: '40001' });
         await finish(embed); await drain(true);
     });
+    await t.test('a full 256-chunk CV manifest and eight-vector batches are atomic and replayable', async () => {
+        await drain(true); const text = 'Exact reviewed CV paragraph. '.padEnd(128, 'x').repeat(256); const item = seed(text); await drain(false);
+        const plan = (await call('claim', { capabilities: ['minilm-v1', 'approved-cv-v1'] })).job;
+        assert.equal(plan.source.component, 'cv');
+        const chunks = Array.from({ length: 256 }, (_, ordinal) => ({ ordinal, startByte: ordinal * 128, endByte: (ordinal + 1) * 128, sha256: sha(text.slice(ordinal * 128, (ordinal + 1) * 128)), tokenCount: 100 }));
+        const body = { jobId: plan.id, leaseToken: plan.leaseToken, kind: 'plan', indexVersion: plan.indexVersion, projectionVersion: plan.projectionVersion, chunkerVersion: plan.chunkerVersion, sourceRevision: plan.source.revision, sourceSha256: plan.source.sha256, result: { byteLength: Buffer.byteLength(text), chunks } };
+        await assert.rejects(call('complete', { ...body, result: { ...body.result, chunks: chunks.map((c, i) => i === 255 ? { ...c, sha256: 'a'.repeat(64) } : c) } }));
+        assert.equal(psql(db, `select count(*) from app.profile_search_chunks where source_id='${plan.id}'`).trim(), '0');
+        const accepted = await call('complete', body); assert.deepEqual(await call('complete', body), accepted);
+        assert.equal(psql(db, `select count(*) from app.profile_search_chunks where source_id='${plan.id}'`).trim(), '256');
+        const embed = (await call('claim', { capabilities: ['minilm-v1', 'approved-cv-v1'] })).job;
+        assert.equal(embed.chunks.length, 8); await finish(embed); await finish(embed);
+        assert.equal(psql(db, `select count(*) from app.profile_search_chunks where source_id='${plan.id}' and embedding is not null`).trim(), '8');
+        await drain(true);
+        assert.equal(psql(db, `select count(*) from app.profile_search_chunks where source_id='${plan.id}' and embedding is not null`).trim(), '256');
+        assert.equal(psql(db, `select status from app.profile_search_sources where source_id='${item.id}' and component='cv'`).trim(), 'ready');
+    });
     await t.test('infected CVs invalidate results and late embed acknowledgements are definitive conflicts', async () => {
         const item = seed('Infection safety fixture'); await drain(false);
         let j = (await call('claim', { capabilities: ['minilm-v1', 'approved-cv-v1'] })).job; await finish(j);
