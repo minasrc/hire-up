@@ -101,7 +101,7 @@ test('Telegram browser connects with QR and encrypted 2FA, waits for logout ackn
     const connectionURL = `${baseURL}/api/staff/telegram-connection`;
     try {
         await page.goto(`${baseURL}/staff/telegram-intake`);
-        await page.getByRole('link', { name: 'Connect Telegram', exact: true }).click();
+        await page.goto(`${baseURL}/staff/telegram-intake/connect`);
         await expect(page.getByRole('heading', { name: 'Connect Telegram', exact: true })).toBeVisible();
         await expect(page.getByLabel('Mac connector', { exact: true })).toContainText('Synthetic Mac — Online');
         psql(db, `update app.telegram_connector_workers set last_seen_at=now()-interval '5 minutes' where id='${registered.id}'`);
@@ -157,7 +157,7 @@ test('Telegram browser connects with QR and encrypted 2FA, waits for logout ackn
         await update({ status: 'connected', profile: { telegramUserId: '123456789', username: 'synthetic_recruiter', displayName: 'Synthetic Recruiter' } });
         await expect(page.getByRole('heading', { name: 'Telegram connected', exact: true })).toBeVisible();
         await expect(page.getByText('@synthetic_recruiter', { exact: true })).toBeVisible();
-        await expect(page.getByText(/Chat selection and history import are not available yet/)).toBeVisible();
+        await expect(page.getByRole('link', { name: 'Choose chats to import', exact: true })).toHaveAttribute('href', '/staff/telegram-intake/chats');
         await page.getByRole('button', { name: 'Disconnect Telegram', exact: true }).click();
         await expect(page.getByRole('heading', { name: 'Waiting for Telegram to disconnect' })).toBeVisible();
         await expect(page.getByRole('heading', { name: 'Telegram disconnected', exact: true })).toHaveCount(0);

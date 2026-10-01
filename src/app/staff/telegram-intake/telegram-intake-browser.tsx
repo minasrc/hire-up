@@ -75,7 +75,7 @@ export function TelegramIntakeBrowser({ initialResult }: { initialResult?: Intak
     return (
         <section className="mx-auto flex w-full max-w-7xl flex-col gap-6">
             <PageHeader eyebrow="Private workspace" title="Telegram intake" description="Review private drafts, complete missing details, and approve candidates into your workspace."
-                actions={<div className="flex gap-2"><Button asChild variant="outline"><Link href="/staff/telegram-intake/connect">Connect Telegram</Link></Button><Button variant="outline" onClick={() => setRevision(value => value + 1)} disabled={loading}><RefreshCw />Refresh inbox</Button></div>} />
+                actions={<div className="flex gap-2"><Button asChild variant="outline"><Link href="/staff/telegram-intake/chats">Telegram chats</Link></Button><Button variant="outline" onClick={() => setRevision(value => value + 1)} disabled={loading}><RefreshCw />Refresh inbox</Button></div>} />
             <nav aria-label="Draft views" className="flex flex-wrap gap-2">
                 {(Object.keys(viewLabels) as IntakeView[]).map(key => <Button key={key} variant={view === key ? 'secondary' : 'ghost'} aria-pressed={view === key}
                     onClick={() => { setView(key); setPage(1); }}>

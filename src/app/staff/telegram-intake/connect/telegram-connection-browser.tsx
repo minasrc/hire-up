@@ -200,6 +200,7 @@ export function TelegramConnectionBrowser() {
             </form> : null}
             {(active || connection.status === 'failed') && connection.status !== 'disconnecting' ? <Button variant="outline" disabled={busy || accessDenied} onClick={() => void mutate({ action: 'disconnect', connectionId: connection.id, generation: connection.generation })}>{['connected', 'failed'].includes(connection.status) ? 'Disconnect Telegram' : 'Cancel sign-in'}</Button> : null}
         </Card> : null}
-        <p className="text-sm text-muted-foreground">This step connects your account. Chat selection and history import are not available yet. Drafts and source messages stay private; only approved candidate records become shared.</p>
+        {connection?.status === 'connected' ? <Button asChild><Link href="/staff/telegram-intake/chats">Choose chats to import</Link></Button> : null}
+        <p className="text-sm text-muted-foreground">Connect your account, then choose chats to import their full available history. Drafts and source messages stay private; only approved candidate records become shared.</p>
     </section>;
 }
