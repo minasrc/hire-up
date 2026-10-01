@@ -616,8 +616,8 @@ create or replace function app.profile_search_worker_fail_v1(p_token text,p json
 declare w uuid; s app.profile_search_sources; q app.profile_search_queries; terminal boolean; delay integer:=(p->>'retryAfterSeconds')::integer; code text:=p->>'code';
 begin
  w:=app.telegram_worker_context_v1(p_token); update app.telegram_workers set last_search_seen_at=now() where id=w;
- if code not in('EMBEDDING_UNAVAILABLE','INVALID_RESULT','INPUT_TOO_LONG','WORKER_ERROR') or delay not between 1 and 3600 then raise exception 'Invalid failure' using errcode='22023'; end if;
- terminal:=code in('INVALID_RESULT','INPUT_TOO_LONG');
+ if code not in('EMBEDDING_UNAVAILABLE','INVALID_RESULT','INPUT_TOO_LONG','SOURCE_TOO_LARGE','WORKER_ERROR') or (p->>'kind'='query' and code='SOURCE_TOO_LARGE') or delay not between 1 and 3600 then raise exception 'Invalid failure' using errcode='22023'; end if;
+ terminal:=code in('INVALID_RESULT','INPUT_TOO_LONG','SOURCE_TOO_LARGE');
  if p->>'kind'='query' then
  select * into q from app.profile_search_queries where id=(p->>'jobId')::uuid for update;
  if not found or q.status<>'running' or q.lease_token is distinct from (p->>'leaseToken')::uuid or q.lease_worker_id<>w or q.lease_expires_at<=now() or q.expires_at<=now() then raise exception 'Query changed' using errcode='40001'; end if;

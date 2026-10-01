@@ -115,6 +115,18 @@ test('approved CV search preserves profile parity, document access and cached sa
         assert.equal(psql(db, `select count(*) from app.profile_search_chunks where source_id='${plan.id}' and embedding is not null`).trim(), '256');
         assert.equal(psql(db, `select status from app.profile_search_sources where source_id='${item.id}' and component='cv'`).trim(), 'ready');
     });
+    await t.test('oversized CV indexing fails terminally and is excluded from transient retries', async () => {
+        await drain(true); const item = seed('Synthetic unchunkable retained CV'); await drain(false);
+        const job = (await call('claim', { capabilities: ['minilm-v1', 'approved-cv-v1'] })).job;
+        assert.equal(job.source.component, 'cv');
+        await call('fail', { jobId: job.id, leaseToken: job.leaseToken, kind: job.kind, code: 'SOURCE_TOO_LARGE', retryAfterSeconds: 1 });
+        const snapshot = await profileSearchStatus(pool, identity, org, { includeCv: true });
+        assert.equal(snapshot.coverage.cv.failed, 1); assert.equal(snapshot.coverage.cv.retryable, 0);
+        const retried = await profileSearchAction(pool, identity, org, { action: 'retryIndex', scope: 'approved', includeCv: true });
+        assert.equal(retried.retried, 0);
+        assert.equal(psql(db, `select status||':'||error_code from app.profile_search_sources where source_id='${item.id}' and component='cv'`).trim(), 'failed:SOURCE_TOO_LARGE');
+        assert.equal((await call('claim', { capabilities: ['minilm-v1', 'approved-cv-v1'] })).job, null);
+    });
     await t.test('infected CVs invalidate results and late embed acknowledgements are definitive conflicts', async () => {
         const item = seed('Infection safety fixture'); await drain(false);
         let j = (await call('claim', { capabilities: ['minilm-v1', 'approved-cv-v1'] })).job; await finish(j);

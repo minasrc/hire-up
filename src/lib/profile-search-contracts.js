@@ -38,7 +38,8 @@ export function profileSearchWorkerInput(action, input = {}) {
     const common = ['jobId', 'leaseToken', 'kind'];
     if (action === 'fail') {
         object(input, [...common, 'code', 'retryAfterSeconds']);
-        if (!['EMBEDDING_UNAVAILABLE', 'INVALID_RESULT', 'INPUT_TOO_LONG', 'WORKER_ERROR'].includes(input.code) || !Number.isInteger(input.retryAfterSeconds) || input.retryAfterSeconds < 1 || input.retryAfterSeconds > 3600) bad('code');
+        if (!['EMBEDDING_UNAVAILABLE', 'INVALID_RESULT', 'INPUT_TOO_LONG', 'SOURCE_TOO_LARGE', 'WORKER_ERROR'].includes(input.code) || !Number.isInteger(input.retryAfterSeconds) || input.retryAfterSeconds < 1 || input.retryAfterSeconds > 3600) bad('code');
+        if (input.kind === 'query' && input.code === 'SOURCE_TOO_LARGE') bad('code');
     } else if (action === 'complete') {
         object(input, [...common, 'indexVersion', 'projectionVersion', 'chunkerVersion', 'querySha256', 'sourceRevision', 'sourceSha256', 'manifestSha256', 'result']);
         if (input.indexVersion !== PROFILE_INDEX_VERSION || ![PROFILE_PROJECTION_VERSION, CV_PROJECTION_VERSION].includes(input.projectionVersion) || input.chunkerVersion !== (input.projectionVersion === CV_PROJECTION_VERSION ? CV_CHUNKER_VERSION : PROFILE_CHUNKER_VERSION)) bad('version');

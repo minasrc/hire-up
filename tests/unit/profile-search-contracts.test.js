@@ -55,3 +55,11 @@ test('CV manifests use their own chunking strategy within the global model names
     assert.throws(() => profileSearchWorkerInput('complete', { ...payload, projectionVersion: PROFILE_PROJECTION_VERSION }));
     assert.throws(() => profileSearchWorkerInput('complete', { ...payload, result: { ...payload.result, chunks: [{ ...payload.result.chunks[0], tokenCount: 129 }] } }));
 });
+
+test('source size failures are accepted for indexing and never disguised as query guidance', () => {
+    const input = { jobId: randomUUID(), leaseToken: randomUUID(), kind: 'plan', code: 'SOURCE_TOO_LARGE', retryAfterSeconds: 1 };
+    assert.equal(profileSearchWorkerInput('fail', input), input);
+    assert.equal(profileSearchWorkerInput('fail', { ...input, kind: 'embed' }).code, 'SOURCE_TOO_LARGE');
+    assert.throws(() => profileSearchWorkerInput('fail', { ...input, kind: 'query' }));
+    assert.equal(profileSearchWorkerInput('fail', { ...input, kind: 'query', code: 'INPUT_TOO_LONG' }).code, 'INPUT_TOO_LONG');
+});

@@ -12,7 +12,7 @@ export function searchGuidance(code) {
         INDEX_VERSION_MISMATCH: 'The search model and index versions do not match. Ask your administrator to finish reindexing.',
         ATTEMPTS_EXHAUSTED: 'The search stopped after repeated attempts. Check the Mac search worker, then retry.',
         SEARCH_TIMEOUT: 'The search exceeded its time limit. Try a narrower scope or contact your workspace administrator.',
-        SOURCE_TOO_LARGE: 'A profile exceeds the indexing limit. Ask your workspace administrator to review it.',
+        SOURCE_TOO_LARGE: 'A profile or CV exceeds the indexing limit. Ask your workspace administrator to review it.',
         WORKER_ERROR: 'The search worker could not finish this request. Check the Mac worker, then retry.',
         INPUT_TOO_LONG: 'Shorten the search description and try again.',
     })[code] || (code ? 'The search could not finish. Refresh its status or try again after checking the Mac search worker.' : '');
