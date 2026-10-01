@@ -1,0 +1,9 @@
+{
+  "name": "agora-isolated-cv-parser",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "engines": { "node": ">=22.13.0 <23" },
+  "scripts": { "test": "node --test ../../tests/database/cv-analysis-parser.test.js" },
+  "dependencies": { "@xmldom/xmldom": "0.8.15", "pdfjs-dist": "6.2.108" }
+}
