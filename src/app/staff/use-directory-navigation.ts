@@ -25,17 +25,39 @@ export function useDirectoryNavigation<T>(
     }, [committed, parse, pending, scheduled]);
 
     useEffect(() => {
-        const onPopState = () => {
+        const cancelScheduled = () => {
             if (timer.current) clearTimeout(timer.current);
+            timer.current = null;
             setScheduled(false);
+        };
+        const onPopState = () => {
+            cancelScheduled();
             setFilters(parse(new URLSearchParams(window.location.search)));
         };
+        const onLinkNavigation = (event: MouseEvent) => {
+            if (!timer.current || event.defaultPrevented || event.button !== 0
+                || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
+            if (!(event.target instanceof Element)) return;
+            const anchor = event.target.closest('a[href]');
+            if (!(anchor instanceof HTMLAnchorElement)
+                || (anchor.target && anchor.target !== '_self')
+                || anchor.hasAttribute('download')
+                || anchor.hasAttribute('data-preview-trigger')) return;
+            const destination = new URL(anchor.href, window.location.href);
+            if (destination.origin !== window.location.origin || destination.pathname !== path) return;
+            // In-page anchor jumps do not replace directory filters.
+            if (destination.hash && destination.search === window.location.search) return;
+            cancelScheduled();
+        };
         window.addEventListener('popstate', onPopState);
+        // Capture before Next's Link handler prevents the native default action.
+        document.addEventListener('click', onLinkNavigation, true);
         return () => {
             if (timer.current) clearTimeout(timer.current);
             window.removeEventListener('popstate', onPopState);
+            document.removeEventListener('click', onLinkNavigation, true);
         };
-    }, [parse]);
+    }, [parse, path]);
 
     const update = (next: T, debounce = false, localOnly = false) => {
         setFilters(next);
@@ -47,6 +69,7 @@ export function useDirectoryNavigation<T>(
         }
         setScheduled(debounce);
         const navigate = () => {
+            timer.current = null;
             setScheduled(false);
             startTransition(() => {
                 router.replace(`${path}${query ? `?${query}` : ''}`, { scroll: false });
