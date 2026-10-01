@@ -34,7 +34,7 @@ export async function main(args = process.argv.slice(2)) {
     const host = async (action, body, { signal } = {}) => {
       // Revocation/rotation on disk stops this process before it submits data.
       if (await readToken(config.workerTokenFile) !== workerToken) throw new ExtractionWorkerError('CREDENTIAL_UNAVAILABLE');
-      return requestJson(`${config.serverUrl}/api/telegram-extraction/worker/${action}`, workerToken, body, { signal, maxRequestBytes: 131072, maxResponseBytes: 262144 });
+      return requestJson(`${config.serverUrl}/api/telegram-extraction/worker/${action}`, workerToken, body, { signal, maxRequestBytes: 131072, maxResponseBytes: action === 'claim' ? 524288 : 262144 });
     };
     const worker = createExtractionWorker({ host, provider: createProvider(config), pendingStore: createPendingStore({ root: config.stateDirectory, server: config.serverUrl, workerToken }) });
     let failures = 0;

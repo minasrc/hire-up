@@ -1,4 +1,4 @@
-import { EXTRACTION_SCHEMA_VERSION, EXTRACTION_PROMPT_VERSION, EXTRACTION_RESULT_SCHEMA, validateExtractionResult } from '../../src/lib/telegram-extraction-contracts.js';
+import { EXTRACTION_SCHEMA_VERSION, EXTRACTION_PROMPT_VERSION, EXTRACTION_RESULT_SCHEMA, EXTRACTION_SOURCE_LIMIT, EXTRACTION_SINGLE_SOURCE_LIMIT, validateExtractionResult } from '../../src/lib/telegram-extraction-contracts.js';
 import { ExtractionWorkerError, readToken } from './config.mjs';
 import { requestJson } from './transport.mjs';
 
@@ -23,8 +23,11 @@ export function createProvider(config, { fetchImpl = fetch, readTokenImpl = read
   return async (source, { signal } = {}) => {
     let response;
     try {
+      const sourceBytes = Buffer.byteLength(JSON.stringify(source));
+      const singleton = source?.messages?.length === 1 && sourceBytes > EXTRACTION_SOURCE_LIMIT;
+      if (!Array.isArray(source?.messages) || sourceBytes > (singleton ? EXTRACTION_SINGLE_SOURCE_LIMIT : EXTRACTION_SOURCE_LIMIT)) throw new ExtractionWorkerError('INVALID_PAYLOAD');
       const token = await readTokenImpl(config.providerTokenFile);
-      response = await requestJson(`${config.providerBaseUrl}/chat/completions`, token, extractionRequest(config.providerModel, source), { fetchImpl, signal, timeoutMs: 60000, maxRequestBytes: 131072, maxResponseBytes: 262144 });
+      response = await requestJson(`${config.providerBaseUrl}/chat/completions`, token, extractionRequest(config.providerModel, source), { fetchImpl, signal, timeoutMs: 60000, maxRequestBytes: singleton ? 1048576 : 131072, maxResponseBytes: 262144 });
     } catch (error) {
       if (error.code === 'STOPPED') throw error;
       throw new ExtractionWorkerError(error.code === 'INVALID_RESPONSE' || error.code === 'INVALID_PAYLOAD' ? 'INVALID_RESULT' : 'PROVIDER_UNAVAILABLE');

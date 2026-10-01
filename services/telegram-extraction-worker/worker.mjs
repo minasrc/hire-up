@@ -1,10 +1,15 @@
-import { EXTRACTION_SCHEMA_VERSION, EXTRACTION_PROMPT_VERSION, EXTRACTION_MESSAGE_LIMIT, EXTRACTION_SOURCE_LIMIT, EXTRACTION_BODY_LIMIT, validateExtractionResult, extractionWorkerInput } from '../../src/lib/telegram-extraction-contracts.js';
+import { EXTRACTION_SCHEMA_VERSION, EXTRACTION_PROMPT_VERSION, EXTRACTION_MESSAGE_LIMIT, EXTRACTION_SOURCE_LIMIT, EXTRACTION_SINGLE_SOURCE_LIMIT, EXTRACTION_BODY_LIMIT, validateExtractionResult, extractionWorkerInput } from '../../src/lib/telegram-extraction-contracts.js';
 import { ExtractionWorkerError } from './config.mjs';
 
 const uuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const failCodes = new Set(['PROVIDER_UNAVAILABLE', 'INVALID_RESULT', 'WORKER_ERROR']);
 function checkJob(job, now) {
-  if (!job || !uuid.test(job.id) || !uuid.test(job.leaseToken) || !/^[0-9a-f]{64}$/.test(job.sourceDigest) || job.schemaVersion !== EXTRACTION_SCHEMA_VERSION || job.promptVersion !== EXTRACTION_PROMPT_VERSION || !Number.isFinite(Date.parse(job.leaseExpiresAt)) || Date.parse(job.leaseExpiresAt) < now + 75000 || !job.source?.chat || !Array.isArray(job.source.messages) || job.source.messages.length > EXTRACTION_MESSAGE_LIMIT || Buffer.byteLength(JSON.stringify(job.source)) > EXTRACTION_SOURCE_LIMIT) throw new ExtractionWorkerError('INVALID_JOB');
+  const sourceLimit = job?.sourceLimitBytes ?? EXTRACTION_SOURCE_LIMIT;
+  const messages = job?.source?.messages;
+  const validLimit = sourceLimit === EXTRACTION_SOURCE_LIMIT || (sourceLimit === EXTRACTION_SINGLE_SOURCE_LIMIT && Array.isArray(messages) && messages.length === 1);
+  // The host applies canonical PostgreSQL JSON bounds. The worker independently
+  // bounds its actual wire JSON, and never widens a normal multi-message batch.
+  if (!job || !uuid.test(job.id) || !uuid.test(job.leaseToken) || !/^[0-9a-f]{64}$/.test(job.sourceDigest) || job.schemaVersion !== EXTRACTION_SCHEMA_VERSION || job.promptVersion !== EXTRACTION_PROMPT_VERSION || !Number.isFinite(Date.parse(job.leaseExpiresAt)) || Date.parse(job.leaseExpiresAt) < now + 75000 || !job.source?.chat || !Array.isArray(messages) || messages.length < 1 || messages.length > EXTRACTION_MESSAGE_LIMIT || !validLimit || Buffer.byteLength(JSON.stringify(job.source)) > sourceLimit) throw new ExtractionWorkerError('INVALID_JOB');
 }
 
 // A pending ACK is durable before the first submission. In particular a network

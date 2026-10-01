@@ -61,24 +61,41 @@ once its former jobs have been reconciled on the platform.
 
 ## Recovery and bounds
 
-- One model request at a time. Each job has at most 40 messages / 48 KiB of source,
-  a 180-second host lease, a 60-second provider timeout and a 10-second host timeout.
-  A claimed lease must retain at least 75 seconds before generation starts.
-- Provider responses are bounded to 256 KiB; completion submissions to 128 KiB.
-  Provider output is limited to 8192 tokens. No message text, prompts, generated
+- One model request at a time. Normal jobs keep at most40 messages /48KiB of
+  canonical source. A single oversized legal history message can use an explicitly
+  advertised `sourceLimitBytes: 327680` budget (320KiB). A multi-message batch can
+  never use that exception. Claims without this field retain the original48KiB
+  budget for compatibility with older hosts. The host checks canonical PostgreSQL
+  JSON size; the worker independently checks actual wire JSON size.
+- Messages remain intact: no trimming, splitting, identity fragmentation, rewritten
+  message IDs or attachment indexes. The larger exception accounts for escaped
+  text and metadata, not a larger Telegram text limit. Current history text remains
+  bounded to32KiB with at most16 attachment metadata entries.
+- A180-second host lease,60-second provider timeout and10-second host timeout remain
+  unchanged. A claimed lease must retain at least75 seconds before generation starts.
+- Only claim responses can use512KiB. Normal provider requests keep128KiB; an
+  oversized singleton can use at most1MiB of serialized provider JSON, including
+  its schema and escaped source envelope. Provider responses remain256KiB;
+  completion submissions remain128KiB, and provider output remains8192 tokens. No message text, prompts, generated
   facts, tokens, endpoint URLs or raw error bodies are logged.
 - Exact completion and failure submissions are encrypted on disk before posting.
   Network errors and ambiguous responses retain them for retry across restarts.
   An acknowledged receipt clears the local queue. A definitive lease conflict
   preserves hosted truth and allows the next claim. Invalid completion requests
   become explicit validation failures without repeatedly regenerating results.
+  Replaying a completed receipt never rereads source or calls the model, including
+  after hosted source cleanup. The host must verify the immutable receipt before
+  attempting source-dependent validation; changed payloads remain conflicts.
 - State uses the connector's tested AES-256-GCM vault, scoped to hosted origin and
   a digest of the hosted worker credential, with directory mode 0700 and file mode
   0600. Keep the state directory on private local storage. The shared vault creates
   its encryption identity locally; extraction does not publish its RSA public key.
 - Hosted errors back off to 30 seconds. Provider failures are reported to the
-  hosted job scheduler for bounded retry. Revoked hosted credentials stop the
-  worker. Ctrl-C/SIGTERM cancels requests and releases the process lock.
+  hosted job scheduler for bounded retry. A configured model whose context window
+  cannot handle an admitted singleton returns an explicit provider failure and
+  follows the same five-attempt hosted retry policy; the worker never truncates
+  or substitutes an empty successful extraction. Configure a compatible model
+  before retrying an exhausted job. Revoked hosted credentials stop the worker. Ctrl-C/SIGTERM cancels requests and releases the process lock.
 
 ## Review boundary and tests
 
@@ -88,10 +105,11 @@ messages as untrusted data and distinguishes candidate self-description from job
 requirements and forwarded material. This does not prove semantic truth: the
 recruiter must review the private draft and any conflicting proposals.
 
-Attachment references are metadata only. This checkpoint does not download CVs,
-extract attachment text, delete source messages, or implement semantic search.
-Recruiters upload a CV and fill required candidate fields before approval; only
-approved records become shared.
+Attachment references are metadata only. CV retrieval runs in the separate Telegram
+connector; manual CV upload is also available. Source cleanup and semantic indexing
+are hosted/separate-worker responsibilities. Recruiters review candidate facts,
+resolve proposals, and provide required fields and a validated CV before approval;
+only approved records become shared.
 
 Run synthetic tests without contacting a provider or Telegram:
 
@@ -101,4 +119,9 @@ node --test tests/unit/telegram-extraction-worker*.test.js
 
 The tests cover request shape, injection boundaries, evidence validation, fixed
 errors, timeout/cancellation, lost acknowledgement recovery, lease conflicts,
-failure-only replay, private file permissions and encrypted restart isolation.
+failure-only replay, private file permissions and encrypted restart isolation. Both
+normal and oversized-singleton fixtures run through the actual CLI against
+synthetic loopback host/provider endpoints. The singleton fixture uses the full
+32KiB legal text allowance, escaping, Unicode and16 attachments; tests also reject
+oversized multi-message batches, preserve completion limits, exercise model-context
+failure, and replay an encrypted completion after simulated hosted source cleanup.
