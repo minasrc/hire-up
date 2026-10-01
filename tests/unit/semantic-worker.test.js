@@ -121,6 +121,7 @@ test('local client packs escaped legal chunks within actual128KiB request budget
 test('transport deadlines, redirect rejection, bounded responses and sanitized token overflow', async () => {
   await assert.rejects(requestJson('http://127.0.0.1', 'token', {}, { maxResponseBytes: 4, fetchImpl: async () => new Response('private data') }), { code: 'INVALID_RESULT' });
   await assert.rejects(requestJson('http://127.0.0.1', 'token', {}, { fetchImpl: async () => new Response(JSON.stringify({ detail: { code: 'INPUT_TOO_LONG', private: 'secret' } }), { status: 422 }) }), { code: 'INPUT_TOO_LONG', message: 'INPUT_TOO_LONG' });
+  await assert.rejects(requestJson('http://127.0.0.1', 'token', {}, { fetchImpl: async () => new Response('<html>upstream temporarily unavailable</html>', { status: 503 }) }), { code: 'HTTP_UNAVAILABLE', status: 503 });
   let signal;
   await assert.rejects(requestJson('http://127.0.0.1', 'token', {}, { timeoutMs: 10, fetchImpl: async (_, options) => { signal = options.signal; assert.equal(options.redirect, 'error'); await new Promise(resolve => setTimeout(resolve, 20)); throw new Error('secret failure'); } }), { code: 'HTTP_UNAVAILABLE' });
   assert.equal(signal.aborted, true);
@@ -129,4 +130,36 @@ test('configuration permits only loopback model endpoint and HTTPS hosted origin
   const good = { serverUrl: 'https://example.com', embeddingUrl: 'http://127.0.0.1:8818', workerTokenFile: '/private/worker', embeddingTokenFile: '/private/model', stateDirectory: '/private/state' };
   assert.equal(validateConfig(good).embeddingUrl, good.embeddingUrl);
   for (const changes of [{ embeddingUrl: 'https://provider.example' }, { serverUrl: 'http://provider.example' }, { serverUrl: 'https://user:secret@example.com' }, { embeddingUrl: 'http://127.0.0.1:8818/path' }]) assert.throws(() => validateConfig({ ...good, ...changes }), { code: 'INVALID_CONFIG' });
+});
+
+test('actual CLI connects only to configured synthetic host/model and persists no plaintext profile', async t => {
+  const { createServer } = await import('node:http');
+  const { execFile } = await import('node:child_process');
+  const { promisify } = await import('node:util');
+  const root = await mkdtemp(join(tmpdir(), 'semantic-cli-'));
+  t.after(() => rm(root, { recursive: true, force: true }));
+  const current = job('plan'), calls = [];
+  const server = createServer(async (request, response) => {
+    let raw = ''; for await (const chunk of request) raw += chunk;
+    const body = JSON.parse(raw); calls.push(request.url);
+    assert.equal(request.headers.authorization, 'Bearer synthetic-worker-and-local-token');
+    response.setHeader('Content-Type', 'application/json');
+    if (request.url === '/api/profile-search/worker/claim') response.end(JSON.stringify({ job: current }));
+    else if (request.url === '/v1/chunk-plan') { assert.equal(body.text, text); response.end(JSON.stringify(manifest(text))); }
+    else if (request.url === '/api/profile-search/worker/complete') {
+      assert.equal(body.sourceSha256, hash(text)); assert.equal(body.result.byteLength, Buffer.byteLength(text));
+      response.end(JSON.stringify({ ok: true, status: 'embedding' }));
+    } else { response.statusCode = 404; response.end('{}'); }
+  });
+  await new Promise((resolve, reject) => { server.once('error', reject); server.listen(0, '127.0.0.1', resolve); });
+  t.after(() => new Promise(resolve => server.close(resolve)));
+  const token = join(root, 'token'); await writeFile(token, 'synthetic-worker-and-local-token', { mode: 0o600 });
+  const config = join(root, 'config.json'), origin = `http://127.0.0.1:${server.address().port}`;
+  await writeFile(config, JSON.stringify({ serverUrl: origin, embeddingUrl: origin, workerTokenFile: token, embeddingTokenFile: token, stateDirectory: join(root, 'state') }), { mode: 0o600 });
+  const { stdout, stderr } = await promisify(execFile)(process.execPath, ['services/semantic-worker/cli.mjs', '--config', config, '--once'], { cwd: process.cwd(), timeout: 10000 });
+  assert.equal(stdout, 'completed\n'); assert.equal(stderr, '');
+  assert.deepEqual(calls, ['/api/profile-search/worker/claim', '/v1/chunk-plan', '/api/profile-search/worker/complete']);
+  for (const path of (await readdir(join(root, 'state'), { recursive: true })).filter(p => p.endsWith('.json'))) {
+    assert.ok(!(await readFile(join(root, 'state', path), 'utf8')).includes(text));
+  }
 });

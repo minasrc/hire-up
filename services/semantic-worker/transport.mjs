@@ -9,12 +9,12 @@ export async function requestJson(url, token, body, { fetchImpl = fetch, signal,
   try {
     response = await fetchImpl(url, { method: 'POST', redirect: 'error', headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' }, body: serialized, signal: requestSignal });
     const reader = response.body?.getReader();
-    if (!reader) throw new SemanticWorkerError('INVALID_RESULT', response.status);
+    if (!reader) throw new SemanticWorkerError(response.ok ? 'INVALID_RESULT' : 'HTTP_UNAVAILABLE', response.status);
     const buffers = []; let size = 0; let data;
     try {
-      while (true) { const { done, value } = await reader.read(); if (done) break; size += value.byteLength; if (size > maxResponseBytes) throw new SemanticWorkerError('INVALID_RESULT', response.status); buffers.push(value); }
+      while (true) { const { done, value } = await reader.read(); if (done) break; size += value.byteLength; if (size > maxResponseBytes) throw new SemanticWorkerError(response.ok ? 'INVALID_RESULT' : 'HTTP_UNAVAILABLE', response.status); buffers.push(value); }
       data = JSON.parse(Buffer.concat(buffers).toString('utf8'));
-    } catch (error) { if (error instanceof SemanticWorkerError) throw error; throw new SemanticWorkerError('INVALID_RESULT', response.ok ? 0 : response.status); }
+    } catch (error) { if (error instanceof SemanticWorkerError) throw error; throw new SemanticWorkerError(response.ok ? 'INVALID_RESULT' : 'HTTP_UNAVAILABLE', response.ok ? 0 : response.status); }
     finally { await reader.cancel().catch(() => {}); reader.releaseLock(); }
     if (!response.ok || response.redirected) {
       const code = response.status === 422 && data?.detail?.code === 'INPUT_TOO_LONG' ? 'INPUT_TOO_LONG' : 'HTTP_UNAVAILABLE';
