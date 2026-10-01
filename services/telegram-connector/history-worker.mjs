@@ -18,15 +18,37 @@ export function createHistoryWorker({ host, vault, now = Date.now, randomId = ra
   const loadPending = (context) => vault.loadHistory(context.connectionId, context.accountUserId, pendingKey);
   const savePending = (context, value) => vault.saveHistory(context.connectionId, context.accountUserId, pendingKey, value);
   const clearPending = (context) => vault.removeHistoryRecord(context.connectionId, context.accountUserId, pendingKey);
+  async function deferRejectedPage(context, pending, code) {
+    requireActive(context);
+    // Validation rejection is definitive, but its defer acknowledgement can be
+    // lost. Persist that distinction and retry only defer after a restart.
+    if (!pending.rejectionCode) { pending.rejectionCode = code; savePending(context, pending); }
+    let status = 'deferred';
+    try {
+      const result = await host('defer', { ...proof(context), jobId: pending.payload.jobId, jobLeaseToken: pending.payload.jobLeaseToken, code });
+      if (result.ok !== true) throw new Error('INVALID_HISTORY_RESPONSE');
+    } catch (error) { if (error.status !== 409) throw error; status = 'stale'; }
+    // An accepted defer or a stale-lease fence leaves the authoritative cursor
+    // untouched. Uncertain network/5xx results keep the encrypted pending page.
+    clearPending(context);
+    nextPoll = now() + 5000;
+    return { status };
+  }
   async function complete(context, pending) {
     requireActive(context);
-    const result = await host('complete', { ...proof(context), ...pending.payload });
+    let result;
+    try { result = await host('complete', { ...proof(context), ...pending.payload }); }
+    catch (error) {
+      if (error.status === 400 || error.status === 422) return deferRejectedPage(context, pending, error.status === 422 ? 'MESSAGE_TOO_LARGE' : 'PEER_UNAVAILABLE');
+      throw error;
+    }
     if (result.ok !== true || !['queued', 'completed', 'capacity_paused'].includes(result.status)) throw new Error('INVALID_HISTORY_RESPONSE');
     clearPending(context);
     return { status: result.status };
   }
   async function reconcilePending(context, pending) {
     if (pending.generation !== context.generation) { clearPending(context); return { status: 'stale' }; }
+    if (['PEER_UNAVAILABLE', 'MESSAGE_TOO_LARGE'].includes(pending.rejectionCode)) return deferRejectedPage(context, pending, pending.rejectionCode);
     try { return await complete(context, pending); }
     catch (error) {
       if (error.status !== 409) throw error;

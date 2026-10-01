@@ -210,3 +210,56 @@ test('connector runs history only after connected account verification with its 
   time += 21000; await connector.tick(); assert.equal(reads, 2);
   await connector.stop(); await connector.tick(); assert.equal(reads, 2);
 });
+
+test('provider metadata strips all controls while conversation text keeps its formatting', async () => {
+  const f = sdkFixture();
+  f.queue.push({ users: [], chats: [{ className: 'Chat', id: 5n, title: 'Recruiting\n\tteam\r\u007f' }], dialogs: [{ className: 'Dialog', peer: { chatId: 5n }, topMessage: 9 }], messages: [{ id: 9, peerId: { chatId: 5n }, date: 1700000000 }] });
+  const page = await f.adapter.dialogs({ ...f.common, cursor: { folder: 0, offsetDate: 0, offsetId: '0', offsetPeer: null, excludePinned: false } });
+  assert.equal(page.records[0].title, 'Recruitingteam');
+  const record = messageRecord({ id: 10, date: 1700000000, message: 'Hello\n\tworld\r\n', fromId: { userId: 9n }, fwdFrom: { fromName: 'Original\nauthor' }, media: { className: 'MessageMediaDocument', document: { id: 1n, mimeType: 'application/\npdf', attributes: [{ className: 'DocumentAttributeFilename', fileName: 'Candidate\nResume\t.pdf\r' }] } } }, new Map([['user:9', { firstName: 'Synthetic\n', lastName: 'Recruiter\t' }]]), '123');
+  assert.equal(record.text, 'Hello\n\tworld\r\n');
+  assert.equal(record.attachments[0].filename, 'CandidateResume.pdf');
+  assert.equal(record.attachments[0].mimeType, 'application/pdf');
+  assert.equal(record.sender.displayName, 'Synthetic Recruiter');
+  assert.equal(record.forwardedFrom.displayName, 'Originalauthor');
+});
+
+for (const [httpStatus, code] of [[400, 'PEER_UNAVAILABLE'], [422, 'MESSAGE_TOO_LARGE']]) {
+  test(`definitive completion ${httpStatus} defers explicitly without advancing the server cursor`, async (t) => {
+    const f = fixture(t); const initialCursor = structuredClone(f.job.cursor);
+    const worker = createHistoryWorker({ ...f.options, host: async (action, body) => {
+      if (action === 'complete') { const error = new Error('validation'); error.status = httpStatus; throw error; }
+      return f.options.host(action, body);
+    } });
+    assert.equal((await worker.tick(f.context)).status, 'deferred');
+    assert.equal(f.calls.at(-1).action, 'defer'); assert.equal(f.calls.at(-1).body.code, code);
+    assert.deepEqual(f.job.cursor, initialCursor);
+    assert.equal(f.vault.loadHistory(connectionId, f.context.accountUserId, 'pending-page'), null);
+  });
+}
+
+test('lost validation-defer acknowledgement retains encrypted page and retries only defer after restart', async (t) => {
+  const f = fixture(t); let completeCalls = 0; let deferCalls = 0;
+  const options = { ...f.options, host: async (action, body) => {
+    if (action === 'complete') { completeCalls++; const error = new Error('validation'); error.status = 400; throw error; }
+    if (action === 'defer') { deferCalls++; const error = new Error('uncertain'); error.status = deferCalls === 1 ? 503 : 409; throw error; }
+    return f.options.host(action, body);
+  } };
+  await assert.rejects(createHistoryWorker(options).tick(f.context), /uncertain/);
+  const pending = f.vault.loadHistory(connectionId, f.context.accountUserId, 'pending-page');
+  assert.equal(pending.rejectionCode, 'PEER_UNAVAILABLE');
+  assert.equal((await createHistoryWorker(options).tick(f.context)).status, 'stale');
+  assert.equal(completeCalls, 1); assert.equal(deferCalls, 2); assert.equal(f.providerCalls(), 1);
+  assert.equal(f.vault.loadHistory(connectionId, f.context.accountUserId, 'pending-page'), null);
+});
+
+test('completion 5xx remains uncertain and never drops or defers its pending page', async (t) => {
+  const f = fixture(t);
+  const worker = createHistoryWorker({ ...f.options, host: async (action, body) => {
+    if (action === 'complete') { const error = new Error('uncertain'); error.status = 503; throw error; }
+    return f.options.host(action, body);
+  } });
+  await assert.rejects(worker.tick(f.context), /uncertain/);
+  assert.equal(f.vault.loadHistory(connectionId, f.context.accountUserId, 'pending-page').rejectionCode, undefined);
+  assert.equal(f.calls.filter((call) => call.action === 'defer').length, 0);
+});

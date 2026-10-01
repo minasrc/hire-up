@@ -12,7 +12,7 @@ export function peerLocator(value) {
 export const peerKey = (peer) => `${peer.kind}:${peer.id}`;
 function text(value, max, nullable = false) {
   if (value == null && nullable) return null;
-  const result = String(value ?? '').replace(/[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]/g, '');
+  const result = String(value ?? '').replace(/[\u0000-\u001f\u007f]/g, '');
   if (result.length > max) throw new HistoryReadError('MESSAGE_TOO_LARGE');
   return result;
 }
