@@ -151,8 +151,11 @@ const sampleContrast = (locator) => locator.first().evaluate((node) => {
 
 test('staff workspace end-to-end in a real browser', async (t) => {
     assertLocalTestEnvironment();
+    // Run a related sequence against one fixture when diagnosing browser ordering failures.
+    const casePattern = process.env.STAFF_WORKSPACE_CASE_PATTERN
+        ? new RegExp(process.env.STAFF_WORKSPACE_CASE_PATTERN) : null;
     const runCase = (name, body) => t.test(name, {
-        skip: process.env.STAFF_WORKSPACE_CANDIDATES_ONLY === '1'
+        skip: (casePattern && !casePattern.test(name)) || process.env.STAFF_WORKSPACE_CANDIDATES_ONLY === '1'
             && !/candidate|profile|duplicate email/.test(name),
     }, body);
     const container = await startPostgresContainer('pgstaffbrowser', POSTGRES_17_IMAGE, {
@@ -1479,26 +1482,37 @@ test('staff workspace end-to-end in a real browser', async (t) => {
             (response) => response.url().includes('/api/staff/members')
                 && response.request().method() === 'POST' && response.ok(),
         );
+        // The success message appears before router.refresh() has finished its RSC
+        // response. Await that request too before handing the shared page to another case.
+        const directoryRefresh = page.waitForResponse(response =>
+            new URL(response.url()).pathname === '/staff/members'
+            && response.request().resourceType() === 'fetch' && response.ok());
         await page.getByRole('button', { name: 'Record invitation' }).click();
         await invited;
+        await directoryRefresh;
         await page.getByText(/Invitation recorded/).waitFor();
         await page.getByText('Invited Synthetic').waitFor();
+        await page.waitForLoadState('networkidle');
         const directory = await page.getByRole('main').last().innerText();
         assert.doesNotMatch(directory, /email sent|invitation sent/i);
     });
 
     await runCase('the pending-invites bell entry filters the member directory', async () => {
-        await gotoStaff(page, `${baseURL}/staff/members`);
-        const statusTrigger = page.getByRole('combobox', {
-            name: 'Filter members by status',
-        });
-        await expect(statusTrigger).toContainText('All statuses');
-        const bell = page.getByRole('button', { name: /Workspace updates/ });
-        await clickUntil(() => bell.click(), page.getByText('Needs attention'));
-        await page.getByRole('link', { name: /Pending invites/ }).click();
-        await page.waitForURL(/\/staff\/members\?status=invited/);
-        await expect(statusTrigger).toContainText('Invited');
-        await page.getByText('Invited Synthetic').waitFor();
+        // Navigation in this case must not compete with the previous form's refresh.
+        const bellPage = await desktop.newPage();
+        try {
+            await gotoStaff(bellPage, `${baseURL}/staff/members`);
+            const statusTrigger = bellPage.getByRole('combobox', {
+                name: 'Filter members by status',
+            });
+            await expect(statusTrigger).toContainText('All statuses');
+            const bell = bellPage.getByRole('button', { name: /Workspace updates/ });
+            await clickUntil(() => bell.click(), bellPage.getByText('Needs attention'));
+            await bellPage.getByRole('link', { name: /Pending invites/ }).click();
+            await bellPage.waitForURL(/\/staff\/members\?status=invited/);
+            await expect(statusTrigger).toContainText('Invited');
+            await bellPage.getByText('Invited Synthetic').waitFor();
+        } finally { await bellPage.close(); }
     });
 
     await runCase('staff APIs enforce session, MFA, permission and input gates', async () => {
