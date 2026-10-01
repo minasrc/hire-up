@@ -91,7 +91,8 @@ test('assessment reports optional problems alongside all missing requirements', 
 test('Telegram identifiers retain decimal precision and username normalization follows its own contract', () => {
     const id = '9007199254740993123456789';
     assert.equal(normalizeTelegramDraftFields({ telegramUserId: id }).telegramUserId, id);
-    for (const telegramUserId of [123, 9007199254740992, 123n, '1e5', '-123', '1.0', ' 123 ']) {
+    assert.equal(normalizeTelegramDraftFields({ telegramUserId: '9'.repeat(30) }).telegramUserId, '9'.repeat(30));
+    for (const telegramUserId of [123, 9007199254740992, 123n, '1e5', '-123', '1.0', ' 123 ', '1'.repeat(31)]) {
         assert.throws(() => normalizeTelegramDraftFields({ telegramUserId }), hasErrors(['telegramUserId']));
     }
     assert.equal(normalizeTelegramDraftFields({ telegramUsername: ' @1abcd ' }).telegramUsername, '1abcd');

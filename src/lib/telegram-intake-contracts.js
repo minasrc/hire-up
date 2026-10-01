@@ -81,8 +81,8 @@ function normalizeField(key, value) {
         }
         case 'telegramUserId':
             if (value == null || value === '') return null;
-            if (typeof value !== 'string' || !/^[0-9]+$/.test(value)) {
-                fail(key, 'Telegram user ID must be a decimal string.');
+            if (typeof value !== 'string' || !/^[0-9]{1,30}$/.test(value)) {
+                fail(key, 'Telegram user ID must be a decimal string of at most 30 characters.');
             }
             return value;
     }
