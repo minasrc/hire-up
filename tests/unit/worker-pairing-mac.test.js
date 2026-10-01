@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, realpathSync, rmSync, readFileSync, writeFileSync, statSync, symlinkSync, chmodSync, existsSync } from 'node:fs';
+import { mkdtempSync, realpathSync, rmSync, readFileSync, writeFileSync, statSync, symlinkSync, chmodSync, existsSync, linkSync, unlinkSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { randomUUID } from 'node:crypto';
@@ -167,4 +167,20 @@ test('crash staging is reaped only after exclusive local lock, without touching 
   writeFileSync(staged, '{\"interrupted-write\":', { mode: 0o600 });
   writeFileSync(join(f.directory, 'operator.json'), '{}', { mode: 0o600 });
   const release = f.store.lock(); assert.equal(existsSync(staged), false); assert.equal(existsSync(join(f.directory, 'operator.json')), true); release();
+});
+
+
+test('interrupted atomic PID publication leaves no lock or a complete recoverable lock', t => {
+  const f = fixture(t); const staged = join(f.directory, '.aaaaaaaaaaaaaaaaaaaaaaaa.tmp');
+  const lock = join(f.directory, 'pairing.lock');
+  // Crash before publication: incomplete staging never occupies the lock name.
+  writeFileSync(staged, '{"pid":', { mode: 0o600 });
+  let release = f.store.lock(); assert.equal(JSON.parse(readFileSync(lock)).pid, process.pid); release();
+  // Crash just after atomic publication: both links contain the complete PID.
+  writeFileSync(staged, JSON.stringify({ pid: process.pid }), { mode: 0o600 }); linkSync(staged, lock);
+  assert.equal(statSync(lock).nlink, 2); assert.throws(() => f.store.unlock(), /PAIRING_ALREADY_RUNNING/);
+  unlinkSync(lock); unlinkSync(staged);
+  writeFileSync(staged, JSON.stringify({ pid: 2147483647 }), { mode: 0o600 }); linkSync(staged, lock);
+  f.store.unlock(); assert.equal(existsSync(lock), false);
+  release = f.store.lock(); assert.equal(existsSync(staged), false); release();
 });
