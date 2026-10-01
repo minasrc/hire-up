@@ -1,7 +1,7 @@
-import { listJobs } from '@/lib/client-job-operations';
+import { listJobDirectory } from '@/lib/client-job-operations';
 import { StaffAuthorizationError } from '@/lib/staff-authorization';
 import { requireStaffVerified } from '@/lib/staff-gate.server';
-import { loadStaffWorkspace } from '@/lib/workspace.server';
+import { loadStaffCapabilities } from '@/lib/workspace.server';
 import { PageHeader } from '@/components/staff-preview/shared';
 import { Card, CardContent } from '@/components/staff-ui/card';
 import { JobsBrowser, type JobRow } from './jobs-browser';
@@ -10,12 +10,21 @@ export const dynamic = 'force-dynamic';
 
 export const metadata = { title: 'Jobs · Agora staff' };
 
-const LIST_LIMIT = 500;
+type Directory = {
+    rows: JobRow[];
+    total: number;
+    page: number;
+    pageSize: number;
+    clients: { id: string; name: string }[];
+};
 
-export default async function StaffJobsPage() {
+
+export default async function StaffJobsPage({
+    searchParams,
+}: { searchParams: Promise<Record<string, string | string[] | undefined>> }) {
     const gate = await requireStaffVerified();
-    const jobsPromise: Promise<JobRow[] | null> = listJobs(
-        gate.pool, gate.identity, gate.organizationId, { limit: LIST_LIMIT },
+    const directoryPromise: Promise<Directory | null> = listJobDirectory(
+        gate.pool, gate.identity, gate.organizationId, await searchParams,
     ).catch((error: unknown) => {
         if (error instanceof StaffAuthorizationError && error.code === 'FORBIDDEN') {
             return null;
@@ -23,12 +32,12 @@ export default async function StaffJobsPage() {
         throw error;
     });
     // Both reads authorize independently; keep concurrency bounded to two.
-    const [{ summary }, jobs] = await Promise.all([
-        loadStaffWorkspace(),
-        jobsPromise,
+    const [{ capabilities }, directory] = await Promise.all([
+        loadStaffCapabilities(),
+        directoryPromise,
     ]);
 
-    if (jobs === null) {
+    if (directory === null) {
         return (
             <section className="mx-auto w-full max-w-7xl">
                 <PageHeader
@@ -47,22 +56,15 @@ export default async function StaffJobsPage() {
         );
     }
 
-    const clients = Array.from(
-        new Map(
-            jobs.map((job) => [job.clientId, job.clientName] as const),
-        ).entries(),
-    )
-        .map(([id, name]) => ({ id, name }))
-        .sort((left, right) => left.name.localeCompare(right.name));
-
     return (
         <section className="mx-auto w-full max-w-7xl">
             <JobsBrowser
-                jobs={jobs}
-                clients={clients}
-                currentMembershipId={gate.principal.membership_id}
-                canCreate={summary?.capabilities.writeJobs === true}
-                capped={jobs.length >= LIST_LIMIT}
+                jobs={directory.rows}
+                clients={directory.clients}
+                canCreate={capabilities?.writeJobs === true}
+                total={directory.total}
+                page={directory.page}
+                pageSize={directory.pageSize}
             />
         </section>
     );

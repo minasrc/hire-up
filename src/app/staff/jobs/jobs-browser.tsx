@@ -1,8 +1,6 @@
 'use client';
 
-import { useMemo } from 'react';
 import Link from 'next/link';
-import { useSearchParams } from 'next/navigation';
 import { ArrowDown, ArrowUp, ArrowUpDown, Briefcase, Search, X } from 'lucide-react';
 
 import { Button } from '@/components/staff-ui/button';
@@ -26,6 +24,7 @@ import {
 import { EmptyState, PageHeader, StatusBadge, TagPill } from '@/components/staff-preview/shared';
 import { jobStatusLabel } from '@/lib/job-display';
 import { cn } from '@/lib/utils';
+import { useDirectoryNavigation } from '../use-directory-navigation';
 import { flagParam, optionParam, textParam, uuidParam } from '../filter-params';
 
 export interface JobRow {
@@ -46,6 +45,7 @@ type SortKey = 'title' | 'client' | 'publication';
 type SortDirection = 'asc' | 'desc';
 
 export interface JobFiltersState {
+    page: number;
     query: string;
     clientId: string;
     state: string;
@@ -67,17 +67,6 @@ const STATE_OPTIONS = [
 
 const INTAKE_VALUES = ['all', 'open', 'closed'];
 
-const statusMatches = (job: JobRow, state: string) => {
-    if (state === 'all') return true;
-    if (state === 'listed') {
-        return job.publicationState === 'published' && job.publiclyListed === true;
-    }
-    if (state === 'unlisted') {
-        return job.publicationState === 'published' && job.publiclyListed === false;
-    }
-    return job.publicationState === state;
-};
-
 const statusTone = (label: string) =>
     label === 'Listed'
         ? 'success'
@@ -85,7 +74,7 @@ const statusTone = (label: string) =>
           ? 'secondary'
           : 'outline';
 
-function syncUrl(filters: JobFiltersState) {
+function serializeFilters(filters: JobFiltersState) {
     const params = new URLSearchParams();
     if (filters.query.trim()) params.set('q', filters.query);
     if (filters.clientId !== 'all') params.set('client', filters.clientId);
@@ -94,15 +83,16 @@ function syncUrl(filters: JobFiltersState) {
     if (filters.mine) params.set('mine', '1');
     if (filters.sortBy !== 'title') params.set('sort', filters.sortBy);
     if (filters.sortDirection !== 'asc') params.set('dir', filters.sortDirection);
-    const query = params.toString();
-    window.history.replaceState(
-        null, '', `/staff/jobs${query ? `?${query}` : ''}`);
+    if (filters.page > 1) params.set('page', String(filters.page));
+    return params.toString();
 }
 
 const STATE_VALUES = STATE_OPTIONS.map((option) => option.value);
 const SORT_VALUES: SortKey[] = ['title', 'client', 'publication'];
 
 const parseFilters = (params: { get(name: string): string | null }): JobFiltersState => ({
+    page: /^\d+$/.test(params.get('page') ?? '')
+        ? Math.min(1000000, Math.max(1, Number(params.get('page')))) : 1,
     query: textParam(params, 'q'),
     clientId: uuidParam(params, 'client'),
     state: optionParam(params, 'state', STATE_VALUES, 'all'),
@@ -115,49 +105,25 @@ const parseFilters = (params: { get(name: string): string | null }): JobFiltersS
 export function JobsBrowser({
     jobs,
     clients,
-    currentMembershipId,
     canCreate,
-    capped,
+    total,
+    page,
+    pageSize,
 }: {
     jobs: JobRow[];
     clients: { id: string; name: string }[];
-    currentMembershipId: string;
     canCreate: boolean;
-    capped: boolean;
+    total: number;
+    page: number;
+    pageSize: number;
 }) {
-    const searchParams = useSearchParams();
-    const filters = parseFilters(searchParams);
-
-    const update = (next: JobFiltersState) => {
-        syncUrl(next);
+    const { filters, update: navigate, pending } = useDirectoryNavigation(
+        '/staff/jobs', parseFilters, serializeFilters,
+    );
+    const update = (next: JobFiltersState, debounce = false) => {
+        navigate({ ...next, page: 1 }, debounce);
     };
-
-    const filteredJobs = useMemo(() => {
-        const needle = filters.query.trim().toLowerCase();
-        return jobs.filter((job) => {
-            if (filters.clientId !== 'all' && job.clientId !== filters.clientId) return false;
-            if (!statusMatches(job, filters.state)) return false;
-            if (filters.intake !== 'all' && job.applicationState !== filters.intake) return false;
-            if (filters.mine && job.ownerMembershipId !== currentMembershipId) return false;
-            if (needle) {
-                const haystack = `${job.title} ${job.clientName}`.toLowerCase();
-                if (!haystack.includes(needle)) return false;
-            }
-            return true;
-        });
-    }, [jobs, filters, currentMembershipId]);
-
-    const direction = filters.sortDirection === 'asc' ? 1 : -1;
-    const sortedJobs = filteredJobs.slice().sort((left, right) => {
-        const comparison =
-            filters.sortBy === 'client'
-                ? left.clientName.localeCompare(right.clientName)
-                : filters.sortBy === 'publication'
-                  ? jobStatusLabel(left).localeCompare(jobStatusLabel(right))
-                  : left.title.localeCompare(right.title);
-        return comparison * direction || left.title.localeCompare(right.title);
-    });
-
+    const totalPages = Math.max(1, Math.ceil(total / pageSize));
     const filtersActive =
         filters.query.trim() !== ''
         || filters.clientId !== 'all'
@@ -213,7 +179,7 @@ export function JobsBrowser({
     };
 
     return (
-        <div className="flex flex-col gap-6">
+        <div className="flex flex-col gap-6" aria-busy={pending}>
             <PageHeader
                 eyebrow="Workspace"
                 title="Jobs"
@@ -239,9 +205,10 @@ export function JobsBrowser({
                             id="job-search"
                             className="pl-9"
                             placeholder="Search title or client…"
+                            maxLength={200}
                             value={filters.query}
                             onChange={(event) =>
-                                update({ ...filters, query: event.target.value })
+                                update({ ...filters, query: event.target.value }, true)
                             }
                         />
                     </div>
@@ -315,13 +282,11 @@ export function JobsBrowser({
             </div>
 
             <p role="status" className="text-xs text-muted-foreground">
-                {filteredJobs.length} job{filteredJobs.length === 1 ? '' : 's'}
-                {capped
-                    ? ' · Showing the latest 500 jobs; filters apply to loaded records'
-                    : ''}
+                {total} job{total === 1 ? '' : 's'}
+                {pending ? ' · Updating…' : ''}
             </p>
 
-            {filteredJobs.length === 0 ? (
+            {jobs.length === 0 ? (
                 <EmptyState
                     icon={Briefcase}
                     title="No jobs match these filters"
@@ -345,7 +310,7 @@ export function JobsBrowser({
                             </TableRow>
                         </TableHeader>
                         <TableBody>
-                            {sortedJobs.map((job) => {
+                            {jobs.map((job) => {
                                 const status = jobStatusLabel(job);
                                 const closedIntake =
                                     job.publicationState === 'published'
@@ -397,6 +362,20 @@ export function JobsBrowser({
                     </Table>
                 </div>
             )}
+            <nav aria-label="Directory pages" className="flex items-center justify-between gap-3">
+                <Button variant="outline" size="sm" disabled={pending || page <= 1}
+                    onClick={() => navigate({ ...filters, page: page - 1 })}>
+                    Previous
+                </Button>
+                <span className="text-xs text-muted-foreground">
+                    Page {page} of {totalPages}
+                    {total > 0 ? ` · ${(page - 1) * pageSize + 1}–${Math.min(page * pageSize, total)} of ${total}` : ''}
+                </span>
+                <Button variant="outline" size="sm" disabled={pending || page >= totalPages}
+                    onClick={() => navigate({ ...filters, page: page + 1 })}>
+                    Next
+                </Button>
+            </nav>
         </div>
     );
 }

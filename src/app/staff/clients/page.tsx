@@ -1,7 +1,7 @@
-import { listClients } from '@/lib/client-job-operations';
+import { listClientDirectory } from '@/lib/client-job-operations';
 import { StaffAuthorizationError } from '@/lib/staff-authorization';
 import { requireStaffVerified } from '@/lib/staff-gate.server';
-import { loadStaffWorkspace } from '@/lib/workspace.server';
+import { loadStaffCapabilities } from '@/lib/workspace.server';
 import { PageHeader } from '@/components/staff-preview/shared';
 import { Card, CardContent } from '@/components/staff-ui/card';
 import { ClientsBrowser, type ClientRow } from './clients-browser';
@@ -10,12 +10,20 @@ export const dynamic = 'force-dynamic';
 
 export const metadata = { title: 'Clients · Agora staff' };
 
-const LIST_LIMIT = 500;
+type Directory = {
+    rows: ClientRow[];
+    total: number;
+    page: number;
+    pageSize: number;
+};
 
-export default async function StaffClientsPage() {
+
+export default async function StaffClientsPage({
+    searchParams,
+}: { searchParams: Promise<Record<string, string | string[] | undefined>> }) {
     const gate = await requireStaffVerified();
-    const clientsPromise: Promise<ClientRow[] | null> = listClients(
-        gate.pool, gate.identity, gate.organizationId, { limit: LIST_LIMIT },
+    const directoryPromise: Promise<Directory | null> = listClientDirectory(
+        gate.pool, gate.identity, gate.organizationId, await searchParams,
     ).catch((error: unknown) => {
         if (error instanceof StaffAuthorizationError && error.code === 'FORBIDDEN') {
             return null;
@@ -23,12 +31,12 @@ export default async function StaffClientsPage() {
         throw error;
     });
     // Both reads authorize independently; keep concurrency bounded to two.
-    const [{ summary }, clients] = await Promise.all([
-        loadStaffWorkspace(),
-        clientsPromise,
+    const [{ capabilities }, directory] = await Promise.all([
+        loadStaffCapabilities(),
+        directoryPromise,
     ]);
 
-    if (clients === null) {
+    if (directory === null) {
         return (
             <section className="mx-auto w-full max-w-7xl">
                 <PageHeader
@@ -50,11 +58,13 @@ export default async function StaffClientsPage() {
     return (
         <section className="mx-auto w-full max-w-7xl">
             <ClientsBrowser
-                clients={clients}
-                canCreate={summary?.capabilities.writeClients === true}
-                canReadJobs={summary?.capabilities.jobs === true}
-                canReadApplications={summary?.capabilities.applications === true}
-                capped={clients.length >= LIST_LIMIT}
+                clients={directory.rows}
+                canCreate={capabilities?.writeClients === true}
+                canReadJobs={capabilities?.jobs === true}
+                canReadApplications={capabilities?.applications === true}
+                total={directory.total}
+                page={directory.page}
+                pageSize={directory.pageSize}
             />
         </section>
     );

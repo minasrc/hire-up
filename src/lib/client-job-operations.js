@@ -1,3 +1,4 @@
+import { clientDirectoryQuery, jobDirectoryQuery } from './staff-directory-query.js';
 import { randomUUID } from 'node:crypto';
 import {
     StaffAuthorizationError,
@@ -330,3 +331,23 @@ export async function getJobPublication(pool, verifiedIdentity, organizationId, 
 }
 
 export { StaffAuthorizationError };
+
+export async function listClientDirectory(pool, verifiedIdentity, organizationId, input = {}) {
+    const filters = clientDirectoryQuery(input);
+    return run(
+        pool, verifiedIdentity, organizationId, CLIENT_READ_PERMISSIONS,
+        'select app.list_client_directory_v1($1::text, $2::text, $3::integer) as result',
+        [filters.query, filters.status, filters.page],
+    );
+}
+
+export async function listJobDirectory(pool, verifiedIdentity, organizationId, input = {}) {
+    const filters = jobDirectoryQuery(input);
+    return run(
+        pool, verifiedIdentity, organizationId, JOB_READ_PERMISSIONS,
+        'select app.list_job_directory_v1($1::text, $2::uuid, $3::text, $4::text,'
+            + ' $5::boolean, $6::text, $7::text, $8::integer) as result',
+        [filters.query, filters.clientId, filters.state, filters.intake,
+            filters.mine, filters.sortBy, filters.sortDirection, filters.page],
+    );
+}
