@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
 import { mkdirSync, readFileSync } from 'node:fs';
+import { createServer } from 'node:http';
 import { join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import test from 'node:test';
@@ -19,6 +20,7 @@ import { PRIVACY_MIGRATIONS } from '../support/privacy-foundation.js';
 import { PRIVACY_OPS_MIGRATION } from '../support/privacy-operations.js';
 import { WORKFLOW_MIGRATION, clientJobFixtureSql } from '../support/client-job-workflows.js';
 import { STAFF_MFA_COOKIE, createStaffMfaProof } from '../../src/lib/staff-mfa-cookie.js';
+import { createSyntheticPdf } from '../support/cv-fixtures.js';
 
 // An integration checkout can be supplied while UI and API work are on separate branches.
 // The application still receives only synthetic credentials and a disposable local database.
@@ -33,7 +35,8 @@ const migrations = [
     '20260928100000_staff_workspace.sql', '20260928220000_job_visibility.sql',
     '20260930090000_candidate_profiles.sql', '20260930090100_candidate_intake_serialization.sql',
     '20261001090000_public_intake_duplicate_review.sql', '20261001100000_candidate_merge.sql',
-    '20261002100000_candidate_upload.sql', '20261002130000_telegram_intake_foundation.sql',
+    '20261002100000_candidate_upload.sql', '20261002110000_staff_shell_capabilities.sql',
+    '20261002120000_staff_list_pagination.sql', '20261002130000_telegram_intake_foundation.sql',
 ];
 
 async function waitForServer(url) {
@@ -57,6 +60,41 @@ test('private intake reviews real drafts, preserves conflicting edits, validates
     const totpId = randomUUID();
     psql(db, `insert into app.totp_credentials (id, organization_id, user_id, secret, status, verified_at)
         values ('${totpId}', '${AUTHZ_ID.ORG_B}', '${AUTHZ_ID.USER_ADMIN2}', 'JBSWY3DPEHPK3PXP', 'active', now());`);
+    const files = new Map();
+    const storageKey = 'synthetic-storage-service-key';
+    const storage = createServer(async (request, response) => {
+        const requestUrl = new URL(request.url, 'http://localhost');
+        const prefix = '/storage/v1/object/';
+        const signed = requestUrl.pathname.startsWith(`${prefix}sign/cv-submissions/`);
+        const key = decodeURIComponent(requestUrl.pathname.slice((signed ? `${prefix}sign/cv-submissions/` : `${prefix}cv-submissions/`).length));
+        const json = (status, body) => { response.writeHead(status, { 'content-type': 'application/json' }); response.end(JSON.stringify(body)); };
+        if (signed && request.method === 'GET' && requestUrl.searchParams.get('token') === 'synthetic') {
+            const file = files.get(key);
+            if (!file) { json(404, { error: 'missing synthetic object' }); return; }
+            response.writeHead(200, { 'content-type': 'application/pdf' }); response.end(file); return;
+        }
+        if (request.headers.authorization !== `Bearer ${storageKey}`) { json(403, { error: 'synthetic credentials required' }); return; }
+        try {
+            const chunks = []; let length = 0;
+            for await (const chunk of request) {
+                length += chunk.length;
+                if (length > 4 * 1024 * 1024 + 65536) { json(413, { error: 'too large' }); return; }
+                chunks.push(chunk);
+            }
+            if (signed && request.method === 'POST' && files.has(key)) {
+                json(200, { signedURL: `/object/sign/cv-submissions/${key}?token=synthetic` });
+            } else if (request.method === 'POST' && requestUrl.pathname.startsWith(`${prefix}cv-submissions/`)) {
+                files.set(key, Buffer.concat(chunks)); json(200, { Key: `cv-submissions/${key}` });
+            } else if (request.method === 'DELETE' && requestUrl.pathname === `${prefix}cv-submissions`) {
+                const { prefixes = [] } = JSON.parse(Buffer.concat(chunks).toString());
+                for (const item of prefixes) files.delete(item);
+                json(200, prefixes.map(name => ({ name })));
+            } else json(404, { error: 'unsupported synthetic storage request' });
+        } catch { json(500, { error: 'synthetic storage failed' }); }
+    });
+    await new Promise((resolve, reject) => { storage.once('error', reject); storage.listen(0, '127.0.0.1', resolve); });
+    t.after(() => { storage.closeAllConnections(); storage.close(); });
+    const storageURL = `http://127.0.0.1:${storage.address().port}`;
     const port = await findFreePort();
     const baseURL = `http://127.0.0.1:${port}`;
     const output = [];
@@ -68,7 +106,7 @@ test('private intake reviews real drafts, preserves conflicting edits, validates
             STAFF_DATABASE_URL: `postgresql://agora_authz_test:${runtimePassword}@127.0.0.1:${publishedPort(db, 5432)}/postgres`,
             STAFF_ORGANIZATION_ID: AUTHZ_ID.ORG_B, NEXTAUTH_URL: baseURL, NEXTAUTH_SECRET: secret,
             GOOGLE_CLIENT_ID: 'synthetic-workspace-client', GOOGLE_CLIENT_SECRET: 'synthetic-workspace-client-secret',
-            TELEGRAM_INTAKE_ENABLED: '1', NEXT_PUBLIC_SUPABASE_URL: '', SUPABASE_SERVICE_ROLE_KEY: '',
+            TELEGRAM_INTAKE_ENABLED: '1', NEXT_PUBLIC_SUPABASE_URL: storageURL, SUPABASE_SERVICE_ROLE_KEY: storageKey,
             GITHUB_ID: '', GITHUB_SECRET: '',
         }, stdio: ['ignore', 'pipe', 'pipe'],
     });
@@ -104,8 +142,8 @@ test('private intake reviews real drafts, preserves conflicting edits, validates
     }
     const ready = await createDraft({ firstName: 'Ready', lastName: 'Candidate', primaryEmail: 'ready-telegram@example.test' });
     const incomplete = await createDraft({ firstName: 'Incomplete' });
-    // Real storage upload is deliberately outside this smoke: seed reviewed metadata in
-    // the throwaway database, while malformed uploads exercise the actual upload route.
+    // One ready draft is seeded for the initial view. The second draft below exercises
+    // an actual upload/sign/approval round trip against the bounded local storage adapter.
     const objectId = randomUUID();
     const evidenceId = randomUUID();
     psql(db, `update app.telegram_drafts set document=jsonb_build_object(
@@ -162,6 +200,36 @@ test('private intake reviews real drafts, preserves conflicting edits, validates
         assert.equal((await response).status(), 400);
         await expect(panel.getByRole('link', { name: /CV: Only valid PDF or DOCX/ })).toBeVisible();
         await expect(panel.getByLabel('First name *', { exact: true })).toHaveValue('External update');
+        await panel.getByLabel('Last name *', { exact: true }).fill('Candidate');
+        await panel.getByLabel('Primary email *', { exact: true }).fill('uploaded-telegram@example.test');
+        response = page.waitForResponse(response => response.url() === `${api}/${incomplete.id}` && response.request().method() === 'PATCH');
+        await panel.getByRole('button', { name: 'Save changes', exact: true }).click();
+        assert.equal((await response).status(), 200);
+        const pdf = createSyntheticPdf();
+        await upload.setInputFiles({ name: 'Uploaded-CV.pdf', mimeType: 'application/pdf', buffer: pdf });
+        response = page.waitForResponse(response => response.url() === `${api}/${incomplete.id}/cv`);
+        await panel.getByRole('button', { name: 'Upload selected CV', exact: true }).click();
+        const uploaded = await response;
+        assert.equal(uploaded.status(), 200, await uploaded.text());
+        assert.deepEqual((await uploaded.json()).result.missingFields, []);
+        assert.equal(files.size, 1);
+        assert.deepEqual([...files.values()][0], pdf);
+        await expect(panel.getByText('Ready', { exact: true })).toBeVisible();
+        await expect(panel.getByRole('link', { name: 'Open CV', exact: true })).toHaveAttribute('href', `/api/staff/telegram-intake/drafts/${incomplete.id}/cv`);
+        const cvRedirect = await context.request.get(`${api}/${incomplete.id}/cv`, { maxRedirects: 0 });
+        assert.equal(cvRedirect.status(), 302, await cvRedirect.text());
+        assert.equal(cvRedirect.headers()['cache-control'], 'private, no-store');
+        const signedURL = cvRedirect.headers().location;
+        assert.equal(new URL(signedURL).origin, storageURL);
+        const downloaded = await fetch(signedURL);
+        assert.equal(downloaded.status, 200);
+        assert.deepEqual(Buffer.from(await downloaded.arrayBuffer()), pdf);
+        response = page.waitForResponse(response => response.url() === `${api}/${incomplete.id}/decision`);
+        await panel.getByRole('button', { name: 'Approve candidate', exact: true }).click();
+        const uploadApproval = await response;
+        assert.equal(uploadApproval.status(), 200, await uploadApproval.text());
+        await expect(panel.getByText('Candidate approved.', { exact: true })).toBeVisible();
+        await expect(panel.getByRole('link', { name: 'Open CV', exact: true })).toHaveCount(0);
         await panel.getByRole('button', { name: 'Close', exact: true }).click();
         await page.getByLabel('Missing information', { exact: true }).selectOption('');
         await page.getByRole('button', { name: /^Ready \d/ }).click();
