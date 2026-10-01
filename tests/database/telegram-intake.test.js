@@ -34,7 +34,8 @@ test('Telegram private drafts and scoped embedding worker PostgreSQL boundaries'
     const password = installStaffFixture(container);
     psql(container, clientJobFixtureSql);
     psql(container, `insert into app.role_permissions(organization_id,role_id,permission_key)
-        values('${ORG_B}','${CJ_ID.ROLE_B_RECRUITER}','candidates.write');`);
+        values('${ORG_B}','${CJ_ID.ROLE_B_RECRUITER}','candidates.write'),
+            ('${ORG_B}','${CJ_ID.ROLE_B_RECRUITER}','documents.write');`);
     pool = new pg.Pool(staffPoolOptions(container, password, 4));
     const workerPassword = randomUUID();
     psql(container, `create role ${workerRole} login noinherit nosuperuser nocreatedb nocreaterole nobypassrls password '${workerPassword}';
@@ -68,6 +69,23 @@ test('Telegram private drafts and scoped embedding worker PostgreSQL boundaries'
     const list = (context) => staff('select app.telegram_list_drafts_v1($1,$2,$3,$4) as result', ['all', null, '', 1], context);
     const decide = (draft, action, operation = randomUUID()) => staff('select app.telegram_decide_draft_v1($1,$2,$3,$4) as result',
         [draft.id, draft.version, action, operation]);
+    const reserve = (draft, objectKey, context) => staff('select app.telegram_reserve_upload_v1($1,$2,$3) as result',
+        [draft.id, draft.version, objectKey], context);
+    const attachReserved = (draft, document) => staff('select app.telegram_attach_cv_v1($1,$2,$3::jsonb) as result',
+        [draft.id, draft.version, JSON.stringify(document)]);
+    const attach = async (draft, document) => {
+        await reserve(draft, document.objectKey);
+        return attachReserved(draft, document);
+    };
+    const pendingCleanup = (context) => staff('select app.telegram_pending_cleanup_v1() as result', [], context);
+    const claimCleanup = (key, context) => staff('select app.telegram_claim_cleanup_v1($1) as result', [key], context);
+    const finishCleanup = (key, context) => staff('select app.telegram_finish_cleanup_v1($1) as result', [key], context);
+    const makeEligible = (key) => psql(container, `update app.telegram_upload_cleanup set available_at=clock_timestamp()-interval '1 second' where object_key='${key}'`);
+    const documentFor = async (draft) => {
+        const candidateId = await staff('select app.telegram_cv_target_v1($1) as result', [draft.id]);
+        return { filename: 'Synthetic CV.pdf', sha256: 'a'.repeat(64), sizeBytes: 500, extension: 'pdf', mimeType: 'application/pdf',
+            objectKey: `staff/${ORG_B}/${candidateId}/${randomUUID()}.pdf` };
+    };
     const register = (credential = token(), context) => staff('select app.telegram_register_worker_v1($1,$2) as result', ['Synthetic worker', credential], context);
     const enqueue = (draft, context) => staff('select app.telegram_enqueue_embedding_v1($1,$2,$3,$4) as result',
         [draft.id, draft.version, 'Name: Synthetic candidate', indexVersion], context);
@@ -102,9 +120,8 @@ test('Telegram private drafts and scoped embedding worker PostgreSQL boundaries'
         let draft = await create({ firstName: 'Ada', lastName: 'Lovelace', primaryEmail: 'telegram@example.test',
             secondaryEmails: ['secondary@example.test'], compensationPreference: 'EUR 100k', telegramUsername: 'Sample_User', telegramUserId: '9007199254740993123456789' });
         const candidateId = await staff('select app.telegram_cv_target_v1($1) as result', [draft.id]);
-        const document = { filename: 'Synthetic CV.pdf', sha256: 'a'.repeat(64), sizeBytes: 500, extension: 'pdf', mimeType: 'application/pdf',
-            objectKey: `staff/${ORG_B}/${candidateId}/${randomUUID()}.pdf` };
-        draft = await staff('select app.telegram_attach_cv_v1($1,$2,$3::jsonb) as result', [draft.id, draft.version, JSON.stringify(document)]);
+        const document = await documentFor(draft);
+        draft = await attach(draft, document);
         assert.deepEqual(draft.cv, { filename: document.filename, status: 'validated' });
         assert.deepEqual(draft.missingFields, []);
         const operation = randomUUID();
@@ -121,6 +138,81 @@ test('Telegram private drafts and scoped embedding worker PostgreSQL boundaries'
         assert.deepEqual(cleared.fields, {});
         assert.equal(cleared.cv, null);
         assert.equal(cleared.candidateId, candidateId);
+    });
+
+    await t.test('abandoned upload reservations honor grace, owner scope, retries and late-attachment fencing', async () => {
+        const draft = await create();
+        const document = await documentFor(draft);
+        const key = document.objectKey;
+        await assert.rejects(attachReserved(draft, document), { code: '40001' });
+        assert.equal(await reserve(draft, key), true);
+        assert.equal(scalar(`select available_at>created_at+interval '59 minutes' from app.telegram_upload_cleanup where object_key='${key}'`), 't');
+        assert.ok(!(await pendingCleanup()).includes(key));
+        assert.equal(await claimCleanup(key), false);
+        assert.equal(await finishCleanup(key), false, 'pending reservations cannot be acknowledged as deleted');
+        makeEligible(key);
+        assert.ok((await pendingCleanup()).includes(key));
+        for (const context of [{ subject: CJ_SUBJECTS.RECRUITER }, { subject: SUBJECTS.ADMIN2, organizationId: ORG_A }]) {
+            assert.ok(!(await pendingCleanup(context)).includes(key));
+            assert.equal(await claimCleanup(key, context), false);
+            assert.equal(await finishCleanup(key, context), false);
+        }
+        assert.equal(await claimCleanup(key), true);
+        assert.equal(scalar(`select state from app.telegram_upload_cleanup where object_key='${key}'`), 'deleting');
+        assert.ok((await pendingCleanup()).includes(key), 'interrupted object deletion remains discoverable');
+        assert.equal(await claimCleanup(key), true, 'cleanup retry can reclaim the deleting key');
+        await assert.rejects(attachReserved(draft, document), { code: '40001' });
+        assert.equal(await finishCleanup(key), true);
+        assert.equal(await finishCleanup(key), false);
+        assert.ok(!(await pendingCleanup()).includes(key));
+        await assert.rejects(attachReserved(draft, document), { code: '40001' });
+        assert.equal((await get(draft)).cv, null);
+    });
+
+    await t.test('cleanup preserves draft and canonical references and queues replaced CVs', async () => {
+        let draft = await create({ firstName: 'Grace', lastName: 'Hopper', primaryEmail: 'cleanup-approved@example.test' });
+        const firstDocument = await documentFor(draft);
+        draft = await attach(draft, firstDocument);
+        assert.equal(scalar(`select count(*) from app.telegram_upload_cleanup where object_key='${firstDocument.objectKey}'`), '0', 'attachment consumes reservation');
+        const credential = token();
+        await register(credential);
+        await enqueue(draft);
+        const lease = await claim(credential);
+        await complete(credential, lease);
+        const secondDocument = await documentFor(draft);
+        draft = await attach(draft, secondDocument);
+        assert.equal(scalar(`select count(*) from app.telegram_draft_embeddings where draft_id='${draft.id}'`), '0', 'CV change invalidates embedding');
+        assert.ok((await pendingCleanup()).includes(firstDocument.objectKey));
+        assert.equal(await claimCleanup(firstDocument.objectKey), true);
+        assert.equal(await finishCleanup(firstDocument.objectKey), true);
+        psql(container, `insert into app.telegram_upload_cleanup(organization_id,owner_user_id,object_key)
+            values('${ORG_B}','${USER_ADMIN2}','${secondDocument.objectKey}')`);
+        assert.equal(await claimCleanup(secondDocument.objectKey), false, 'live private draft owns the bytes');
+        assert.equal(await finishCleanup(secondDocument.objectKey), false);
+        assert.equal(scalar(`select state from app.telegram_upload_cleanup where object_key='${secondDocument.objectKey}'`), 'pending');
+        const approved = await decide(draft, 'approve');
+        assert.equal(approved.status, 'approved');
+        assert.equal(await claimCleanup(secondDocument.objectKey), false, 'canonical blob reference survives approval and draft clearing');
+        assert.equal(await finishCleanup(secondDocument.objectKey), false);
+        assert.equal(scalar(`select count(*) from app.blob_locations where object_key='${secondDocument.objectKey}' and state='available'`), '1');
+    });
+
+    await t.test('cleanup claim racing attachment cannot delete an attached CV', async () => {
+        const draft = await create();
+        const document = await documentFor(draft);
+        await reserve(draft, document.objectKey);
+        makeEligible(document.objectKey);
+        const [attached, claimed] = await Promise.allSettled([attachReserved(draft, document), claimCleanup(document.objectKey)]);
+        assert.equal(claimed.status, 'fulfilled');
+        if (attached.status === 'fulfilled') {
+            assert.equal(claimed.value, false);
+            assert.equal((await get(draft)).cv.filename, document.filename);
+        } else {
+            assert.equal(attached.reason.code, '40001');
+            assert.equal(claimed.value, true);
+            assert.equal((await get(draft)).cv, null);
+            assert.equal(await finishCleanup(document.objectKey), true);
+        }
     });
 
     await t.test('shared evidence survives one decision and is removed after the last reference', async () => {
@@ -195,6 +287,26 @@ test('Telegram private drafts and scoped embedding worker PostgreSQL boundaries'
         assert.equal(scalar(`select attempts from app.telegram_jobs where id='${jobId}'`), '2');
         await update(draft, { firstName: 'Edited' });
         assert.equal(scalar(`select count(*) from app.telegram_draft_embeddings where draft_id='${draft.id}'`), '0');
+    });
+
+    await t.test('explicit re-enqueue retries terminal jobs with a fresh payload and lease', async () => {
+        const credential = token();
+        await register(credential);
+        const draft = await create();
+        const { jobId } = await enqueue(draft);
+        const oldLease = await claim(credential);
+        await worker('select app.telegram_fail_job_v1($1,$2,$3,$4) as result',
+            [credential, oldLease.id, oldLease.leaseToken, 'INVALID_JOB']);
+        assert.equal(scalar(`select status from app.telegram_jobs where id='${jobId}'`), 'failed');
+        assert.equal(scalar(`select payload::text from app.telegram_jobs where id='${jobId}'`), '{}');
+        assert.equal((await enqueue(draft)).jobId, jobId);
+        assert.equal(scalar(`select attempts from app.telegram_jobs where id='${jobId}'`), '0');
+        const newLease = await claim(credential);
+        assert.equal(newLease.id, jobId);
+        assert.notEqual(newLease.leaseToken, oldLease.leaseToken);
+        assert.equal(newLease.payload.indexVersion, indexVersion);
+        await assert.rejects(complete(credential, oldLease), { code: '40001' });
+        assert.deepEqual(await complete(credential, newLease), { status: 'completed' });
     });
 
     await t.test('editing a draft fences an in-flight embedding result', async () => {
