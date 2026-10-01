@@ -86,27 +86,21 @@ export default async function StaffJobPage(
     const { job, draft, published, publicationNeedsReview } = workspace;
     const { summary } = await loadStaffWorkspace();
     const canWrite = summary?.capabilities.writeJobs === true;
-    let client = null;
-    let clientError = false;
-    try {
-        const result = await getClient(
-            gate.pool, gate.identity, gate.organizationId,
-            { clientId: job.clientId });
-        client = result?.client ?? result;
-    } catch {
-        clientError = true;
-    }
-    let preview = null;
-    let previewError = false;
-    if (draft) {
-        try {
-            preview = await previewJobPublic(
-                gate.pool, gate.identity, gate.organizationId,
-                { revisionId: draft.id });
-        } catch {
-            previewError = true;
-        }
-    }
+    // Optional reads settle independently, preserving each failure message.
+    const [clientResult, previewResult] = await Promise.allSettled([
+        getClient(gate.pool, gate.identity, gate.organizationId,
+            { clientId: job.clientId }),
+        draft
+            ? previewJobPublic(gate.pool, gate.identity, gate.organizationId,
+                { revisionId: draft.id })
+            : Promise.resolve(null),
+    ]);
+    const client = clientResult.status === 'fulfilled'
+        ? clientResult.value?.client ?? clientResult.value
+        : null;
+    const clientError = clientResult.status === 'rejected';
+    const preview = previewResult.status === 'fulfilled' ? previewResult.value : null;
+    const previewError = previewResult.status === 'rejected';
 
     const field = (label: string, value: ReactNode) => (
         <FieldLabel label={label}>{value ?? '—'}</FieldLabel>

@@ -2,18 +2,30 @@
 
 import { useEffect, useRef, useState, type MouseEvent, type ReactNode } from 'react';
 import Link from 'next/link';
+import dynamic from 'next/dynamic';
 
 import { JobDocumentView } from '@/components/staff-preview/job-document';
-import {
-    RealCandidateDocuments,
-    type CandidateDocumentRecord,
-} from '@/components/staff-preview/real-candidate-documents';
+import type { CandidateDocumentRecord } from '@/components/staff-preview/real-candidate-documents';
 import { Badge } from '@/components/staff-ui/badge';
 import { Button } from '@/components/staff-ui/button';
 import {
     Sheet, SheetContent, SheetDescription, SheetTitle,
 } from '@/components/staff-ui/sheet';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/staff-ui/tabs';
+
+// Document preview controls are only needed when a candidate preview opens.
+const RealCandidateDocuments = dynamic(
+    () => import('@/components/staff-preview/real-candidate-documents').then(
+        (module) => module.RealCandidateDocuments,
+    ),
+    {
+        loading: () => (
+            <p role="status" className="py-4 text-sm text-muted-foreground">
+                Loading documents…
+            </p>
+        ),
+    },
+);
 
 type Selection = { kind: 'candidate' | 'job'; id: string };
 
