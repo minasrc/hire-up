@@ -1,4 +1,5 @@
 import { createHistoryAdapter } from './history-adapter.mjs';
+import { createCvAdapter } from './cv-adapter.mjs';
 
 // Loaded only by the Mac CLI, never imported into the hosted application bundle.
 export async function createTelegramFactory({ apiId, apiHash }, runtime) {
@@ -35,6 +36,7 @@ export async function createTelegramFactory({ apiId, apiHash }, runtime) {
     }
     return {
       history: createHistoryAdapter({ client, Api }),
+      cv: createCvAdapter({ client, Api }),
       session: () => client.session.save(),
       close: async () => { client.removeEventHandler(handler); await client.destroy(); },
       profile: async () => {

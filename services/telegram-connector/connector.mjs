@@ -120,7 +120,7 @@ export function createConnector({ host, vault, createTelegram, now = Date.now, o
     }
     if (task.status === 'connected') {
       if (now() >= nextKeepalive) { connectedProfile = await operation(() => client.profile(), version); nextKeepalive = now() + 60000; }
-      if (onConnectedTick && connectedProfile) await onConnectedTick({ connectionId: task.id, generation: task.generation, connectionLeaseToken: task.leaseToken, connectionLeaseExpiresAt: task.leaseExpiresAt, accountUserId: connectedProfile.telegramUserId, telegram: client.history, signal: clientAbort.signal, isActive: () => active(version) && task.status === 'connected' });
+      if (onConnectedTick && connectedProfile) await onConnectedTick({ connectionId: task.id, generation: task.generation, connectionLeaseToken: task.leaseToken, connectionLeaseExpiresAt: task.leaseExpiresAt, accountUserId: connectedProfile.telegramUserId, telegram: { ...client.history, cv: client.cv }, signal: clientAbort.signal, isActive: () => active(version) && task.status === 'connected' });
       return;
     }
     if (task.status === 'awaiting_password') {

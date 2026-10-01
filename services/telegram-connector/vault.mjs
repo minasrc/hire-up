@@ -65,6 +65,32 @@ export function createVault({ root, server, workerId }) {
   };
   return {
     publicKeySpki: identity.publicKeySpki,
+    saveCvChunk(connectionId, accountId, jobId, index, bytes) {
+      if (!idPattern.test(jobId) || !Number.isInteger(index) || index < 0 || index > 7 || !Buffer.isBuffer(bytes) || bytes.length < 1 || bytes.length > 524288) throw new Error('INVALID_CV_CHUNK');
+      const key = `cv:${jobId}:chunk:${index}`;
+      const iv = randomBytes(12);
+      const cipher = createCipheriv('aes-256-gcm', encryptionKey, iv);
+      cipher.setAAD(Buffer.from(`${scope}:cv:${connectionId}:${accountId}:${key}`));
+      const ciphertext = Buffer.concat([cipher.update(bytes), cipher.final()]);
+      atomicWrite(historyFile(connectionId, accountId, key, true), JSON.stringify({ iv: iv.toString('base64'), tag: cipher.getAuthTag().toString('base64'), ciphertext: ciphertext.toString('base64') }));
+    },
+    loadCvChunk(connectionId, accountId, jobId, index) {
+      if (!idPattern.test(jobId) || !Number.isInteger(index) || index < 0 || index > 7) throw new Error('INVALID_CV_CHUNK');
+      const key = `cv:${jobId}:chunk:${index}`;
+      const record = JSON.parse(readPrivateFile(historyFile(connectionId, accountId, key), 750000));
+      const decipher = createDecipheriv('aes-256-gcm', encryptionKey, Buffer.from(record.iv, 'base64'));
+      decipher.setAAD(Buffer.from(`${scope}:cv:${connectionId}:${accountId}:${key}`));
+      decipher.setAuthTag(Buffer.from(record.tag, 'base64'));
+      const bytes = Buffer.concat([decipher.update(Buffer.from(record.ciphertext, 'base64')), decipher.final()]);
+      if (!bytes.length || bytes.length > 524288) throw new Error('INVALID_CV_CHUNK');
+      return bytes;
+    },
+    removeCvChunks(connectionId, accountId, jobId) {
+      if (!idPattern.test(jobId)) throw new Error('INVALID_CV_CHUNK');
+      for (let index = 0; index < 8; index++) {
+        try { unlinkSync(historyFile(connectionId, accountId, `cv:${jobId}:chunk:${index}`)); } catch (error) { if (error.code !== 'ENOENT') throw error; }
+      }
+    },
     saveHistory(connectionId, accountId, key, record) {
       const json = JSON.stringify(record);
       if (Buffer.byteLength(json) > 524288) throw new Error('HISTORY_CACHE_TOO_LARGE');

@@ -125,8 +125,8 @@ feature; deleted/inaccessible Telegram content cannot be recovered by this impor
 The server schedules selected chats fairly, enforces private storage quotas, and
 shows explicit pauses for quota, peer access and large-message problems. Flood
 waits become server-side account cooldowns; the Mac never sleeps while holding a
-job lease. No requests send messages, join chats, download attachments, or mark
-conversations as read.
+job lease. History requests do not download attachments. No requests send
+messages, join chats, or mark conversations as read.
 
 Access hashes stay in encrypted, account-scoped peer-cache files. Usernames are
 only metadata; they are never used to resolve a hosted job to a different person.
@@ -140,4 +140,45 @@ History checks use synthetic Telegram responses and disposable local caches:
 
 ```sh
 node --test tests/unit/telegram-history-runtime.test.js tests/unit/telegram-connector*.test.js
+```
+
+## Recruiter-selected CV retrieval
+
+After extraction, recruiters may select a PDF/DOCX attachment suggestion and
+choose Retrieve CV. The same connector claims this account-scoped job while
+connected. It re-fetches the exact source message, checks the original document
+ID and available filename/size, and then reads at most 512 KiB per tick. Files
+larger than 4 MiB are rejected. Unknown original size is resolved from the fresh
+Telegram document before any file bytes are downloaded.
+
+CV work alternates with history pages, with connection control checks between
+ticks. Every file RPC has a 10-second deadline, cancellation signal and zero
+automatic retries. Flood waits become the shared account cooldown (up to seven
+days). File references can be refreshed at most three times for the same private
+document; DC migrations are similarly bounded. No high-level parallel Telegram
+downloader is used.
+
+Partial bytes and document access fields stay encrypted in account/job-scoped
+local chunk files, with 0600 files and 0700 directories. A restarted partial
+download rechecks the source before resuming. Completed bytes are submitted only
+to the configured platform's scoped binary upload endpoint; the Mac receives no
+storage key, general storage credential or database credential. The host checks
+the real byte length, SHA-256, file signature and filename extension before
+attaching it to the still-open, still-empty draft.
+
+Lost upload acknowledgements replay the same encrypted bytes and digest before
+claiming new work, using the current connection proof. A definitive stale-job
+response removes stale local work; uncertain network/server responses retain it.
+Successful acknowledgement removes local chunks. Successful Telegram disconnect
+removes the account cache as well. Permission denial stops the connector until
+credentials or permissions are repaired. Cancelled retrieval or a manual CV
+uploaded first cannot be overwritten by a late worker completion.
+
+The recruiter chooses among suggestions and reviews the CV and candidate draft;
+retrieval does not approve a candidate. Existing manual upload remains available.
+Signature detection establishes file type, not malware clearance or complete
+document-structure validation. CV text extraction is a separate checkpoint.
+
+```sh
+node --test tests/unit/telegram-cv-*.test.js
 ```
