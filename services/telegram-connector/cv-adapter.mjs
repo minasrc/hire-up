@@ -20,8 +20,10 @@ export function createCvAdapter({ client, Api }) {
     } catch (error) {
       if (signal?.aborted) throw new CvReadError('CONNECTION_CHANGED');
       if (Number.isInteger(error.seconds) && error.seconds > 0) throw new CvReadError('FLOOD_WAIT', Math.min(error.seconds, 604800));
-      if (/^FILE_REFERENCE_(EXPIRED|EMPTY|INVALID|[0-9]+_EXPIRED)$/.test(error.errorMessage ?? '')) throw new CvReadError('FILE_REFERENCE_EXPIRED');
-      if (/^FILE_MIGRATE_[0-9]+$/.test(error.errorMessage ?? '') && Number.isInteger(error.newDc) && error.newDc > 0 && error.newDc <= 100) throw new CvReadError('FILE_MIGRATE', undefined, error.newDc);
+      // Generated dynamic SDK errors expose their typed class/capture without
+      // consistently preserving the raw errorMessage string.
+      if (['FileReferenceExpiredError', 'FileReferenceEmptyError', 'FileReferenceInvalidError'].includes(error.constructor?.name) || /^FILE_REFERENCE_(EXPIRED|EMPTY|INVALID|[0-9]+_EXPIRED)$/.test(error.errorMessage ?? '')) throw new CvReadError('FILE_REFERENCE_EXPIRED');
+      if ((error.constructor?.name === 'FileMigrateError' || /^FILE_MIGRATE_[0-9]+$/.test(error.errorMessage ?? '')) && Number.isInteger(error.newDc) && error.newDc > 0 && error.newDc <= 100) throw new CvReadError('FILE_MIGRATE', undefined, error.newDc);
       if (['CHANNEL_PRIVATE', 'CHANNEL_INVALID', 'CHAT_ID_INVALID', 'PEER_ID_INVALID', 'USER_ID_INVALID', 'CHAT_ADMIN_REQUIRED', 'MESSAGE_ID_INVALID', 'MEDIA_EMPTY', 'FILE_ID_INVALID', 'LOCATION_INVALID'].includes(error.errorMessage)) throw new CvReadError('SOURCE_UNAVAILABLE');
       throw new CvReadError('TELEGRAM_UNAVAILABLE');
     }

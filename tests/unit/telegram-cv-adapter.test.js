@@ -46,6 +46,15 @@ test('adapter surfaces flood wait, expired references and file-DC migration with
   }
 });
 
+test('generated SDK error classes work without a raw errorMessage property', async () => {
+  class FileMigrateError extends Error { constructor() { super('private RPC detail'); this.newDc = 4; } }
+  class FileReferenceExpiredError extends Error {}
+  for (const [error, code] of [[new FileMigrateError(), 'FILE_MIGRATE'], [new FileReferenceExpiredError('private RPC detail'), 'FILE_REFERENCE_EXPIRED']]) {
+    const adapter = createCvAdapter({ Api, client: { invoke: async () => { throw error; } } });
+    await assert.rejects(adapter.inspect(inspectArgs()), value => value.code === code && value.message === code);
+  }
+});
+
 test('short/oversized chunks and cancelled responses cannot become successful partial CVs', async () => {
   const adapter = createCvAdapter({ Api, client: { invoke: async () => ({ messages: [message()] }) } });
   const location = await adapter.inspect(inspectArgs());

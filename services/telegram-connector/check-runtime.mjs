@@ -6,6 +6,8 @@ import { StringSession } from 'teleproto/sessions';
 import { Logger } from 'teleproto/extensions';
 import { computeCheck } from 'teleproto/Password.js';
 import { createTelegramFactory } from './telegram-adapter.mjs';
+import { createCvAdapter } from './cv-adapter.mjs';
+import { FileMigrateError, FileReferenceExpiredError } from 'teleproto/errors/RPCErrorList.js';
 assert.equal(Number(process.versions.node.split('.')[0]), 22);
 assert.equal(typeof await createTelegramFactory({ apiId: 1, apiHash: '0'.repeat(32) }), 'function');
 for (const method of ['connect', 'destroy', '_switchDC', 'invoke', 'getMe', 'addEventHandler', 'removeEventHandler']) assert.equal(typeof TelegramClient.prototype[method], 'function', method);
@@ -22,4 +24,8 @@ assert.equal(typeof Api.UpdateLoginToken, 'function');
 assert.equal(typeof computeCheck, 'function');
 assert.equal(new StringSession('').save(), '');
 assert.equal(new Logger('none').canSend('error'), false);
+for (const [error, expected] of [[new FileMigrateError({ capture: 4, request: undefined }), 'FILE_MIGRATE'], [new FileReferenceExpiredError({ capture: 0, request: undefined }), 'FILE_REFERENCE_EXPIRED']]) {
+  const cv = createCvAdapter({ Api, client: { invoke: async () => { throw error; } } });
+  await assert.rejects(cv.inspect({ peer: { kind: 'user', id: '123' }, messageId: '1', attachment: {}, readPeer: () => null }), value => value.code === expected);
+}
 process.stdout.write('Telegram runtime imports and API contract passed (offline).\n');
