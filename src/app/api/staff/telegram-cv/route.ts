@@ -1,5 +1,5 @@
 import { staffApiContext, staffGateResponse } from '@/lib/staff-api.server';
-import { telegramCvAction, telegramCvStatus } from '@/lib/telegram-cv-operations';
+import { telegramCvAction, telegramCvStatus, telegramCvBatchStatus } from '@/lib/telegram-cv-operations';
 import { readTelegramJson, telegramErrorResponse, telegramFeatureResponse, telegramJson, telegramOriginAllowed } from '@/lib/telegram-intake-http';
 export const runtime = 'nodejs';
 async function handle(request: Request) {
@@ -9,6 +9,8 @@ async function handle(request: Request) {
     const args = [context.pool, context.identity, context.organizationId] as const;
     try {
         const q = new URL(request.url).searchParams;
+        if (request.method === 'GET' && q.get('draftId') && q.get('extractionJobId')) return telegramJson({ error: 'Choose a draft or batch.' }, 400);
+        if (request.method === 'GET' && q.get('extractionJobId')) return telegramJson(await telegramCvBatchStatus(...args, q.get('extractionJobId'), q.get('after') || null));
         return telegramJson(request.method === 'GET' ? await telegramCvStatus(...args, q.get('draftId'), q.get('after') || null) : await telegramCvAction(...args, await readTelegramJson(request, 16384)));
     } catch (error) { return telegramErrorResponse(error); }
 }
