@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+import { createHostedCredentialGuard } from '../worker-pairing/hosted-credential.mjs';
 import { pathToFileURL } from 'node:url';
 import { setTimeout as delay } from 'node:timers/promises';
 import { acquireLock, unlockStoppedProcess } from '../telegram-connector/vault.mjs';
@@ -28,9 +29,10 @@ export async function main(args = process.argv.slice(2)) {
   const stop = () => shutdown.abort();
   process.once('SIGINT', stop); process.once('SIGTERM', stop);
   try {
-    const workerToken = await readToken(config.workerTokenFile);
+    const credential = await createHostedCredentialGuard(config, readToken);
+    const workerToken = credential.workerToken;
     const host = async (action, body, { signal } = {}) => {
-      if (await readToken(config.workerTokenFile) !== workerToken) throw new SemanticWorkerError('CREDENTIAL_UNAVAILABLE');
+      await credential.check();
       return requestJson(`${config.serverUrl}/api/profile-search/worker/${action}`, workerToken, body, { signal, timeoutMs: action === 'complete' ? 20000 : 10000 });
     };
     const worker = createSemanticWorker({ host, ...createLocalClient(config), vault: createPendingStore({ root: config.stateDirectory, server: config.serverUrl, workerToken }) });

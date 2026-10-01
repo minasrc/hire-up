@@ -125,3 +125,19 @@ synthetic loopback host/provider endpoints. The singleton fixture uses the full
 32KiB legal text allowance, escaping, Unicode and16 attachments; tests also reject
 oversized multi-message batches, preserve completion limits, exercise model-context
 failure, and replay an encrypted completion after simulated hosted source cleanup.
+
+## Shared paired credential
+
+Set `credentialFile` in the private configuration, or `TELEGRAM_EXTRACTION_CREDENTIAL_FILE`,
+to the existing pairing `credential.json`. Relative paths resolve beside the
+configuration. The file supplies the hosted origin and original worker token;
+`serverUrl` and `workerTokenFile` are no longer required in this mode. Legacy
+configuration remains supported. If both forms are supplied, origins and tokens
+must match. Provider/model credentials remain separate.
+
+The process rechecks the paired origin, token and worker UUID before each hosted
+request. Replacement stops with `CREDENTIAL_UNAVAILABLE`; pending encrypted
+receipts remain intact. Same-device renewal and display metadata updates are
+allowed without changing the original encrypted namespace. Keep using the same
+stateDirectory when adopting a paired credential for an existing identity; do not
+copy, rotate or regenerate its token merely to start the launcher.

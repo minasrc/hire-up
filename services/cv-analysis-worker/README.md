@@ -50,3 +50,19 @@ CV_PARSER_DOCKER=1 node --test tests/database/cv-analysis-parser.test.js
 ```
 
 The first command uses injected adapters and synthetic loopback HTTP only. The second requires the installed service dependencies and built image, covering real PDF/DOCX extraction and Docker roundtrips. No live Telegram account or model provider is contacted. Root integration tests additionally exercise real platform jobs, CV replacement fences, human review and approval.
+
+## Shared paired credential
+
+Set `credentialFile` in the private configuration, or `CV_ANALYSIS_CREDENTIAL_FILE`,
+to the existing pairing `credential.json`. Relative paths resolve beside the
+configuration. The file supplies the hosted origin and original worker token;
+`serverUrl` and `workerTokenFile` are no longer required in this mode. Legacy
+configuration remains supported. If both forms are supplied, origins and tokens
+must match. Provider/model credentials remain separate.
+
+The process rechecks the paired origin, token and worker UUID before each hosted
+request. Replacement stops with `CREDENTIAL_UNAVAILABLE`; pending encrypted
+receipts remain intact. Same-device renewal and display metadata updates are
+allowed without changing the original encrypted namespace. Keep using the same
+stateDirectory when adopting a paired credential for an existing identity; do not
+copy, rotate or regenerate its token merely to start the launcher.

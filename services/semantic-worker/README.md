@@ -48,3 +48,19 @@ node --test tests/unit/semantic-worker.test.js
 Synthetic tests cover protocol versions/coverage, malformed or nonnormalized vectors, expired/cancelled work, lost-ACK restart using the real encrypted vault, terminal failures, request-byte packing and credential boundaries. Root's database acceptance additionally exercises the real scoped hosted operations. The optional local service `acceptance.py` measures full65KiB Unicode chunking and query latency during a long-passage backlog against the actual pinned model; the relevance evaluation is separate.
 
 The global model namespace is pinned multilingual MiniLM. Query/profile jobs use `minilm-utf8-128-v1`; CV jobs use `minilm-cv-lines-128-v1` with the same model space and full byte coverage. The claim advertises both `minilm-v1` and `approved-cv-v1`. E5 jobs are rejected even though they also contain384-dimensional vectors; the hosted migration invalidates their receipts and requeues all projections. Use the coordinated model migration described in the local service README. CV document binding and projection/chunker versions are validated before inference. A definitive403 for a CV receipt clears only that local receipt so ordinary profile work continues;401, uncertain network errors and profile403 retain their existing behavior.
+
+## Shared paired credential
+
+Set `credentialFile` in the private configuration, or `SEMANTIC_CREDENTIAL_FILE`,
+to the existing pairing `credential.json`. Relative paths resolve beside the
+configuration. The file supplies the hosted origin and original worker token;
+`serverUrl` and `workerTokenFile` are no longer required in this mode. Legacy
+configuration remains supported. If both forms are supplied, origins and tokens
+must match. Provider/model credentials remain separate.
+
+The process rechecks the paired origin, token and worker UUID before each hosted
+request. Replacement stops with `CREDENTIAL_UNAVAILABLE`; pending encrypted
+receipts remain intact. Same-device renewal and display metadata updates are
+allowed without changing the original encrypted namespace. Keep using the same
+stateDirectory when adopting a paired credential for an existing identity; do not
+copy, rotate or regenerate its token merely to start the launcher.

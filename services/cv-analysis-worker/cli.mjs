@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+import { createHostedCredentialGuard } from '../worker-pairing/hosted-credential.mjs';
 import { pathToFileURL } from 'node:url';
 import { setTimeout as delay } from 'node:timers/promises';
 import { acquireLock, unlockStoppedProcess } from '../telegram-connector/vault.mjs';
@@ -24,8 +25,9 @@ export async function main(args = process.argv.slice(2)) {
     const release = acquireLock(config.stateDirectory); const shutdown = new AbortController(); const stop = () => shutdown.abort();
     process.once('SIGINT', stop); process.once('SIGTERM', stop);
     try {
-        const workerToken = await readToken(config.workerTokenFile);
-        const checkToken = async () => { if (await readToken(config.workerTokenFile) !== workerToken) throw new ParserError('CREDENTIAL_UNAVAILABLE'); };
+        const credential = await createHostedCredentialGuard(config, readToken);
+        const workerToken = credential.workerToken;
+        const checkToken = () => credential.check();
         const host = async (action, body, { signal } = {}) => { await checkToken(); return requestJson(`${config.serverUrl}/api/cv-analysis/worker/${action}`, workerToken, body, { signal, timeoutMs: 15000, maxRequestBytes: body.stage === 'parse' && action === 'complete' ? 1048576 : 131072, maxResponseBytes: action === 'claim' ? 1048576 : 131072 }); };
         const worker = createCvAnalysisWorker({ host, readContent: createContentReader({ serverUrl: config.serverUrl, workerToken, checkToken }), parse: (bytes, options) => runIsolatedParser(bytes, { ...options, image: config.parserImage }), extract: createCvAnalysisProvider(config), vault: createPendingStore({ root: config.stateDirectory, server: config.serverUrl, workerToken }) });
         let failures = 0;

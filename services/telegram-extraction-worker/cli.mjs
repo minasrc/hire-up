@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+import { createHostedCredentialGuard } from '../worker-pairing/hosted-credential.mjs';
 import { pathToFileURL } from 'node:url';
 import { setTimeout as delay } from 'node:timers/promises';
 import { acquireLock, unlockStoppedProcess } from '../telegram-connector/vault.mjs';
@@ -30,10 +31,11 @@ export async function main(args = process.argv.slice(2)) {
   const stop = () => shutdown.abort();
   process.once('SIGINT', stop); process.once('SIGTERM', stop);
   try {
-    const workerToken = await readToken(config.workerTokenFile);
+    const credential = await createHostedCredentialGuard(config, readToken);
+    const workerToken = credential.workerToken;
     const host = async (action, body, { signal } = {}) => {
       // Revocation/rotation on disk stops this process before it submits data.
-      if (await readToken(config.workerTokenFile) !== workerToken) throw new ExtractionWorkerError('CREDENTIAL_UNAVAILABLE');
+      await credential.check();
       return requestJson(`${config.serverUrl}/api/telegram-extraction/worker/${action}`, workerToken, body, { signal, maxRequestBytes: 131072, maxResponseBytes: action === 'claim' ? 524288 : 262144 });
     };
     const worker = createExtractionWorker({ host, provider: createProvider(config), pendingStore: createPendingStore({ root: config.stateDirectory, server: config.serverUrl, workerToken }) });

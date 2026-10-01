@@ -1,6 +1,7 @@
 import { constants } from 'node:fs';
 import { open } from 'node:fs/promises';
 import { dirname, isAbsolute, resolve } from 'node:path';
+import { hostedCredentialConfig } from '../worker-pairing/hosted-credential.mjs';
 
 export class ExtractionWorkerError extends Error {
   constructor(code, status = 0) { super(code); this.code = code; this.status = status; }
@@ -30,8 +31,9 @@ export function validateConfig(raw) {
   if (!raw || typeof raw !== 'object' || Array.isArray(raw)) throw new ExtractionWorkerError('INVALID_CONFIG');
   if (!raw.providerBaseUrl || !raw.providerModel || !raw.providerTokenFile) throw new ExtractionWorkerError('PROVIDER_NOT_CONFIGURED');
   if (typeof raw.providerModel !== 'string' || raw.providerModel.length > 120 || raw.providerModel.includes('://') || !/^[a-zA-Z0-9][a-zA-Z0-9._:/-]*$/.test(raw.providerModel)) throw new ExtractionWorkerError('INVALID_CONFIG');
-  for (const name of ['workerTokenFile', 'providerTokenFile']) if (typeof raw[name] !== 'string' || !isAbsolute(raw[name])) throw new ExtractionWorkerError('INVALID_CONFIG');
-  return { serverUrl: safeUrl(raw.serverUrl, true), workerTokenFile: raw.workerTokenFile, providerBaseUrl: safeUrl(raw.providerBaseUrl, false), providerModel: raw.providerModel, providerTokenFile: raw.providerTokenFile, stateDirectory: resolve(raw.stateDirectory ?? 'services/telegram-extraction-worker/.runtime') };
+  raw = hostedCredentialConfig(raw);
+  for (const name of ['providerTokenFile', ...(raw.credentialFile ? [] : ['workerTokenFile']), ...(raw.workerTokenFile !== undefined ? ['workerTokenFile'] : [])]) if (typeof raw[name] !== 'string' || !isAbsolute(raw[name])) throw new ExtractionWorkerError('INVALID_CONFIG');
+  return { serverUrl: safeUrl(raw.serverUrl, true), workerTokenFile: raw.workerTokenFile, ...(raw.credentialFile ? { credentialFile: raw.credentialFile } : {}), providerBaseUrl: safeUrl(raw.providerBaseUrl, false), providerModel: raw.providerModel, providerTokenFile: raw.providerTokenFile, stateDirectory: resolve(raw.stateDirectory ?? 'services/telegram-extraction-worker/.runtime') };
 }
 export async function loadConfig(configPath, env = process.env) {
   let raw = {};
@@ -44,10 +46,11 @@ export async function loadConfig(configPath, env = process.env) {
     stateDirectory: resolve(base, env.TELEGRAM_EXTRACTION_STATE_DIRECTORY ?? raw.stateDirectory ?? 'services/telegram-extraction-worker/.runtime'),
     serverUrl: env.TELEGRAM_EXTRACTION_SERVER_URL ?? raw.serverUrl,
     workerTokenFile: env.TELEGRAM_EXTRACTION_WORKER_TOKEN_FILE ?? raw.workerTokenFile,
+    credentialFile: env.TELEGRAM_EXTRACTION_CREDENTIAL_FILE ?? raw.credentialFile,
     providerBaseUrl: env.TELEGRAM_EXTRACTION_PROVIDER_BASE_URL ?? raw.providerBaseUrl,
     providerModel: env.TELEGRAM_EXTRACTION_PROVIDER_MODEL ?? raw.providerModel,
     providerTokenFile: env.TELEGRAM_EXTRACTION_PROVIDER_TOKEN_FILE ?? raw.providerTokenFile,
   };
-  for (const key of ['workerTokenFile', 'providerTokenFile']) if (typeof merged[key] === 'string' && merged[key]) merged[key] = resolve(base, merged[key]);
+  for (const key of ['workerTokenFile', 'providerTokenFile', 'credentialFile']) if (typeof merged[key] === 'string' && merged[key]) merged[key] = resolve(base, merged[key]);
   return validateConfig(merged);
 }
