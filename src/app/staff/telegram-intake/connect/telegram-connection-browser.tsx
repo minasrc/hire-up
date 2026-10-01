@@ -10,6 +10,7 @@ import { Button } from '@/components/staff-ui/button';
 import { Card } from '@/components/staff-ui/card';
 import { Input } from '@/components/staff-ui/input';
 import { Label } from '@/components/staff-ui/label';
+import { WorkerPairingPanel } from './worker-pairing-panel';
 import { connectionError, encryptTelegramPassword, pollingDelay, requiresWorkerDisconnect, usableQr } from './connection-model';
 
 type Worker = { id: string; name: string; publicKeySpki: string; online: boolean; lastSeenAt: string | null };
@@ -36,7 +37,7 @@ async function request(init?: RequestInit): Promise<Snapshot> {
     return response.json();
 }
 
-export function TelegramConnectionBrowser() {
+export function TelegramConnectionBrowser({ workspaceId }: { workspaceId: string }) {
     const [snapshot, setSnapshot] = useState<Snapshot | null>(null);
     const [selectedWorker, setSelectedWorker] = useState('');
     const [password, setPassword] = useState('');
@@ -174,7 +175,7 @@ export function TelegramConnectionBrowser() {
                     {!snapshot.workers.find(item => item.id === selectedWorker)?.online ? <p className="text-sm text-muted-foreground">This connector is offline. Start it on your Mac; this page will detect it automatically.</p> : null}
                     {workerChangeBlocked ? <p role="status" className="text-sm text-muted-foreground">Disconnect this account before choosing another Mac. Wait for logout confirmation, or select the original Mac to retry.</p> : null}
                     <Button onClick={() => { if (!workerChangeBlocked) void mutate({ action: 'connect', workerId: selectedWorker }); }} disabled={busy || accessDenied || workerChangeBlocked || !snapshot.workers.find(item => item.id === selectedWorker)?.online}>{busy ? 'Starting…' : connection ? 'Connect again' : 'Connect Telegram'}</Button></>
-                    : <p className="text-sm text-muted-foreground">No registered Mac connector is available. Ask your workspace administrator to register this Mac and start its Telegram connector, then refresh this page.</p>}
+                    : <p className="text-sm text-muted-foreground">No Mac connector is available. Pair your Mac below, then start its Telegram connector.</p>}
             </div> : null}
             {active ? <div className="flex flex-wrap items-center gap-2 text-sm"><span>{worker?.name || 'Assigned Mac connector'}</span><Badge variant="secondary">{worker?.online ? 'Online' : 'Offline'}</Badge></div> : null}
             {active && !worker?.online ? <p role="status" className="text-sm text-muted-foreground">The Mac connector is offline. Keep it running to continue. If you need to revoke access now, use Telegram Settings → Devices.</p> : null}
@@ -201,6 +202,7 @@ export function TelegramConnectionBrowser() {
             {(active || connection.status === 'failed') && connection.status !== 'disconnecting' ? <Button variant="outline" disabled={busy || accessDenied} onClick={() => void mutate({ action: 'disconnect', connectionId: connection.id, generation: connection.generation })}>{['connected', 'failed'].includes(connection.status) ? 'Disconnect Telegram' : 'Cancel sign-in'}</Button> : null}
         </Card> : null}
         {connection?.status === 'connected' ? <Button asChild><Link href="/staff/telegram-intake/chats">Choose chats to import</Link></Button> : null}
+        <WorkerPairingPanel workspaceId={workspaceId} onDeviceChange={() => setRefresh(value => value + 1)} />
         <p className="text-sm text-muted-foreground">Connect your account, then choose chats to import their full available history. Drafts and source messages stay private; only approved candidate records become shared.</p>
     </section>;
 }

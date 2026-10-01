@@ -6,7 +6,7 @@ export const dynamic = 'force-dynamic';
 export const metadata = { title: 'Connect Telegram · Agora staff', robots: { index: false, follow: false } };
 
 export default async function TelegramConnectionPage() {
-    await requireStaffVerified();
+    const gate = await requireStaffVerified();
     if (process.env.TELEGRAM_INTAKE_ENABLED !== '1') notFound();
-    return <TelegramConnectionBrowser />;
+    return <TelegramConnectionBrowser workspaceId={gate.organizationId} />;
 }
