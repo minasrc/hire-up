@@ -6,6 +6,9 @@ export function searchStatusLabel(status, workerAvailable) {
 }
 export function searchGuidance(code) {
     return ({
+        CV_ACCESS_CHANGED: 'Your access to CV text changed. Previous results were cleared. Search profiles only, or start a new CV search after access is restored.',
+        CV_RESULTS_CHANGED: 'A CV used by this search changed or became unavailable. Previous results were cleared. Run the search again for current results.',
+        SEARCH_CAPACITY: 'CV search exceeds the supported search capacity. Search profiles only, or ask your administrator to review capacity.',
         WORKER_UNAVAILABLE: 'Keep the Mac search worker online, then retry this search.',
         EMBEDDING_UNAVAILABLE: 'The embedding service is unavailable. Check the Mac search worker before retrying.',
         INVALID_RESULT: 'The search worker returned an invalid result. Check the worker configuration before retrying.',
@@ -25,5 +28,11 @@ export function validResultHref(result) {
     return null;
 }
 export function hasIncompleteCoverage(coverage) {
-    return coverage.pending > 0 || coverage.failed > 0 || coverage.indexed < coverage.eligible;
+    return coverage.pending > 0 || coverage.failed > 0 || (coverage.fullyIndexed ?? coverage.indexed) < coverage.eligible;
 }
+export const cvSearchInvalidated = code => code === 'CV_ACCESS_CHANGED' || code === 'CV_RESULTS_CHANGED';
+export function safeSearchSnapshot(snapshot) {
+    if (!cvSearchInvalidated(snapshot.errorCode)) return snapshot;
+    return { ...snapshot, status: 'failed', results: [], nextAfter: null, capacity: null, coverage: { ...snapshot.coverage, cv: null } };
+}
+export function searchCvMode(scope, includeCv) { return scope !== 'my_drafts' && includeCv === true; }

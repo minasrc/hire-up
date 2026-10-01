@@ -182,6 +182,8 @@ test('Profile search separates keyword lookup, private scopes and asynchronous r
         await expect(page.getByLabel('Name/email lookup', { exact: true })).toBeVisible();
         await expect(page.getByRole('link', { name: 'Telegram intake', exact: true })).toBeVisible();
         await page.getByRole('link', { name: 'Search by meaning', exact: true }).click();
+        await expect(page.getByLabel('Include approved CV text', { exact: true })).toBeChecked();
+        await page.getByLabel('Include approved CV text', { exact: true }).uncheck();
         await expect(page.getByText(/The Mac search worker has not checked in recently/)).toBeVisible();
         await expect(page.getByText(/Coverage is incomplete/)).toBeVisible();
         const cancelled = await search('Private first query Solidity experience');
