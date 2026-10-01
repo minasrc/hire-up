@@ -56,6 +56,11 @@ const SECTION_LABELS: Record<string, string> = {
     jobs: 'Jobs',
     clients: 'Clients',
     members: 'Members',
+    'telegram-intake': 'Telegram intake',
+};
+
+const TELEGRAM_PAGE_LABELS: Record<string, string> = {
+    connect: 'Connect Telegram', chats: 'Telegram chats', extraction: 'Candidate extraction',
 };
 
 function useSection(pathname: string) {
@@ -496,7 +501,9 @@ export function StaffShell({
                                             aria-current="page"
                                             className="truncate font-medium text-foreground"
                                         >
-                                            {detail[detail.length - 1] === 'new'
+                                            {section === 'telegram-intake'
+                                                ? TELEGRAM_PAGE_LABELS[detail[detail.length - 1]] ?? 'Details'
+                                                : detail[detail.length - 1] === 'new'
                                                 ? `New ${sectionLabel.slice(0, -1)}`
                                                 : detail[detail.length - 1] === 'edit'
                                                   ? 'Edit'

@@ -23,6 +23,8 @@ export interface IntakeDraft {
     sourceTitle: string;
     updatedAt: string;
     candidateId?: string;
+    evidenceCount?: number;
+    evidenceTruncated?: boolean;
     evidence?: { id: string; text: string; senderName: string; sentAt: string }[];
 }
 export interface IntakeResult {
