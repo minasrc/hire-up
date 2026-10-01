@@ -2,7 +2,8 @@
 
 import hmac
 import os
-import threading
+import asyncio
+from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Literal
 
@@ -15,13 +16,15 @@ os.environ["TOKENIZERS_PARALLELISM"] = "false"
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, ConfigDict, ValidationError, field_validator
-from starlette.concurrency import run_in_threadpool
 from starlette.middleware.trustedhost import TrustedHostMiddleware
 
 from model_config import (
     DIMENSIONS, INDEX_VERSION, MAX_BODY_BYTES, MAX_INPUTS, MAX_TOKENS,
     MODEL_ID, MODEL_REVISION,
 )
+
+from chunking import CHUNKER_VERSION, chunk_plan
+from scheduler import PriorityScheduler
 
 ROOT = Path(__file__).resolve().parent
 
@@ -45,6 +48,13 @@ class EmbeddingRequest(BaseModel):
         return items
 
 
+class PlanRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+    model: Literal[MODEL_ID]
+    chunker_version: Literal[CHUNKER_VERSION]
+    text: str
+
+
 class Encoder:
     def __init__(self):
         import torch
@@ -61,6 +71,9 @@ class Encoder:
             raise RuntimeError("Unexpected embedding dimensions.")
         self.model.max_seq_length = MAX_TOKENS
         self.encode(["local startup check"], "query")
+
+    def plan(self, text):
+        return chunk_plan(text, self.model.tokenizer)
 
     def encode(self, inputs, input_type):
         prefixed = [f"{input_type}: {value}" for value in inputs]
@@ -84,9 +97,15 @@ class Encoder:
 def create_app(encoder, token):
     if len(token) < 32:
         raise ValueError("An authentication token of at least 32 characters is required.")
-    app = FastAPI(docs_url=None, redoc_url=None, openapi_url=None)
+    scheduler = PriorityScheduler(encoder)
+
+    @asynccontextmanager
+    async def lifespan(app):
+        yield
+        scheduler.close()
+
+    app = FastAPI(docs_url=None, redoc_url=None, openapi_url=None, lifespan=lifespan)
     app.add_middleware(TrustedHostMiddleware, allowed_hosts=["127.0.0.1", "localhost"])
-    slot = threading.BoundedSemaphore(1)
 
     @app.middleware("http")
     async def browser_boundary(request, call_next):
@@ -102,10 +121,10 @@ def create_app(encoder, token):
             "status": "ready", "model": MODEL_ID, "revision": MODEL_REVISION,
             "index_version": INDEX_VERSION, "dimensions": DIMENSIONS,
             "device": "cpu", "max_inputs": MAX_INPUTS, "max_tokens": MAX_TOKENS,
+            "chunker_version": CHUNKER_VERSION, "chunk_tokens": 448, "microbatch_inputs": 8,
         }
 
-    @app.post("/v1/embeddings")
-    async def embeddings(request: Request):
+    async def read_payload(request, schema, maximum):
         provided = request.headers.get("authorization", "").encode("utf-8")
         expected = f"Bearer {token}".encode("utf-8")
         if not hmac.compare_digest(provided, expected):
@@ -115,10 +134,10 @@ def create_app(encoder, token):
         raw = bytearray()
         async for chunk in request.stream():
             raw.extend(chunk)
-            if len(raw) > MAX_BODY_BYTES:
-                raise HTTPException(413, "Request exceeds 128 KiB.")
+            if len(raw) > maximum:
+                raise HTTPException(413, "Request exceeds size limit.")
         try:
-            payload = EmbeddingRequest.model_validate_json(raw)
+            payload = schema.model_validate_json(raw)
         except ValidationError as error:
             # Pydantic errors otherwise echo raw private inputs in responses.
             raise HTTPException(422, {
@@ -126,21 +145,33 @@ def create_app(encoder, token):
                 "fields": [".".join(str(x) for x in issue["loc"]) for issue in error.errors()],
             }) from None
 
-        def encode():
-            if not slot.acquire(blocking=False):
-                raise HTTPException(429, "Embedding worker busy; retry later.", headers={"Retry-After": "1"})
-            try:
-                return encoder.encode(payload.input, payload.input_type)
-            finally:
-                slot.release()
+        return payload
 
+    async def wait_result(request, future):
+        pending = asyncio.wrap_future(future)
         try:
-            vectors, token_count = await run_in_threadpool(encode)
+            while not pending.done():
+                await asyncio.wait({pending}, timeout=0.1)
+                if not pending.done() and await request.is_disconnected():
+                    raise asyncio.CancelledError()
+            return await pending
+        except asyncio.CancelledError:
+            future.cancel()
+            raise
         except HTTPException:
             raise
         except Exception:
-            # Do not expose library exception text, which can contain input text.
             raise HTTPException(503, "Embedding failed; retry the request.") from None
+
+    @app.post("/v1/chunk-plan")
+    async def plan(request: Request):
+        payload = await read_payload(request, PlanRequest, 1024 * 1024)
+        return await wait_result(request, scheduler.submit(plan_text=payload.text))
+
+    @app.post("/v1/embeddings")
+    async def embeddings(request: Request):
+        payload = await read_payload(request, EmbeddingRequest, MAX_BODY_BYTES)
+        vectors, token_count = await wait_result(request, scheduler.submit(payload.input, payload.input_type))
         return {
             "object": "list", "model": MODEL_ID, "index_version": INDEX_VERSION,
             "data": [{"object": "embedding", "index": i, "embedding": v} for i, v in enumerate(vectors)],
@@ -155,4 +186,4 @@ if __name__ == "__main__":
 
     token = (ROOT / ".runtime" / "token").read_text().strip()
     application = create_app(Encoder(), token)
-    uvicorn.run(application, host="127.0.0.1", port=8817, workers=1, access_log=False, log_level="warning")
+    uvicorn.run(application, host="127.0.0.1", port=int(os.environ.get("LOCAL_EMBEDDINGS_PORT", "8817")), workers=1, access_log=False, log_level="warning")

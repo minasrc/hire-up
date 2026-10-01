@@ -14,6 +14,7 @@ from urllib.request import urlopen
 ROOT = Path(__file__).resolve().parent
 RUNTIME = ROOT / ".runtime"
 PID_FILE = RUNTIME / "service.pid"
+PORT = int(os.environ.get("LOCAL_EMBEDDINGS_PORT", "8817"))
 
 
 def owned_pid():
@@ -26,7 +27,7 @@ def owned_pid():
 
 def health():
     try:
-        with urlopen("http://127.0.0.1:8817/health", timeout=2) as response:
+        with urlopen(f"http://127.0.0.1:{PORT}/health", timeout=2) as response:
             return json.load(response)
     except (URLError, TimeoutError):
         return None
@@ -55,7 +56,7 @@ def perform_action(action):
         print("Embedding service already started.")
         return
     if health():
-        raise SystemExit("Port 8817 already serves another process; leave it untouched.")
+        raise SystemExit(f"Port {PORT} already serves another process; leave it untouched.")
     if not (RUNTIME / "model" / "model.safetensors").exists():
         raise SystemExit("Run prepare.py first.")
     os.umask(0o077)
@@ -71,7 +72,7 @@ def perform_action(action):
             PID_FILE.unlink(missing_ok=True)
             raise SystemExit("Service failed to start; inspect .runtime/service.log.")
         if health():
-            print("Embedding service ready at http://127.0.0.1:8817 (authentication required).")
+            print(f"Embedding service ready at http://127.0.0.1:{PORT} (authentication required).")
             return
         time.sleep(0.5)
     raise SystemExit("Startup is still pending; inspect status and .runtime/service.log.")

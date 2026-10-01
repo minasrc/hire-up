@@ -1,4 +1,5 @@
 import threading
+import time
 import unittest
 from concurrent.futures import ThreadPoolExecutor
 
@@ -13,6 +14,11 @@ BODY = {"model": MODEL_ID, "input": ["Synthetic developer profile"], "input_type
 
 
 class FakeEncoder:
+    def plan(self, text):
+        from chunking import chunk_plan
+        from test_chunking import CharacterTokenizer
+        return chunk_plan(text, CharacterTokenizer())
+
     def encode(self, inputs, input_type):
         return [[1.0] + [0.0] * 383 for _ in inputs], 8
 
@@ -77,28 +83,42 @@ class ServiceTests(unittest.TestCase):
         self.assertEqual(response.status_code, 503)
         self.assertNotIn("private conversation", response.text)
 
-    def test_concurrent_work_is_rejected_then_slot_recovers(self):
+    def test_single_string_is_one_embedding(self):
+        response = self.post({**BODY, "input": "one complete string"})
+        self.assertEqual(len(response.json()["data"]), 1)
+
+    def test_plan_endpoint_authenticated_and_versioned(self):
+        from chunking import CHUNKER_VERSION
+        body = {"model": MODEL_ID, "chunker_version": CHUNKER_VERSION, "text": "private source " * 100}
+        self.assertEqual(self.client.post("/v1/chunk-plan", json=body).status_code, 401)
+        result = self.client.post("/v1/chunk-plan", json=body, headers=HEADERS)
+        self.assertEqual(result.status_code, 200)
+        self.assertEqual(result.json()["byte_length"], len(body["text"].encode()))
+        self.assertGreater(len(result.json()["chunks"]), 1)
+        response = self.client.post("/v1/chunk-plan", json={**body, "chunker_version": "secret-wrong"}, headers=HEADERS)
+        self.assertEqual(response.status_code, 422)
+        self.assertNotIn("secret-wrong", response.text)
+
+    def test_queries_preempt_remaining_passage_batches(self):
         entered, release = threading.Event(), threading.Event()
-
+        calls = []
         class BlockingEncoder(FakeEncoder):
-            def encode(self, *args):
-                entered.set()
-                if not release.wait(5):
-                    raise RuntimeError("test timed out")
-                return super().encode(*args)
-
+            def encode(self, inputs, kind):
+                calls.append((kind, len(inputs)))
+                if len(calls) == 1:
+                    entered.set()
+                    if not release.wait(5): raise RuntimeError("test timed out")
+                return super().encode(inputs, kind)
         client = TestClient(create_app(BlockingEncoder(), TOKEN), base_url="http://127.0.0.1:8817")
-        with ThreadPoolExecutor(max_workers=1) as executor:
-            first = executor.submit(client.post, "/v1/embeddings", headers=HEADERS, json=BODY)
-            try:
-                self.assertTrue(entered.wait(3))
-                second = client.post("/v1/embeddings", headers=HEADERS, json=BODY)
-                self.assertEqual(second.status_code, 429)
-                self.assertEqual(second.headers["retry-after"], "1")
-            finally:
-                release.set()
+        with ThreadPoolExecutor(max_workers=2) as executor:
+            first = executor.submit(client.post, "/v1/embeddings", headers=HEADERS, json={**BODY, "input": ["profile"] * 24})
+            self.assertTrue(entered.wait(3))
+            second = executor.submit(client.post, "/v1/embeddings", headers=HEADERS, json={**BODY, "input_type": "query"})
+            time.sleep(0.1)
+            release.set()
             self.assertEqual(first.result(timeout=5).status_code, 200)
-        self.assertEqual(client.post("/v1/embeddings", headers=HEADERS, json=BODY).status_code, 200)
+            self.assertEqual(second.result(timeout=5).status_code, 200)
+        self.assertEqual(calls, [("passage", 8), ("query", 1), ("passage", 8), ("passage", 8)])
 
 
 if __name__ == "__main__":
