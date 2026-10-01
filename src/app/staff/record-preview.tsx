@@ -1,8 +1,10 @@
 'use client';
 
-import { useEffect, useRef, useState, type MouseEvent, type ReactNode } from 'react';
+import { useEffect, useMemo, useRef, useState, type MouseEvent, type ReactNode } from 'react';
 import Link from 'next/link';
 import dynamic from 'next/dynamic';
+import { useSession } from 'next-auth/react';
+import { createStaffPreviewCache } from '@/lib/staff-preview-cache';
 
 import { JobDocumentView } from '@/components/staff-preview/job-document';
 import type { CandidateDocumentRecord } from '@/components/staff-preview/real-candidate-documents';
@@ -202,26 +204,101 @@ const recordPath = /^\/staff\/(candidates|jobs)\/([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-
 
 export function RecordPreview({ children }: { children: ReactNode }) {
     const [selection, setSelection] = useState<Selection | null>(null);
-    const [record, setRecord] = useState<CandidateRecord | JobRecord | null>(null);
+    const { data: session, status } = useSession();
+    const sessionIdentity = session?.user?.email;
+    const sessionCache = useMemo(() => ({
+        status, sessionIdentity, records: createStaffPreviewCache(),
+    }), [status, sessionIdentity]);
+    const cache = sessionCache.records;
+    const [loaded, setLoaded] = useState<{
+        cache: ReturnType<typeof createStaffPreviewCache>;
+        key: string;
+        value: CandidateRecord | JobRecord;
+    } | null>(null);
+    if (loaded && loaded.cache !== cache) setLoaded(null);
+    const [revision, setRevision] = useState(0);
+    const selectionKey = selection ? `${selection.kind}:${selection.id}` : '';
+    const record = status === 'authenticated' && loaded?.cache === cache
+        && loaded.key === selectionKey ? loaded.value : null;
     const [error, setError] = useState('');
     const triggerRef = useRef<HTMLElement | null>(null);
 
     useEffect(() => {
-        if (!selection) return;
-        const controller = new AbortController();
-        fetch(`/api/staff/${selection.kind === 'candidate' ? 'candidates' : 'jobs'}/${selection.id}`,
-            { signal: controller.signal, cache: 'no-store' })
-            .then(async (response) => {
-                if (!response.ok) throw new Error(response.status === 403
-                    ? 'You do not have permission to view this record.'
-                    : 'This record could not be loaded.');
-                const payload = await response.json();
-                setRecord(payload.result);
-            }).catch((reason) => {
-                if (!controller.signal.aborted) setError(reason.message);
-            });
-        return () => controller.abort();
-    }, [selection]);
+        let refreshTimer: ReturnType<typeof setTimeout>;
+        const invalidate = () => {
+            cache.clear();
+            setLoaded(null);
+            setError('');
+            clearTimeout(refreshTimer);
+            refreshTimer = setTimeout(() => setRevision((value) => value + 1), 50);
+        };
+        const authLost = () => {
+            invalidate();
+            setSelection(null);
+        };
+        const onFocus = () => {
+            if (document.visibilityState === 'visible') invalidate();
+        };
+        const onVisibility = () => {
+            // Clear hidden-tab PII and check permissions again upon returning.
+            invalidate();
+        };
+        window.addEventListener('staff-workspace-updated', invalidate);
+        window.addEventListener('staff-session-invalidated', authLost);
+        window.addEventListener('focus', onFocus);
+        document.addEventListener('visibilitychange', onVisibility);
+        return () => {
+            clearTimeout(refreshTimer);
+            cache.clear();
+            window.removeEventListener('staff-workspace-updated', invalidate);
+            window.removeEventListener('staff-session-invalidated', authLost);
+            window.removeEventListener('focus', onFocus);
+            document.removeEventListener('visibilitychange', onVisibility);
+        };
+    }, [cache]);
+
+    useEffect(() => {
+        if (!selection || status !== 'authenticated'
+            || document.visibilityState !== 'visible') return;
+        let current = true;
+        cache.load(selectionKey, async (signal: AbortSignal) => {
+            const response = await fetch(
+                `/api/staff/${selection.kind === 'candidate' ? 'candidates' : 'jobs'}/${selection.id}`,
+                { signal, cache: 'no-store' },
+            );
+            if (signal.aborted) throw new DOMException('Preview request superseded', 'AbortError');
+            if (!response.ok) {
+                const failure = Object.assign(new Error(
+                    response.status === 403
+                        ? 'You do not have permission to view this record.'
+                        : response.status === 401 || response.status === 428
+                          ? 'Your session expired. Sign in again.'
+                          : 'This record could not be loaded.',
+                ), { status: response.status });
+                if ([401, 403, 428].includes(response.status)) {
+                    cache.clear();
+                    setLoaded(null);
+                    setError(failure.message);
+                }
+                throw failure;
+            }
+            const payload = await response.json();
+            if (!payload?.result) throw new Error('This record could not be loaded.');
+            return payload.result;
+        }).then((value: CandidateRecord | JobRecord) => {
+            if (current && cache.peek(selectionKey) === value) {
+                setLoaded({ cache, key: selectionKey, value });
+            }
+        }).catch((reason: Error) => {
+            if (current && reason.name !== 'AbortError') {
+                setLoaded(null);
+                setError(reason.message);
+            }
+        });
+        // Switching or closing a preview detaches its subscriber, allowing a
+        // quick reopen to share the same request without stale state writes.
+        return () => { current = false; };
+    }, [selection, selectionKey, cache, revision, status]);
 
     const handleClick = (event: MouseEvent<HTMLElement>) => {
         if (event.defaultPrevented || event.button !== 0 || event.metaKey || event.ctrlKey
@@ -236,9 +313,14 @@ export function RecordPreview({ children }: { children: ReactNode }) {
         event.preventDefault();
         event.stopPropagation();
         triggerRef.current = anchor;
-        setRecord(null);
+        const next: Selection = {
+            kind: match[1] === 'jobs' ? 'job' : 'candidate', id: match[2],
+        };
+        const key = `${next.kind}:${next.id}`;
+        const cached = cache.peek(key) as CandidateRecord | JobRecord | undefined;
+        setLoaded(cached ? { cache, key, value: cached } : null);
         setError('');
-        setSelection({ kind: match[1] === 'jobs' ? 'job' : 'candidate', id: match[2] });
+        setSelection(next);
     };
 
     const fullUrl = selection
@@ -259,7 +341,13 @@ export function RecordPreview({ children }: { children: ReactNode }) {
     return <>
         <main onClickCapture={handleClick}
             className="min-w-0 flex-1 px-4 py-6 md:px-8 md:py-8">{children}</main>
-        <Sheet open={selection !== null} onOpenChange={(open) => { if (!open) setSelection(null); }}>
+        <Sheet open={selection !== null} onOpenChange={(open) => {
+            if (!open) {
+                setSelection(null);
+                setLoaded(null);
+                setError('');
+            }
+        }}>
             <SheetContent side="right" className="w-full max-w-full gap-0 p-0 sm:max-w-[min(900px,75vw)]"
                 onCloseAutoFocus={(event) => {
                     event.preventDefault();
@@ -283,7 +371,15 @@ export function RecordPreview({ children }: { children: ReactNode }) {
                     </Button> : null}
                 </div>
                 <div className="min-h-0 flex-1 overflow-y-auto px-5 py-5">
-                    {error ? <p role="alert" className="text-sm text-destructive">{error}</p>
+                    {status === 'unauthenticated' ? <p role="alert" className="text-sm text-destructive">
+                        Your session expired. Sign in again.</p>
+                        : error ? <div className="space-y-3">
+                            <p role="alert" className="text-sm text-destructive">{error}</p>
+                            <Button size="sm" variant="outline" onClick={() => {
+                                setError('');
+                                setRevision((value) => value + 1);
+                            }}>Retry</Button>
+                        </div>
                         : !selection || !record ? <p role="status" className="text-sm text-muted-foreground">
                             Loading preview…</p>
                             : selection?.kind === 'candidate'
