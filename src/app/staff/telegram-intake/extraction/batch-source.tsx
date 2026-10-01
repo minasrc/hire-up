@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useState } from 'react';
+import { BatchCvActions } from '../cv-analysis/batch-cv-actions';
 import { Button } from '@/components/staff-ui/button';
 import { extractionAction, extractionEndpoint, extractionRequest } from './extraction-api';
 import { canReleaseContext, retentionHolds, retentionLabel } from './retention-model';
@@ -58,6 +59,7 @@ export function BatchSource({ jobId, retention, disabled = false, onChanged }: {
                 {message.attachments.length ? <ul className="space-y-1 text-xs text-muted-foreground">{message.attachments.map((item, index) => <li key={index} className="break-words">{item.filename || item.kind} · Metadata only</li>)}</ul> : null}
             </article>)}
             {source && !source.messages.length ? <p className="text-sm">No messages are available in this batch snapshot.</p> : null}
+            {source?.messages.some(message => message.attachments.length) ? <BatchCvActions jobId={jobId} disabled={busy || disabled} /> : null}
             {current.canRelease || current.canKeep ? <div className="space-y-3 border-t border-border pt-4">
                 <p className="text-sm">Keep context unless you have reviewed all of it and no longer need the remaining information.</p>
                 {holds ? <p className="text-xs text-muted-foreground">Review holds: {holds}. A release request waits for these to finish.</p> : null}

@@ -1,5 +1,5 @@
 export type IntakeView = 'ready' | 'needs_information' | 'snoozed' | 'duplicates' | 'all';
-export type MissingField = '' | 'cv' | 'firstName' | 'lastName' | 'primaryEmail';
+export type MissingField = '' | 'cv' | 'firstName' | 'lastName' | 'primaryEmail' | 'cvAnalysis';
 export interface DraftFields {
     firstName?: string;
     lastName?: string;
@@ -24,6 +24,9 @@ export interface IntakeDraft {
     sourceTitle: string;
     updatedAt: string;
     candidateId?: string;
+    analysisReviewRequired?: boolean;
+    pendingCvProposalCount?: number;
+    pendingProposalCount?: number;
     evidenceCount?: number;
     evidenceTruncated?: boolean;
     evidence?: { id: string; text: string; senderName: string; sentAt: string }[];
@@ -45,6 +48,8 @@ export const fieldLabels: Record<string, string> = {
     professionalUrl: 'Professional URL', professionalSummary: 'Professional summary',
     compensationPreference: 'Compensation preference', telegramUsername: 'Telegram username', cv: 'CV',
 };
+
+export const reviewLabels: Record<string, string> = { ...fieldLabels, proposals: 'Suggestions', cvAnalysis: 'CV analysis review' };
 
 export function draftName(draft: IntakeDraft) {
     return [draft.fields.firstName, draft.fields.lastName].filter(Boolean).join(' ') || 'Unnamed draft';

@@ -12,10 +12,12 @@ import { Label } from '@/components/staff-ui/label';
 import { Textarea } from '@/components/staff-ui/textarea';
 import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from '@/components/staff-ui/sheet';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/staff-ui/table';
+import { CvAnalysisReview } from './cv-analysis/cv-analysis-review';
+import { mergeAnalysisDraft } from './cv-analysis/analysis-model';
 import { CvRetrieval } from './cv/cv-retrieval';
 import { classifyCvDraftRefresh } from './cv/cv-model';
 import { DraftSuggestions } from './extraction/draft-suggestions';
-import { draftName, draftStatus, editableFields, errorFields, fieldLabels, fieldsForSave, viewLabels } from './intake-model';
+import { draftName, draftStatus, editableFields, errorFields, fieldLabels, reviewLabels, fieldsForSave, viewLabels } from './intake-model';
 import type { IntakeDraft, IntakeResult, IntakeView, MissingField } from './intake-model';
 
 const endpoint = '/api/staff/telegram-intake/drafts';
@@ -94,7 +96,7 @@ export function TelegramIntakeBrowser({ initialResult, initialDraftId }: { initi
                     <div className="space-y-2"><Label htmlFor="draft-missing">Missing information</Label>
                         <select id="draft-missing" className="h-9 w-full rounded-lg border border-input bg-card px-3 text-sm sm:w-48" value={missing}
                             onChange={event => { setMissing(event.target.value as MissingField); setPage(1); }}>
-                            <option value="">Any</option><option value="cv">CV</option><option value="firstName">First name</option><option value="lastName">Last name</option><option value="primaryEmail">Primary email</option>
+                            <option value="">Any</option><option value="cv">CV</option><option value="firstName">First name</option><option value="lastName">Last name</option><option value="primaryEmail">Primary email</option><option value="cvAnalysis">CV analysis review</option>
                         </select>
                     </div>
                 </div>
@@ -106,7 +108,7 @@ export function TelegramIntakeBrowser({ initialResult, initialDraftId }: { initi
                         {result.drafts.map(draft => <TableRow key={draft.id}>
                             <TableCell><button type="button" className="rounded text-left font-medium underline-offset-4 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring" onClick={() => setSelected(draft.id)}>{draftName(draft)}</button><p className="mt-1 text-xs text-muted-foreground">{draft.fields.primaryEmail || 'No primary email'}</p></TableCell>
                             <TableCell><Badge variant="secondary">{draftStatus(draft)}</Badge></TableCell>
-                            <TableCell className="text-xs text-muted-foreground">{draft.missingFields.map(key => key === 'proposals' ? 'Suggestions' : fieldLabels[key] ?? key).join(', ') || 'Complete'}</TableCell>
+                            <TableCell className="text-xs text-muted-foreground">{draft.missingFields.map(key => reviewLabels[key] ?? key).join(', ') || 'Complete'}</TableCell>
                             <TableCell className="text-sm">{draft.sourceTitle || '—'}</TableCell><TableCell className="whitespace-nowrap text-xs text-muted-foreground">{dateLabel(draft.updatedAt)}</TableCell>
                         </TableRow>)}
                     </TableBody></Table> : null}
@@ -184,6 +186,8 @@ function DraftEditor({ id, onUpdate, onNotice }: { id: string; onUpdate: (row: I
 
     function refreshRetrievedDraft(row: IntakeDraft) {
         if (!draft || busy || conflict) return;
+        if (row.documentRevision === draft.documentRevision && row.version <= draft.version) return;
+        if (row.documentRevision === draft.documentRevision && row.status !== 'approved' && row.status !== 'discarded') { refreshAnalysisDraft(row); return; }
         const mode = classifyCvDraftRefresh({ current: draft, incoming: row, baselineFields: editableFields(draft.fields), localFields: fields, nextFields: editableFields(row.fields) });
         if (mode === 'ignore') return;
         if (mode === 'conflict') { fail(new IntakeError('Draft changed', 409, {})); return; }
@@ -201,6 +205,24 @@ function DraftEditor({ id, onUpdate, onNotice }: { id: string; onUpdate: (row: I
             setErrors(current => { const next = { ...current }; delete next.cv; return next; });
             setMessage('CV validated and attached. Your profile edits are preserved.');
         }
+    }
+
+    function refreshAnalysisDraft(row: IntakeDraft) {
+        if (!draft || busy || conflict) return;
+        const merged = mergeAnalysisDraft({ current: draft, incoming: row, baselineFields: editableFields(draft.fields), localFields: fields, nextFields: editableFields(row.fields) });
+        if (merged.mode === 'ignore') return;
+        if (merged.mode === 'conflict') {
+            fail(new IntakeError('Draft changed', 409, {}));
+            if (row.status === 'approved' || row.status === 'discarded') {
+                const baseline = editableFields(draft.fields);
+                const unsaved = Object.fromEntries(Object.entries(fields).filter(([key, value]) => value !== baseline[key]));
+                setClosedEdits(Object.keys(unsaved).length ? unsaved : null);
+                setMessage(`This draft was ${row.status} in another session.${Object.keys(unsaved).length ? ' Your unsaved edits were not saved. Copy them below before refreshing.' : ' Refresh to see its latest state.'}`);
+            }
+            return;
+        }
+        accept(row, false); setFields(merged.fields as Record<string, string>);
+        setErrors(current => { const next = { ...current }; if (!row.missingFields.includes('cvAnalysis')) delete next.cvAnalysis; if (!row.missingFields.includes('proposals')) delete next.proposals; return next; });
     }
 
     async function save() {
@@ -248,8 +270,8 @@ function DraftEditor({ id, onUpdate, onNotice }: { id: string; onUpdate: (row: I
         {message ? <div role={conflict || Object.keys(errors).length ? 'alert' : 'status'} className="space-y-3 rounded-lg border border-border bg-muted/30 p-3 text-sm"><p>{message}</p>{conflict ? <Button variant="outline" size="sm" onClick={refreshDraft}>Refresh draft{dirty ? ' (replace my edits)' : ''}</Button> : null}</div> : null}
         {closedEdits ? <div className="space-y-2"><Label htmlFor="closed-draft-edits">Your unsaved changes</Label><Textarea id="closed-draft-edits" readOnly rows={6} value={Object.entries(closedEdits).map(([key, value]) => `${fieldLabels[key] ?? key}: ${value || '(cleared)'}`).join('\n')} /><p className="text-xs text-muted-foreground">These values are available to copy in this open review only. They were not added to the closed draft or candidate profile.</p></div> : null}
         {candidateId ? <Link className="text-sm font-medium underline underline-offset-4" href={`/staff/candidates/${encodeURIComponent(candidateId)}`}>Open {draft.status === 'duplicate' ? 'existing' : 'approved'} candidate</Link> : null}
-        {Object.keys(errors).length ? <div role="alert" className="rounded-lg border border-border p-3 text-sm"><p className="font-medium">Resolve these issues before approval:</p><ul className="mt-2 list-disc space-y-1 pl-5">{Object.entries(errors).map(([key, error]) => <li key={key}><a className="underline underline-offset-4" href={`#intake-${key}`}>{key === 'proposals' ? 'Suggestions' : fieldLabels[key] ?? key}: {error}</a></li>)}</ul></div> : null}
-        {!terminal && draft.missingFields.length ? <p className="text-sm text-muted-foreground">Still needed: {draft.missingFields.map(key => key === 'proposals' ? 'Suggestions' : fieldLabels[key] ?? key).join(', ')}.</p> : null}
+        {Object.keys(errors).length ? <div role="alert" className="rounded-lg border border-border p-3 text-sm"><p className="font-medium">Resolve these issues before approval:</p><ul className="mt-2 list-disc space-y-1 pl-5">{Object.entries(errors).map(([key, error]) => <li key={key}><a className="underline underline-offset-4" href={`#intake-${key}`}>{reviewLabels[key] ?? key}: {error}</a></li>)}</ul></div> : null}
+        {!terminal && draft.missingFields.length ? <p className="text-sm text-muted-foreground">Still needed: {draft.missingFields.map(key => reviewLabels[key] ?? key).join(', ')}.</p> : null}
         <DraftSuggestions draft={draft} dirty={Boolean(dirty)} busy={busy} conflict={conflict} onUpdate={row => { accept(row); setErrors(current => { const next = { ...current }; delete next.proposals; return next; }); setMessage(''); }} onBusyChange={setBusy} onConflict={() => fail(new IntakeError('Draft changed', 409, {}))} />
         {!terminal ? <form className="space-y-5" onSubmit={event => { event.preventDefault(); void run('save'); }} noValidate>
             <fieldset disabled={busy || terminal || conflict} className="grid gap-4 sm:grid-cols-2">
@@ -268,6 +290,7 @@ function DraftEditor({ id, onUpdate, onNotice }: { id: string; onUpdate: (row: I
             <p className="break-all text-sm text-muted-foreground">{draft.cv ? `${draft.cv.filename} · ${draft.cv.status}` : terminal ? draft.status === 'approved' ? 'The CV is available on the approved candidate profile.' : 'No CV is retained on this closed draft.' : 'No CV attached'}</p>
             {draft.cv && !terminal ? <a className="block text-sm font-medium underline underline-offset-4" href={`${url}/cv`} target="_blank" rel="noopener noreferrer">Open CV</a> : null}
             {!terminal ? <><Label className="block" htmlFor="intake-cv">{draft.cv ? 'Replace CV' : 'Upload CV'}</Label><Input ref={fileInput} id="intake-cv" type="file" accept=".pdf,.docx,application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document" className="h-auto py-2" disabled={busy || conflict} onChange={event => setFile(event.target.files?.[0] ?? null)} aria-describedby="intake-cv-help" aria-invalid={Boolean(errors.cv)} /><p id="intake-cv-help" className="text-xs text-muted-foreground">PDF or DOCX, up to 4 MB.</p>{errors.cv ? <p className="text-xs font-medium">{errors.cv}</p> : null}<Button variant="outline" size="sm" disabled={!file || busy || conflict} onClick={() => void upload()}>Upload selected CV</Button></> : null}
+            <CvAnalysisReview key={`${draft.id}:${draft.documentRevision}:${terminal}`} draft={draft} dirty={Boolean(dirty)} busy={busy} conflict={conflict} onDraft={refreshAnalysisDraft} onBusyChange={setBusy} onConflict={() => fail(new IntakeError('Draft changed', 409, {}))} />
             <CvRetrieval draft={draft} busy={busy} conflict={conflict} onDraft={refreshRetrievedDraft} />
         </section>
         {!terminal ? <details className="rounded-lg border border-border p-4"><summary className="cursor-pointer text-sm font-medium">Private source evidence ({draft.evidenceCount ?? draft.evidence?.length ?? 0})</summary><p className="mt-3 text-xs text-muted-foreground">Source messages are for intake review only and are not added to the candidate profile.</p>{draft.evidenceTruncated ? <p className="mt-2 text-xs text-muted-foreground">Showing the latest 100 source quotes. Earlier quotes remain private; pending suggestions include their own evidence.</p> : null}<div className="mt-4 space-y-4">{draft.evidence?.length ? draft.evidence.map(item => <article key={item.id} className="border-t border-border pt-3"><p className="text-xs text-muted-foreground">{item.senderName || 'Unknown sender'} · {dateLabel(item.sentAt)}</p><p className="mt-2 whitespace-pre-wrap break-words text-sm">{item.text}</p></article>) : <p className="text-sm text-muted-foreground">No source evidence attached.</p>}</div></details> : null}

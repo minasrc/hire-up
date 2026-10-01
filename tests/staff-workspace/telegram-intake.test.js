@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
-import { mkdirSync, readFileSync } from 'node:fs';
+import { mkdirSync, readFileSync, readdirSync } from 'node:fs';
 import { createServer } from 'node:http';
 import { join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -37,6 +37,7 @@ const migrations = [
     '20261001090000_public_intake_duplicate_review.sql', '20261001100000_candidate_merge.sql',
     '20261002100000_candidate_upload.sql', '20261002110000_staff_shell_capabilities.sql',
     '20261002120000_staff_list_pagination.sql', '20261002130000_telegram_intake_foundation.sql',
+    ...readdirSync(join(root, 'supabase/migrations')).filter(name => name > '20261002130000_telegram_intake_foundation.sql' && name.endsWith('.sql')).sort(),
 ];
 
 async function waitForServer(url) {
