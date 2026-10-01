@@ -34,6 +34,9 @@ export async function telegramExtractionWorkerOperation(pool, token, action, inp
         if (action === 'claim') output = await result(client, 'select app.telegram_extraction_claim_v1($1) as result', [token]);
         else if (action === 'fail') output = await result(client, 'select app.telegram_extraction_fail_v1($1,$2,$3,$4,$5) as result', [token, parsed.jobId, parsed.leaseToken, parsed.code, parsed.retryAfterSeconds]);
         else {
+            const hasReceiptProbe = await result(client, "select to_regprocedure('app.telegram_extraction_receipt_v1(text,uuid,text,jsonb,jsonb)') is not null as result", []);
+            const receipt = hasReceiptProbe ? await result(client, 'select app.telegram_extraction_receipt_v1($1,$2,$3,$4::jsonb,$5::jsonb) as result', [token, parsed.jobId, parsed.sourceDigest, JSON.stringify(parsed.result), JSON.stringify(parsed.metadata)]) : null;
+            if (receipt) { await client.query('commit'); return receipt; }
             const source = await result(client, 'select app.telegram_extraction_source_v1($1,$2) as result', [token, parsed.jobId]);
             const validated = validateExtractionResult(parsed.result, source);
             output = await result(client, 'select app.telegram_extraction_complete_v1($1,$2,$3,$4,$5::jsonb,$6::jsonb) as result', [token, parsed.jobId, parsed.leaseToken, parsed.sourceDigest, JSON.stringify(validated), JSON.stringify(parsed.metadata)]);

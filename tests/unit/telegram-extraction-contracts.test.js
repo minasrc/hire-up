@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { validateExtractionResult, extractionWorkerInput, EXTRACTION_PROMPT_VERSION } from '../../src/lib/telegram-extraction-contracts.js';
+import { validateExtractionResult, extractionWorkerInput, extractionStaffAction, EXTRACTION_PROMPT_VERSION, EXTRACTION_SINGLE_SOURCE_LIMIT } from '../../src/lib/telegram-extraction-contracts.js';
 const source = { messages: [{ messageId: '10', text: 'I am Alice Smith; email ALICE@example.test. Looking for Paris roles.', sender: { peer: { kind: 'user', id: '777' } }, forwardedFrom: null, attachments: [{ filename: 'CV.pdf' }] }] };
 const fact = (field, value) => ({ field, value, evidence: [{ messageId: '10', quote: source.messages[0].text }] });
 const result = () => ({ subjects: [{ key: 's1', identity: { kind: 'email', email: 'ALICE@example.test' }, facts: [fact('firstName', 'Alice'), fact('lastName', 'Smith'), fact('primaryEmail', 'ALICE@example.test')], attachments: [{ messageId: '10', attachmentIndex: 0 }] }] });
@@ -22,4 +22,16 @@ test('extraction completion metadata is bounded and versioned without URLs', () 
     assert.doesNotThrow(() => extractionWorkerInput('complete', body));
     assert.throws(() => extractionWorkerInput('complete', { ...body, metadata: { ...body.metadata, model: 'https://private.example.test' } }));
     assert.throws(() => extractionWorkerInput('complete', { ...body, metadata: { ...body.metadata, promptVersion: 'unknown' } }));
+});
+
+test('retention decisions and automatic extraction settings are explicit, bounded and versioned', () => {
+    const id = '10000000-0000-4000-8000-000000000001';
+    const change = { action: 'setExtraction', chats: [{ chatId: id, expectedVersion: 1 }], enabled: true };
+    assert.deepEqual(extractionStaffAction(change), change);
+    for (const input of [{ ...change, enabled: 'true' }, { ...change, chats: [...change.chats, ...change.chats] }, { ...change, chats: [] }, { ...change, chats: [{ chatId: id, expectedVersion: 0 }] }, { ...change, chats: Array(51).fill(change.chats[0]) }]) assert.throws(() => extractionStaffAction(input));
+    const release = { action: 'sourceRetention', jobId: id, expectedSourceVersion: 1, mode: 'release_after_review' };
+    assert.deepEqual(extractionStaffAction(release), release);
+    assert.equal(extractionStaffAction({ ...release, mode: 'keep' }).mode, 'keep');
+    for (const input of [{ ...release, mode: 'automatic' }, { ...release, expectedSourceVersion: null }, { ...release, ownerId: id }]) assert.throws(() => extractionStaffAction(input));
+    assert.equal(EXTRACTION_SINGLE_SOURCE_LIMIT, 327680);
 });
