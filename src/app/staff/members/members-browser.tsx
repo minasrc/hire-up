@@ -33,6 +33,8 @@ import { EmptyState, PageHeader, StatusBadge } from '@/components/staff-preview/
 import { cn } from '@/lib/utils';
 import { optionParam, textParam } from '../filter-params';
 
+import { MemberMfaResetForm } from './mfa-reset-form';
+
 import { InviteDomainsForm, MemberInviteForm, MemberRevokeButton } from '../workspace-forms';
 
 interface MemberRow {
@@ -86,11 +88,13 @@ export function MembersBrowser({
     roles,
     inviteDomains,
     capped,
+    currentMembershipId,
 }: {
     members: MemberRow[];
     roles: { id: string; name: string; key: string }[];
     inviteDomains: string[];
     capped: boolean;
+    currentMembershipId?: string;
 }) {
     const searchParams = useSearchParams();
     const filters = parseFilters(searchParams);
@@ -220,6 +224,10 @@ export function MembersBrowser({
                                         </StatusBadge>
                                     </TableCell>
                                     <TableCell>
+                                        {member.status === 'active' && member.membershipId !== currentMembershipId && (
+                                            <MemberMfaResetForm membershipId={member.membershipId} version={member.version}
+                                                displayName={member.displayName ?? member.invitedEmail ?? 'this member'} />
+                                        )}
                                         {member.status !== 'revoked' && (
                                             <MemberRevokeButton
                                                 membershipId={member.membershipId}

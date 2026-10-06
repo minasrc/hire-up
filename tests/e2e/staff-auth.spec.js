@@ -76,6 +76,7 @@ for (const path of [
     '/api/staff/mfa/enroll',
     '/api/staff/mfa/verify',
     '/api/staff/mfa/backup-codes',
+    '/api/staff/members/mfa-reset',
 ]) {
     test(`${path} rejects unauthenticated requests`, async ({ request }) => {
         const response = await request.post(path, { data: {} });

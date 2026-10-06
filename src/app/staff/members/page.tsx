@@ -46,6 +46,7 @@ export default async function StaffMembersPage() {
     return (
         <section className="mx-auto w-full max-w-7xl">
             <MembersBrowser
+                currentMembershipId={gate.principal.membership_id}
                 members={directory.members}
                 roles={directory.roles}
                 inviteDomains={directory.inviteDomains ?? []}

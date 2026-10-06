@@ -75,6 +75,7 @@ const MIGRATIONS = [
     '20261004110000_staff_application_directory.sql',
     '20261003090000_staff_mfa_backup_codes.sql',
     '20261006090000_staff_totp_stable_enrollment.sql',
+    '20261007090000_staff_mfa_admin_recovery.sql',
 ];
 
 const NEXTAUTH_SECRET = 'synthetic-workspace-secret';
@@ -2573,10 +2574,63 @@ test('staff workspace end-to-end in a real browser', async (t) => {
             .locator('#edit-candidate-headline')).toHaveValue('Second');
     });
 
+    await runCase('administrator MFA recovery requires re-enrollment and invalidates old proofs and backup codes', async () => {
+        // Create a real backup set first so reset checks cover the old codes.
+        const generate = await fetch(`${baseURL}/api/staff/mfa/backup-codes`, {
+            method: 'POST', headers: { 'content-type': 'application/json', cookie: cookieHeader(recruiterCookies) },
+            body: JSON.stringify({ code: totpCode('JBSWY3DPEHPK3PXP', totpCounter()) }),
+        });
+        assert.equal(generate.status, 200);
+        const oldCodes = (await generate.json()).backupCodes;
+        assert.equal(oldCodes.length, 10);
+        await page.goto(`${baseURL}/staff/members`, { waitUntil: 'domcontentloaded' });
+        const memberRow = page.getByRole('row').filter({ hasText: 'Synthetic Recruiter B' });
+        await clickUntil(() => memberRow.getByRole('button', { name: 'Reset authenticator', exact: true }).click(), memberRow.getByLabel('Your fresh authenticator code'));
+        // Compile the new route before submitting the hydrated form.
+        const warmReset = await fetch(`${baseURL}/api/staff/members/mfa-reset`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: '{}' });
+        assert.equal(warmReset.status, 401);
+        await memberRow.getByLabel('Your fresh authenticator code').fill(totpCode('JBSWY3DPEHPK3PXP', totpCounter()));
+        await memberRow.getByLabel('I verified this member’s identity.').check();
+        const resetResponse = page.waitForResponse((response) => response.url().endsWith('/api/staff/members/mfa-reset') && response.request().method() === 'POST');
+        await memberRow.getByRole('button', { name: 'Confirm reset' }).click();
+        const resetResult = await resetResponse;
+        assert.equal(resetResult.status(), 200, await resetResult.text());
+        await expect(memberRow.getByRole('status')).toContainText('set up their authenticator again');
+        const oldProof = await fetch(`${baseURL}/api/staff/clients`, { method: 'POST',
+            headers: { 'content-type': 'application/json', cookie: cookieHeader(recruiterCookies) }, body: '{}' });
+        assert.equal(oldProof.status, 428);
+        const recovered = await browser.newContext();
+        try {
+            await recovered.addCookies(recruiterCookies);
+            const userPage = await recovered.newPage();
+            await userPage.goto(`${baseURL}/staff`, { waitUntil: 'domcontentloaded' });
+            await expect(userPage).toHaveURL(/\/staff\/mfa\/enroll/);
+            const secret = psql(container, `select secret from app.totp_credentials where organization_id = '${ORG_ID}' and user_id = '${CJ_ID.USER_B_REC}' and status = 'pending'`).trim();
+            await expect(async () => {
+                const input = userPage.getByLabel('Authenticator code');
+                await input.fill('');
+                await input.fill(totpCode(secret, totpCounter()));
+                await expect(userPage.getByRole('button', { name: 'Enable two-factor' }))
+                    .toBeEnabled({ timeout: 1500 });
+            }).toPass({ timeout: 30_000 });
+            await userPage.getByRole('button', { name: 'Enable two-factor' }).click();
+            await expect(userPage.getByLabel('Your backup codes')).toBeVisible();
+            const newCodes = (await userPage.getByLabel('Your backup codes').inputValue()).split('\n');
+            assert.equal(newCodes.length, 10);
+            assert.notDeepEqual(newCodes, oldCodes);
+            await userPage.getByLabel('I saved my backup codes').check();
+            await userPage.getByRole('button', { name: 'Continue to workspace' }).click();
+            await expect(userPage).toHaveURL(`${baseURL}/staff`);
+            const oldCode = await recovered.request.post(`${baseURL}/api/staff/mfa/verify`, { data: { method: 'backup', code: oldCodes[0] } });
+            assert.equal(oldCode.status(), 401);
+        } finally { await recovered.close(); }
+    });
+
     await runCase('concurrent authenticator setup tabs keep one QR and one successful confirmation', async () => {
         // This synthetic member starts without an active authenticator.
         psql(container, `update app.totp_credentials set status = 'revoked', revoked_at = now()
-            where id = '${TOTP_CREDENTIAL_ID_REC}';`);
+            where organization_id = '${ORG_ID}' and user_id = '${CJ_ID.USER_B_REC}'
+            and status in ('active','pending');`);
         const context = await browser.newContext();
         try {
             await context.addCookies([recruiterCookies[0]]);

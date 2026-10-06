@@ -150,6 +150,7 @@ export function MfaVerifyForm() {
             {backup ? 'Use authenticator instead' : 'Use a backup code'}
         </button>
         {backup && <p className="mt-3 text-xs text-muted-foreground">Enter one of the codes you saved during setup. Each code works once.</p>}
+        <p className="mt-3 text-xs text-muted-foreground">If you lost your authenticator and all saved backup codes, ask a staff administrator to verify your identity and reset your authenticator.</p>
     </>;
 }
 
