@@ -1,10 +1,10 @@
 import { notFound } from 'next/navigation';
-import { getCandidateWorkspace } from '@/lib/pipeline-operations';
+import { getCandidateWorkspace } from '@/lib/recruitment-operations';
 import { StaffAuthorizationError } from '@/lib/staff-authorization';
 import { requireStaffVerified } from '@/lib/staff-gate.server';
 import { PageHeader } from '@/components/staff-preview/shared';
 import { Card, CardContent } from '@/components/staff-ui/card';
-import { CandidateDetail } from './candidate-detail';
+import { CandidateDetail, RestrictedCandidateNotice } from './candidate-detail';
 
 export const dynamic = 'force-dynamic';
 
@@ -20,7 +20,7 @@ export default async function StaffCandidatePage({
     let workspace = null;
     try {
         workspace = await getCandidateWorkspace(
-            gate.pool, gate.identity, gate.organizationId, { candidateId });
+            gate.pool, gate.identity, gate.organizationId, candidateId);
     } catch (error) {
         if (error instanceof StaffAuthorizationError && error.code === 'FORBIDDEN') {
             return (
@@ -28,7 +28,7 @@ export default async function StaffCandidatePage({
                     <PageHeader
                         eyebrow="Workspace"
                         title="Candidate"
-                        description="Applications, documents and staff notes."
+                        description="Profile, applications, documents and staff notes."
                     />
                     <Card className="mt-6">
                         <CardContent className="py-8 text-center">
@@ -45,10 +45,17 @@ export default async function StaffCandidatePage({
         }
         throw error;
     }
+    if (!workspace?.candidate) {
+        notFound();
+    }
 
     return (
         <section className="mx-auto w-full max-w-7xl">
-            <CandidateDetail workspace={workspace} />
+            {workspace.candidate.lifecycle === 'restricted' ? (
+                <RestrictedCandidateNotice workspace={workspace} />
+            ) : (
+                <CandidateDetail workspace={workspace} />
+            )}
         </section>
     );
 }

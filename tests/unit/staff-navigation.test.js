@@ -6,6 +6,7 @@ import * as React from 'react';
 import * as jsxRuntime from 'react/jsx-runtime';
 import { renderToStaticMarkup } from 'react-dom/server';
 import ts from 'typescript';
+import { createStaffRefresh } from '../../src/lib/staff-refresh.js';
 
 const { jsx } = jsxRuntime;
 
@@ -38,10 +39,20 @@ function loadShell() {
         'next/navigation': { usePathname: () => '/staff' },
         'next-auth/react': { signOut: () => {} },
         'lucide-react': iconProxy,
+        './form-guard': {
+            FormGuardProvider: ({ children }) => children,
+            useUnsavedChangesGuard: () => {},
+        },
+        './record-previews': {
+            StaffRecordPreviewProvider: ({ children }) => children,
+            RecordPreviewLink: ({ href, children, ...rest }) =>
+                jsx('a', { href, ...rest, children }),
+        },
         '@/components/staff-ui/button': inertProxy,
         '@/components/staff-ui/popover': inertProxy,
         '@/components/staff-ui/separator': inertProxy,
         '@/components/staff-ui/sheet': inertProxy,
+        '@/lib/staff-refresh': { createStaffRefresh },
         '@/lib/utils': { cn: (...parts) => parts.filter(Boolean).join(' ') },
     };
     runInNewContext(compiled, {
@@ -106,6 +117,34 @@ test('known capabilities hide only the sections they deny', () => {
     assert.deepEqual(
         renderAnchors(NavLinks, capabilities).map((anchor) => anchor.href),
         ['/staff', '/staff/jobs', '/staff/clients'],
+    );
+});
+
+test('data requests only appear when the capability is known allowed', () => {
+    const { NavLinks } = loadShell();
+    const base = {
+        jobs: true,
+        clients: true,
+        applications: true,
+        candidates: true,
+        members: true,
+        tasks: true,
+        writeTasks: true,
+        writeJobs: true,
+        writeClients: true,
+    };
+    assert.deepEqual(
+        renderAnchors(NavLinks, { ...base, privacy: true }).map((a) => a.href),
+        [...ALL_HREFS, '/staff/privacy'],
+    );
+    assert.deepEqual(
+        renderAnchors(NavLinks, { ...base, privacy: false }).map((a) => a.href),
+        ALL_HREFS,
+    );
+    assert.deepEqual(
+        renderAnchors(NavLinks, base).map((a) => a.href),
+        ALL_HREFS,
+        'an unknown privacy capability must not reveal the data-requests route',
     );
 });
 

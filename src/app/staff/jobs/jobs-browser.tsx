@@ -24,9 +24,14 @@ import {
     TableRow,
 } from '@/components/staff-ui/table';
 import { EmptyState, PageHeader, StatusBadge, TagPill } from '@/components/staff-preview/shared';
-import { jobStatusLabel } from '@/lib/job-display';
+import {
+    employmentTypeLabel,
+    jobStatusLabel,
+    workplaceModeLabel,
+} from '@/lib/job-display';
 import { cn } from '@/lib/utils';
 import { flagParam, optionParam, textParam, uuidParam } from '../filter-params';
+import { RecordPreviewLink } from '../record-previews';
 
 export interface JobRow {
     id: string;
@@ -40,9 +45,14 @@ export interface JobRow {
     ownerMembershipId: string | null;
     draftRevisionId: string | null;
     createdAt: string;
+    employmentType?: string | null;
+    workplaceMode?: string | null;
+    locations?: string[];
+    remoteRegions?: string[];
+    applicationCount?: number | null;
 }
 
-type SortKey = 'title' | 'client' | 'publication';
+type SortKey = 'title' | 'client' | 'publication' | 'location' | 'applications';
 type SortDirection = 'asc' | 'desc';
 
 export interface JobFiltersState {
@@ -85,6 +95,15 @@ const statusTone = (label: string) =>
           ? 'secondary'
           : 'outline';
 
+const locationLabel = (job: JobRow): string =>
+    (job.locations?.length ?? 0) > 0
+        ? job.locations!.join(', ')
+        : (job.remoteRegions?.length ?? 0) > 0
+          ? `Remote · ${job.remoteRegions!.join(', ')}`
+          : job.workplaceMode === 'remote'
+            ? 'Remote'
+            : '—';
+
 function syncUrl(filters: JobFiltersState) {
     const params = new URLSearchParams();
     if (filters.query.trim()) params.set('q', filters.query);
@@ -100,7 +119,13 @@ function syncUrl(filters: JobFiltersState) {
 }
 
 const STATE_VALUES = STATE_OPTIONS.map((option) => option.value);
-const SORT_VALUES: SortKey[] = ['title', 'client', 'publication'];
+const SORT_VALUES: SortKey[] = [
+    'title',
+    'client',
+    'publication',
+    'location',
+    'applications',
+];
 
 const parseFilters = (params: { get(name: string): string | null }): JobFiltersState => ({
     query: textParam(params, 'q'),
@@ -140,7 +165,16 @@ export function JobsBrowser({
             if (filters.intake !== 'all' && job.applicationState !== filters.intake) return false;
             if (filters.mine && job.ownerMembershipId !== currentMembershipId) return false;
             if (needle) {
-                const haystack = `${job.title} ${job.clientName}`.toLowerCase();
+                const haystack = [
+                    job.title,
+                    job.clientName,
+                    locationLabel(job),
+                    ...(job.locations ?? []),
+                    ...(job.remoteRegions ?? []),
+                    job.workplaceMode ? workplaceModeLabel(job.workplaceMode) : '',
+                ]
+                    .join(' ')
+                    .toLowerCase();
                 if (!haystack.includes(needle)) return false;
             }
             return true;
@@ -154,7 +188,11 @@ export function JobsBrowser({
                 ? left.clientName.localeCompare(right.clientName)
                 : filters.sortBy === 'publication'
                   ? jobStatusLabel(left).localeCompare(jobStatusLabel(right))
-                  : left.title.localeCompare(right.title);
+                  : filters.sortBy === 'location'
+                    ? locationLabel(left).localeCompare(locationLabel(right))
+                    : filters.sortBy === 'applications'
+                      ? (left.applicationCount ?? -1) - (right.applicationCount ?? -1)
+                      : left.title.localeCompare(right.title);
         return comparison * direction || left.title.localeCompare(right.title);
     });
 
@@ -238,7 +276,7 @@ export function JobsBrowser({
                         <Input
                             id="job-search"
                             className="pl-9"
-                            placeholder="Search title or client…"
+                            placeholder="Search title, client or location…"
                             value={filters.query}
                             onChange={(event) =>
                                 update({ ...filters, query: event.target.value })
@@ -341,6 +379,9 @@ export function JobsBrowser({
                             <TableRow>
                                 {sortableHead('title', 'Title')}
                                 {sortableHead('client', 'Client')}
+                                <TableHead className="hidden lg:table-cell">Type</TableHead>
+                                {sortableHead('location', 'Location', 'hidden md:table-cell')}
+                                {sortableHead('applications', 'Apps', 'hidden sm:table-cell w-16')}
                                 {sortableHead('publication', 'Status')}
                             </TableRow>
                         </TableHeader>
@@ -360,21 +401,44 @@ export function JobsBrowser({
                                 >
                                     <TableCell>
                                         <div className="flex flex-col">
-                                            <Link
-                                                href={`/staff/jobs/${job.id}`}
+                                            <RecordPreviewLink
+                                                kind="job"
+                                                id={job.id}
                                                 className="w-fit rounded-sm font-medium text-foreground outline-none hover:text-accent-foreground hover:underline focus-visible:ring-2 focus-visible:ring-ring"
                                             >
                                                 {job.title}
-                                            </Link>
+                                            </RecordPreviewLink>
                                         </div>
                                     </TableCell>
                                     <TableCell>
-                                        <Link
-                                            href={`/staff/clients/${job.clientId}`}
+                                        <RecordPreviewLink
+                                            kind="client"
+                                            id={job.clientId}
                                             className="rounded-sm text-muted-foreground outline-none hover:text-accent-foreground hover:underline focus-visible:ring-2 focus-visible:ring-ring"
                                         >
                                             {job.clientName}
-                                        </Link>
+                                        </RecordPreviewLink>
+                                    </TableCell>
+                                    <TableCell className="hidden text-muted-foreground lg:table-cell">
+                                        {job.employmentType
+                                            ? employmentTypeLabel(job.employmentType)
+                                            : '—'}
+                                    </TableCell>
+                                    <TableCell className="hidden text-muted-foreground md:table-cell">
+                                        {locationLabel(job)}
+                                    </TableCell>
+                                    <TableCell className="hidden text-muted-foreground sm:table-cell">
+                                        {job.applicationCount === null
+                                            || job.applicationCount === undefined ? (
+                                            '—'
+                                        ) : (
+                                            <Link
+                                                href={`/staff/applications?client=${job.clientId}&job=${job.id}`}
+                                                className="rounded-sm outline-none hover:underline focus-visible:ring-2 focus-visible:ring-ring"
+                                            >
+                                                {job.applicationCount}
+                                            </Link>
+                                        )}
                                     </TableCell>
                                     <TableCell>
                                         <span className="flex flex-wrap items-center gap-1.5">

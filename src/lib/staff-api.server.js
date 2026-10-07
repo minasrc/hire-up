@@ -30,14 +30,24 @@ export async function staffApiContext() {
     if (await staffGoogleCredentialStatus(identity.subject) === 'revoked') {
         return { status: 'unauthorized' };
     }
-    const principal = await resolveOrClaimStaffPrincipal(
-        pool, identity, staffInviteEmailFromSession(session), organizationId);
-    if (!principal) {
-        return { status: 'unauthorized' };
-    }
-    const totp = await getTotpStatus(pool, identity, organizationId);
-    if (!totp || totp.status !== 'active') {
-        return { status: 'mfa-required' };
+    let principal;
+    let totp;
+    try {
+        principal = await resolveOrClaimStaffPrincipal(
+            pool, identity, staffInviteEmailFromSession(session), organizationId);
+        if (!principal) {
+            return { status: 'unauthorized' };
+        }
+        totp = await getTotpStatus(pool, identity, organizationId);
+        if (!totp || totp.status !== 'active') {
+            return { status: 'mfa-required' };
+        }
+    } catch (error) {
+        if (error?.code === '42501' || error?.code === '23505') {
+            return { status: 'unauthorized' };
+        }
+        console.error('staff API resolution failed', error);
+        return { status: 'unavailable' };
     }
     const cookieStore = await cookies();
     const proof = readStaffMfaProof(
@@ -59,8 +69,8 @@ export function staffGateResponse(context) {
     if (context.status === 'ok') {
         return null;
     }
-    if (context.status === 'unconfigured') {
-        return Response.json({ error: 'staff workspace not configured' }, { status: 503 });
+    if (context.status === 'unconfigured' || context.status === 'unavailable') {
+        return Response.json({ error: 'workspace temporarily unavailable' }, { status: 503 });
     }
     if (context.status === 'mfa-required') {
         return Response.json({ error: 'mfa required' }, { status: 428 });

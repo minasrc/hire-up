@@ -6,6 +6,7 @@ import { Badge } from '@/components/staff-ui/badge';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/staff-ui/card';
 import type { StaffWorkspaceSummary } from '@/lib/workspace-types';
 import { cn } from '@/lib/utils';
+import { RecordPreviewLink } from './record-preview-context';
 
 const formatDate = (iso: string) =>
     new Date(iso).toLocaleDateString('en-GB', {
@@ -117,26 +118,29 @@ export function ReviewQueue({ summary }: { summary: StaffWorkspaceSummary }) {
                                 className="flex items-start justify-between gap-3 rounded-lg border border-border px-3 py-2.5"
                             >
                                 <div className="flex min-w-0 flex-col">
-                                    <Link
-                                        href={`/staff/candidates/${row.candidateId}`}
+                                    <RecordPreviewLink
+                                        kind="candidate"
+                                        id={row.candidateId}
                                         className="w-fit truncate rounded-sm text-sm font-medium text-foreground outline-none hover:text-accent-foreground hover:underline focus-visible:ring-2 focus-visible:ring-ring"
                                     >
                                         {row.candidateName}
-                                    </Link>
+                                    </RecordPreviewLink>
                                     <span className="text-xs text-muted-foreground">
-                                        <Link
-                                            href={`/staff/jobs/${row.jobId}`}
+                                        <RecordPreviewLink
+                                            kind="job"
+                                            id={row.jobId}
                                             className="rounded-sm outline-none hover:underline focus-visible:ring-2 focus-visible:ring-ring"
                                         >
                                             {row.jobTitle}
-                                        </Link>
+                                        </RecordPreviewLink>
                                         {' · '}
-                                        <Link
-                                            href={`/staff/clients/${row.clientId}`}
+                                        <RecordPreviewLink
+                                            kind="client"
+                                            id={row.clientId}
                                             className="rounded-sm outline-none hover:underline focus-visible:ring-2 focus-visible:ring-ring"
                                         >
                                             {row.clientName}
-                                        </Link>
+                                        </RecordPreviewLink>
                                     </span>
                                 </div>
                                 <span className="shrink-0 text-xs text-muted-foreground">
@@ -194,12 +198,13 @@ export function ClientsHiring({ summary }: { summary: StaffWorkspaceSummary }) {
                             >
                                 <div className="flex min-w-0 flex-col">
                                     <span className="flex min-w-0 flex-wrap items-center gap-2">
-                                        <Link
-                                            href={`/staff/clients/${row.clientId}`}
+                                        <RecordPreviewLink
+                                            kind="client"
+                                            id={row.clientId}
                                             className="min-w-0 truncate rounded-sm text-sm font-medium text-foreground outline-none hover:text-accent-foreground hover:underline focus-visible:ring-2 focus-visible:ring-ring"
                                         >
                                             {row.name}
-                                        </Link>
+                                        </RecordPreviewLink>
                                         {row.isStealth ? (
                                             <Badge variant="outline">Stealth</Badge>
                                         ) : null}

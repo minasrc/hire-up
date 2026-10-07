@@ -16,7 +16,13 @@ export function getStaffPool() {
             connectionString,
             max: 2,
             idleTimeoutMillis: 10_000,
+            connectionTimeoutMillis: 5_000,
+            statement_timeout: 10_000,
+            query_timeout: 11_000,
+            lock_timeout: 2_000,
         });
+        // Idle connection failures must not become uncaught process errors.
+        staffPool.on('error', (error) => console.error('staff database connection failed', error));
     }
     return staffPool;
 }
@@ -88,10 +94,9 @@ export async function resolveOrClaimStaffPrincipal(pool, identity, email, organi
     if (resolved || !email) {
         return resolved;
     }
-    const claimed = await claimStaffInvite(pool, identity, email, organizationId);
-    if (!claimed) {
-        return null;
-    }
+    await claimStaffInvite(pool, identity, email, organizationId);
+    // Another request may have consumed the invitation while this one waited.
+    // Re-resolve even on a zero-row claim so that request can still proceed.
     return resolveStaffPrincipal(pool, identity, organizationId);
 }
 

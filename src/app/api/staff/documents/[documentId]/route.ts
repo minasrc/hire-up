@@ -9,11 +9,13 @@ import {
 export const runtime = 'nodejs';
 
 const SIGNED_URL_TTL_SECONDS = 60;
+const PDF_MIME_TYPE = 'application/pdf';
+const CACHE_PRIVATE = 'private, no-store';
 
 // Issues a short-lived signed URL for a verified blob location. The procedure
 // resolves coordinates under documents.download; the route signs and redirects.
 export async function GET(
-    _request: Request,
+    request: Request,
     { params }: { params: Promise<{ documentId: string }> },
 ) {
     const context = await staffApiContext();
@@ -27,6 +29,9 @@ export async function GET(
         return Response.json({ error: 'storage is not configured' }, { status: 503 });
     }
     const { documentId } = await params;
+    const searchParams = new URL(request.url).searchParams;
+    const inline = searchParams.get('inline') === '1';
+    const wantsJson = searchParams.get('format') === 'json';
     try {
         const document = await getDocumentDownload(
             context.pool, context.identity, context.organizationId,
@@ -38,15 +43,34 @@ export async function GET(
         const supabase = createClient(supabaseUrl, serviceRoleKey, {
             auth: { persistSession: false, autoRefreshToken: false },
         });
+        if (inline && document.mimeType !== PDF_MIME_TYPE) {
+            return Response.json(
+                { error: 'inline preview is only available for PDF documents' },
+                { status: 400 },
+            );
+        }
+        const previewable = inline && document.mimeType === PDF_MIME_TYPE;
         const { data, error } = await supabase.storage
             .from(document.bucket)
             .createSignedUrl(document.objectKey, SIGNED_URL_TTL_SECONDS, {
-                download: document.filename,
+                download: previewable ? false : document.filename,
             });
         if (error || !data?.signedUrl) {
             return Response.json({ error: 'document unavailable' }, { status: 404 });
         }
-        return Response.redirect(data.signedUrl, 302);
+        if (inline && wantsJson) {
+            return Response.json(
+                { url: data.signedUrl, expiresIn: SIGNED_URL_TTL_SECONDS },
+                { headers: { 'Cache-Control': CACHE_PRIVATE } },
+            );
+        }
+        return new Response(null, {
+            status: 302,
+            headers: {
+                Location: data.signedUrl,
+                'Cache-Control': CACHE_PRIVATE,
+            },
+        });
     } catch (error) {
         return staffErrorResponse(error);
     }

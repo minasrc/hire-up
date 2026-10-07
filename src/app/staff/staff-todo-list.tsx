@@ -1,7 +1,6 @@
 'use client';
 
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { useRouter } from 'next/navigation';
 import { ClipboardList, Plus } from 'lucide-react';
 
 import { Badge } from '@/components/staff-ui/badge';
@@ -26,6 +25,7 @@ import {
 } from '@/components/staff-ui/select';
 import { Tabs, TabsList, TabsTrigger } from '@/components/staff-ui/tabs';
 import { staffMutation } from '@/lib/staff-mutation';
+import { taskCompletionView } from '@/lib/staff-refresh';
 import type {
     StaffTask,
     StaffTaskCategory,
@@ -42,7 +42,6 @@ const CATEGORIES: { value: 'all' | StaffTaskCategory; label: string }[] = [
 const PAGE_SIZE = 20;
 
 export function StaffTodoList({ writeEnabled }: { writeEnabled: boolean }) {
-    const router = useRouter();
     const [category, setCategory] = useState<'all' | StaffTaskCategory>('all');
     const [showCompleted, setShowCompleted] = useState(false);
     const [data, setData] = useState<StaffTaskListResult | null>(null);
@@ -144,7 +143,12 @@ export function StaffTodoList({ writeEnabled }: { writeEnabled: boolean }) {
     }, [loadTasks]);
 
     const toggleTask = async (task: StaffTask, completed: boolean) => {
-        if (busyId) return;
+        if (busyId || !data || loading || addBusy) return;
+        const previous = data;
+        // Prevent an older list response from restoring the optimistic row.
+        requestRef.current += 1;
+        abortRef.current?.abort();
+        setData(taskCompletionView(previous, task, completed));
         setBusyId(task.id);
         setActionError(null);
         setActionStatus(null);
@@ -156,14 +160,15 @@ export function StaffTodoList({ writeEnabled }: { writeEnabled: boolean }) {
                 expectedVersion: task.version,
             });
             setActionStatus(completed ? 'Task completed.' : 'Task reopened.');
-            router.refresh();
         } catch (error) {
+            setData(previous);
+            // A conflict or lost permission must reconcile with the server.
+            void loadTasks(0, { clear: false });
             setActionError(
                 error instanceof Error ? error.message : 'Could not save. Please try again.');
         } finally {
             setBusyId(null);
         }
-        void loadTasks(0, { clear: false });
     };
 
     const openAddDialog = () => {
@@ -198,7 +203,6 @@ export function StaffTodoList({ writeEnabled }: { writeEnabled: boolean }) {
             } else {
                 void loadTasks(0);
             }
-            router.refresh();
         } catch (error) {
             setAddError(
                 error instanceof Error ? error.message : 'Could not save. Please try again.');
@@ -225,7 +229,12 @@ export function StaffTodoList({ writeEnabled }: { writeEnabled: boolean }) {
                     </CardTitle>
                     <span className="flex items-center gap-2">
                         {writeEnabled && !denied && !sessionLost ? (
-                            <Button variant="outline" size="sm" onClick={openAddDialog}>
+                            <Button
+                                variant="outline"
+                                size="sm"
+                                onClick={openAddDialog}
+                                disabled={busyId !== null || addBusy}
+                            >
                                 <Plus aria-hidden="true" />
                                 Add task
                             </Button>
@@ -239,7 +248,7 @@ export function StaffTodoList({ writeEnabled }: { writeEnabled: boolean }) {
                                 setData(null);
                                 setLoading(true);
                             }}
-                            disabled={denied || sessionLost || (loading && !data)}
+                            disabled={busyId !== null || denied || sessionLost || (loading && !data)}
                         >
                             {showCompleted
                                 ? `Showing completed (${data?.counts.completed ?? '–'})`
@@ -283,7 +292,11 @@ export function StaffTodoList({ writeEnabled }: { writeEnabled: boolean }) {
                                 className="grid grid-cols-2 sm:flex"
                             >
                                 {CATEGORIES.map((entry) => (
-                                    <TabsTrigger key={entry.value} value={entry.value}>
+                                    <TabsTrigger
+                                        key={entry.value}
+                                        value={entry.value}
+                                        disabled={busyId !== null || addBusy}
+                                    >
                                         {entry.label}
                                         <Badge variant="secondary">
                                             {countFor(entry.value)}
@@ -326,11 +339,13 @@ export function StaffTodoList({ writeEnabled }: { writeEnabled: boolean }) {
                             </div>
                         ) : data.tasks.length === 0 ? (
                             <p className="rounded-lg border border-dashed border-border px-4 py-8 text-center text-sm text-muted-foreground">
-                                {showCompleted
-                                    ? 'No completed tasks in this view'
-                                    : category === 'all'
-                                      ? 'You’re up to date'
-                                      : 'No tasks in this category'}
+                                {data.total > 0
+                                    ? 'More tasks remain in this view. Choose Show more to load them.'
+                                    : showCompleted
+                                      ? 'No completed tasks in this view'
+                                      : category === 'all'
+                                        ? 'You’re up to date'
+                                        : 'No tasks in this category'}
                             </p>
                         ) : (
                             <ul className="flex max-h-80 flex-col gap-2 overflow-y-auto pr-1">
@@ -347,7 +362,7 @@ export function StaffTodoList({ writeEnabled }: { writeEnabled: boolean }) {
                                                         : `Mark ${task.title} complete`
                                                 }
                                                 checked={showCompleted}
-                                                disabled={busyId !== null}
+                                                disabled={busyId !== null || loading || addBusy}
                                                 onCheckedChange={(checked) =>
                                                     void toggleTask(task, checked === true)
                                                 }
@@ -379,7 +394,7 @@ export function StaffTodoList({ writeEnabled }: { writeEnabled: boolean }) {
                                 variant="outline"
                                 size="sm"
                                 className="self-start"
-                                disabled={loading}
+                                disabled={loading || busyId !== null || addBusy}
                                 onClick={() =>
                                     void loadTasks(data.tasks.length, { append: true, clear: false })
                                 }

@@ -105,7 +105,7 @@ test('createJobDraft sends the listing flag through create_job_draft_v2', async 
                     }] };
                 }
                 if (text.includes('has_permission_v1')) {
-                    return { rows: [{ allowed: true }] };
+                    return { rows: params[0].map(() => ({ allowed: true })) };
                 }
                 if (text.includes('create_job_draft_v2')) {
                     return {

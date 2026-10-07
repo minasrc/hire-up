@@ -38,7 +38,7 @@ const makeClient = (behaviour = {}) => {
                 return { rows: behaviour.resolverRows ?? [PRINCIPAL_ROW] };
             }
             if (text.includes('has_permission_v1')) {
-                return { rows: [{ allowed: behaviour.allowed !== false }] };
+                return { rows: params[0].map(() => ({ allowed: behaviour.allowed !== false })) };
             }
             if (text.includes('privacy_')) {
                 return { rows: [{ result: RESULT }] };
@@ -141,7 +141,7 @@ test('each wrapper issues one typed procedure call with privacy.manage', async (
         assert.equal(call.text, expectedSql[wrapper.name],
             `${wrapper.name} must use the fixed typed call`);
         const permission = client.queries.find(({ text }) => text.includes('has_permission_v1'));
-        assert.deepEqual(permission.params, ['privacy.manage'],
+        assert.deepEqual(permission.params, [['privacy.manage']],
             `${wrapper.name} must require privacy.manage`);
         assert.ok(
             client.queries.map(({ text }) => text).indexOf('commit')
@@ -377,7 +377,7 @@ test('permission denial and provider errors propagate after rollback', async () 
 
     const failure = Object.assign(new Error('procedure exploded'), { code: '40001' });
     const failing = makeClient({
-        onQuery(text) {
+        onQuery(text, params) {
             if (text.includes('privacy_')) {
                 throw failure;
             }
@@ -385,7 +385,7 @@ test('permission denial and provider errors propagate after rollback', async () 
                 return { rows: [PRINCIPAL_ROW] };
             }
             if (text.includes('has_permission_v1')) {
-                return { rows: [{ allowed: true }] };
+                return { rows: params[0].map(() => ({ allowed: true })) };
             }
             return { rows: [] };
         },

@@ -1,0 +1,28 @@
+{
+  "permissions": {
+    "allow": [
+      "Exec(node)",
+      "Exec(./node_modules/.bin/eslint)",
+      "Exec(ls)",
+      "Exec(E2E_REAL_BACKEND=0 NEXT_PUBLIC_SUPABASE_URL='' SUPABASE_SERVICE_ROLE_KEY='' ./node_modules/.bin/playwright test)",
+      "Exec(npm run)",
+      "Exec(lsof)",
+      "Exec(shasum)",
+      "Exec(git restore)",
+      "Exec(git add)",
+      "Exec(git remote)",
+      "Exec(gh repo)",
+      "Exec(git fetch)",
+      "Exec(git switch)",
+      "Exec(git push)",
+      "Exec(gh pr)",
+      "Exec(git ls-remote)",
+      "Exec(git commit)",
+      "Exec(wc)",
+      "Exec(docker version)",
+      "Exec(docker ps)",
+      "Exec(command)",
+      "Exec(grep)"
+    ]
+  }
+}

@@ -1,4 +1,5 @@
-import { listJobs } from '@/lib/client-job-operations';
+import { listWorkspaceJobs } from '@/lib/recruitment-operations';
+import type { StaffJobCard } from '@/lib/recruitment-types';
 import { StaffAuthorizationError } from '@/lib/staff-authorization';
 import { requireStaffVerified } from '@/lib/staff-gate.server';
 import { loadStaffWorkspace } from '@/lib/workspace.server';
@@ -14,18 +15,19 @@ const LIST_LIMIT = 500;
 
 export default async function StaffJobsPage() {
     const gate = await requireStaffVerified();
-    const { summary } = await loadStaffWorkspace();
-
-    let jobs: any[] | null = null;
-    try {
-        jobs = await listJobs(gate.pool, gate.identity, gate.organizationId, {
-            limit: LIST_LIMIT,
-        });
-    } catch (error) {
-        if (!(error instanceof StaffAuthorizationError && error.code === 'FORBIDDEN')) {
-            throw error;
+    const jobsPromise: Promise<StaffJobCard[] | null> = listWorkspaceJobs(
+        gate.pool, gate.identity, gate.organizationId, { limit: LIST_LIMIT },
+    ).catch((error: unknown) => {
+        if (error instanceof StaffAuthorizationError && error.code === 'FORBIDDEN') {
+            return null;
         }
-    }
+        throw error;
+    });
+    // Both reads authorize independently; keep concurrency bounded to two.
+    const [{ summary }, jobs] = await Promise.all([
+        loadStaffWorkspace(),
+        jobsPromise,
+    ]);
 
     if (jobs === null) {
         return (
@@ -48,7 +50,7 @@ export default async function StaffJobsPage() {
 
     const clients = Array.from(
         new Map(
-            (jobs as any[]).map((job) => [job.clientId, job.clientName] as const),
+            jobs.map((job) => [job.clientId, job.clientName] as const),
         ).entries(),
     )
         .map(([id, name]) => ({ id, name }))

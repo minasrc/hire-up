@@ -18,7 +18,10 @@ export default async function StaffNoAccessPage() {
         redirect('/staff/sign-in');
     }
     // A fully-gated member landing here (e.g. a stale tab) belongs in the shell.
-    if ((await staffGate()).stage === 'verified') {
+    const gate = await staffGate();
+    if (gate.stage === 'unavailable') redirect('/staff/unavailable');
+    if (gate.stage === 'reauthenticate') redirect('/staff/sign-in');
+    if (gate.stage !== 'unresolved') {
         redirect('/staff');
     }
 
@@ -27,8 +30,9 @@ export default async function StaffNoAccessPage() {
             <p className="text-sm uppercase tracking-widest text-foreground/50">Agora staff</p>
             <h1 className="mt-3 text-2xl font-semibold">No workspace access</h1>
             <p className="mt-4 text-sm leading-6 text-foreground/60">
-                Your Google account is not linked to an Agora staff membership.
-                Send the identity details below to a workspace administrator.
+                This Google account does not have an active workspace membership.
+                Check that you used the exact email on your invitation. If it is correct,
+                ask an administrator to check your invitation, role, and allowed email domain.
             </p>
             <dl className="mt-8 space-y-3 rounded-lg border border-foreground/10 p-4 font-mono text-xs">
                 <div className="flex gap-3">

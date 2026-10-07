@@ -1,5 +1,6 @@
 'use client';
 
+import { createStaffRefresh } from '@/lib/staff-refresh';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { signOut } from 'next-auth/react';
@@ -13,6 +14,7 @@ import {
     ChevronRight,
     LayoutDashboard,
     Menu,
+    ShieldCheck,
     UserCog,
     Users,
 } from 'lucide-react';
@@ -27,6 +29,8 @@ import { Separator } from '@/components/staff-ui/separator';
 import { Sheet, SheetContent, SheetTitle, SheetTrigger } from '@/components/staff-ui/sheet';
 import type { StaffWorkspaceSummary } from '@/lib/workspace-types';
 import { cn } from '@/lib/utils';
+import { FormGuardProvider } from './form-guard';
+import { StaffRecordPreviewProvider } from './record-previews';
 
 const NAV_ITEMS = [
     { href: '/staff', label: 'Overview', icon: LayoutDashboard, exact: true },
@@ -45,6 +49,12 @@ const NAV_ITEMS = [
     { href: '/staff/jobs', label: 'Jobs', icon: BriefcaseBusiness, capability: 'jobs' },
     { href: '/staff/clients', label: 'Clients', icon: Building2, capability: 'clients' },
     { href: '/staff/members', label: 'Members', icon: UserCog, capability: 'members' },
+    {
+        href: '/staff/privacy',
+        label: 'Data requests',
+        icon: ShieldCheck,
+        capability: 'privacy',
+    },
 ] as const;
 
 const SECTION_LABELS: Record<string, string> = {
@@ -53,6 +63,7 @@ const SECTION_LABELS: Record<string, string> = {
     jobs: 'Jobs',
     clients: 'Clients',
     members: 'Members',
+    privacy: 'Data requests',
 };
 
 function useSection(pathname: string) {
@@ -68,17 +79,21 @@ export function NavLinks({
     onNavigate,
 }: {
     pathname: string;
-    capabilities: StaffWorkspaceSummary['capabilities'] | 'denied' | null;
+    capabilities: Record<string, boolean> | 'denied' | null;
     onNavigate?: () => void;
 }) {
     return (
         <nav aria-label="Main navigation" className="flex flex-col gap-1">
-            {NAV_ITEMS.filter(
-                (item) =>
-                    !('capability' in item)
-                    || capabilities === null
-                    || (capabilities !== 'denied' && capabilities[item.capability]),
-            ).map((item) => {
+            {NAV_ITEMS.filter((item) => {
+                if (!('capability' in item)) return true;
+                if (item.capability === 'privacy') {
+                    return capabilities !== null
+                        && capabilities !== 'denied'
+                        && capabilities.privacy === true;
+                }
+                return capabilities === null
+                    || (capabilities !== 'denied' && capabilities[item.capability]);
+            }).map((item) => {
                 const Icon = item.icon;
                 const active = 'exact' in item && item.exact
                     ? pathname === item.href
@@ -261,11 +276,17 @@ export function StaffShell({
     const pathname = usePathname();
     const [sheetOpen, setSheetOpen] = useState(false);
     const [summary, setSummary] = useState<StaffWorkspaceSummary | null>(initialSummary);
-    const [navCaps, setNavCaps] = useState<StaffWorkspaceSummary['capabilities'] | null>(
-        initialSummary?.capabilities ?? null,
+    const [navCaps, setNavCaps] = useState<Record<string, boolean> | null>(
+        initialSummary
+            ? Object.fromEntries(Object.entries(initialSummary.capabilities))
+            : null,
     );
+    const [privacyAllowed, setPrivacyAllowed] = useState(false);
     const [loadError, setLoadError] = useState<'denied' | 'unavailable' | null>(null);
     const requestRef = useRef(0);
+    const summaryRefreshRef = useRef<ReturnType<typeof createStaffRefresh> | null>(null);
+    const previousPathRef = useRef(pathname);
+    const initialSummaryRef = useRef(initialSummary);
     const abortRef = useRef<AbortController | null>(null);
     const { section, detail } = useSection(pathname);
     const sectionLabel = section ? SECTION_LABELS[section] : null;
@@ -276,7 +297,7 @@ export function StaffShell({
         setSeenInitial(initialSummary);
         setSummary(initialSummary);
         if (initialSummary) {
-            setNavCaps(initialSummary.capabilities);
+            setNavCaps(Object.fromEntries(Object.entries(initialSummary.capabilities)));
             setLoadError(null);
         }
     }
@@ -299,7 +320,7 @@ export function StaffShell({
                 const next = (payload?.result ?? null) as StaffWorkspaceSummary | null;
                 setSummary(next);
                 if (next) {
-                    setNavCaps(next.capabilities);
+                    setNavCaps(Object.fromEntries(Object.entries(next.capabilities)));
                     setLoadError(null);
                 } else {
                     setLoadError('unavailable');
@@ -329,25 +350,74 @@ export function StaffShell({
     }, []);
 
     useEffect(() => {
-        void refreshSummary();
-    }, [pathname, refreshSummary]);
-
-    useEffect(() => {
+        const refresh = createStaffRefresh(refreshSummary);
+        summaryRefreshRef.current = refresh;
         const onFocus = () => {
-            if (document.visibilityState === 'visible') void refreshSummary();
+            if (document.visibilityState === 'visible') refresh.schedule();
         };
-        const interval = window.setInterval(() => {
-            if (document.visibilityState === 'visible') void refreshSummary();
-        }, 60_000);
-        const onUpdated = () => void refreshSummary();
+        const interval = window.setInterval(onFocus, 60_000);
+        const onUpdated = () => refresh.schedule();
         window.addEventListener('focus', onFocus);
         window.addEventListener('staff-workspace-updated', onUpdated);
         return () => {
+            refresh.dispose();
+            summaryRefreshRef.current = null;
             window.clearInterval(interval);
             window.removeEventListener('focus', onFocus);
             window.removeEventListener('staff-workspace-updated', onUpdated);
         };
     }, [refreshSummary]);
+
+    useEffect(() => {
+        const changedPath = previousPathRef.current !== pathname;
+        const freshServerSummary = initialSummaryRef.current !== initialSummary;
+        previousPathRef.current = pathname;
+        initialSummaryRef.current = initialSummary;
+        // Hydration already has an authorized server snapshot. Retain route
+        // revalidation when the persistent layout has not supplied a new one.
+        if (!initialSummary || (changedPath && !freshServerSummary)) {
+            summaryRefreshRef.current?.schedule();
+        }
+    }, [pathname, initialSummary]);
+
+    useEffect(() => {
+        const controller = new AbortController();
+        const loadContext = async () => {
+            try {
+                const response = await fetch('/api/staff/recruitment/context', {
+                    headers: { accept: 'application/json' },
+                    signal: controller.signal,
+                });
+                if (!response.ok) {
+                    if (
+                        !controller.signal.aborted
+                        && [401, 403, 428].includes(response.status)
+                    ) {
+                        setPrivacyAllowed(false);
+                    }
+                    return;
+                }
+                const payload = await response.json().catch(() => null);
+                if (controller.signal.aborted) return;
+                setPrivacyAllowed(payload?.result?.capabilities?.managePrivacy === true);
+            } catch {
+                if (controller.signal.aborted) return;
+            }
+        };
+        const refresh = createStaffRefresh(loadContext);
+        refresh.schedule();
+        const onUpdated = (event: Event) => {
+            if ((event as CustomEvent<{ scope?: string }>).detail?.scope !== 'tasks') {
+                refresh.schedule();
+            }
+        };
+        window.addEventListener('staff-workspace-updated', onUpdated);
+        return () => {
+            refresh.dispose();
+            controller.abort();
+            window.removeEventListener('staff-workspace-updated', onUpdated);
+        };
+    }, []);
 
     const sidebar = (onNavigate?: () => void) => (
         <div className="flex h-full flex-col">
@@ -367,7 +437,13 @@ export function StaffShell({
             <div className="flex-1 overflow-y-auto px-3 py-4">
                 <NavLinks
                     pathname={pathname}
-                    capabilities={loadError === 'denied' ? 'denied' : navCaps}
+                    capabilities={
+                        loadError === 'denied'
+                            ? 'denied'
+                            : navCaps
+                              ? { ...navCaps, privacy: privacyAllowed }
+                              : null
+                    }
                     onNavigate={onNavigate}
                 />
             </div>
@@ -502,7 +578,11 @@ export function StaffShell({
                     </div>
                 </header>
 
-                <main className="min-w-0 flex-1 px-4 py-6 md:px-8 md:py-8">{children}</main>
+                <main className="min-w-0 flex-1 px-4 py-6 md:px-8 md:py-8">
+                    <FormGuardProvider>
+                        <StaffRecordPreviewProvider>{children}</StaffRecordPreviewProvider>
+                    </FormGuardProvider>
+                </main>
             </div>
         </div>
     );

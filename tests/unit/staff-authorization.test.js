@@ -3,6 +3,7 @@ import test from 'node:test';
 import {
     StaffAuthorizationError,
     withStaffTransaction,
+    withStaffActor,
 } from '../../src/lib/staff-authorization.js';
 
 const ORG = '9c4edd11-2571-490b-a87c-ef30b9e0a001';
@@ -28,7 +29,7 @@ const makeClient = (behaviour = {}) => {
                 return { rows: behaviour.resolverRows ?? [PRINCIPAL_ROW] };
             }
             if (text.includes('has_permission_v1')) {
-                return { rows: [{ allowed: behaviour.allowed !== false }] };
+                return { rows: params[0].map(() => ({ allowed: behaviour.allowed !== false })) };
             }
             return { rows: [] };
         },
@@ -95,12 +96,16 @@ test('resolves principal, checks every permission and commits', async () => {
     assert.equal(result, 'done');
     assert.equal(pool.connects, 1);
     const texts = client.queries.map(({ text }) => text);
-    assert.equal(texts[0], 'begin isolation level read committed');
+    assert.match(texts[0], /^begin isolation level read committed;/);
+    assert.match(texts[0], /set local lock_timeout = '2s'/);
+    assert.match(texts[0], /set local statement_timeout = '10s'/);
+    assert.match(texts[0], /set_config\('app.actor_id', '', true\)/);
+    assert.equal(client.queries.length, 5, 'setup, resolve, context, permissions, commit');
     assert.equal(texts.at(-1), 'commit');
     const resolverCall = client.queries.find(({ text }) => text.includes('resolve_staff_principal_v1'));
     assert.deepEqual(resolverCall.params, ['google', 'https://accounts.google.com', '12345', ORG]);
     const permissionCalls = client.queries.filter(({ text }) => text.includes('has_permission_v1'));
-    assert.deepEqual(permissionCalls.map(({ params }) => params), [['staff.manage'], ['roles.manage']]);
+    assert.deepEqual(permissionCalls.map(({ params }) => params), [[['staff.manage', 'roles.manage']]]);
     assert.equal(operationContext.principal.userId, PRINCIPAL_ROW.user_id);
     assert.equal(operationContext.principal.membershipId, PRINCIPAL_ROW.membership_id);
     assert.equal(operationContext.principal.roleId, PRINCIPAL_ROW.role_id);
@@ -135,13 +140,13 @@ test('denied permission raises FORBIDDEN and rolls back', async () => {
     assert.deepEqual(client.releases, [null]);
 });
 
-test('mixed permission outcomes stop at the first false and skip the operation', async () => {
+test('mixed batched permission outcomes skip the operation', async () => {
     let permissionChecks = 0;
     const client = makeClient({
         onQuery(text) {
             if (text.includes('has_permission_v1')) {
                 permissionChecks += 1;
-                return { rows: [{ allowed: permissionChecks === 1 }] };
+                return { rows: [{ allowed: true }, { allowed: false }] };
             }
             if (text.includes('resolve_staff_principal_v1')) {
                 return { rows: [PRINCIPAL_ROW] };
@@ -164,7 +169,7 @@ test('mixed permission outcomes stop at the first false and skip the operation',
         (error) => error.code === 'FORBIDDEN',
     );
     assert.equal(invoked, false);
-    assert.equal(permissionChecks, 2);
+    assert.equal(permissionChecks, 1);
     const texts = client.queries.map(({ text }) => text);
     assert.ok(texts.includes('rollback'));
     assert.ok(!texts.includes('commit'));
@@ -302,4 +307,48 @@ test('query parameters are never interpolated into SQL text', async () => {
     }
     const resolverCall = client.queries.find(({ text }) => text.includes('resolve_staff_principal_v1'));
     assert.equal(resolverCall.params[2], '777');
+});
+
+for (const rows of [[], [{ allowed: null }], [{ allowed: 'true' }]]) {
+    test(`incomplete or non-boolean permission results fail closed: ${JSON.stringify(rows)}`, async () => {
+        const client = makeClient({
+            onQuery(text) {
+                if (text.includes('resolve_staff_principal_v1')) return { rows: [PRINCIPAL_ROW] };
+                if (text.includes('has_permission_v1')) return { rows };
+                return { rows: [] };
+            },
+        });
+        await assert.rejects(
+            () => withStaffTransaction(makePool(client), IDENTITY, ORG, ['staff.manage'], () => {
+                assert.fail('unauthorized operation ran');
+            }),
+            { code: 'FORBIDDEN' },
+        );
+        assert.equal(client.queries.at(-1).text, 'rollback');
+    });
+}
+
+test('actor transactions batch setup and retain the staff role before resolving', async () => {
+    const client = makeClient();
+    await withStaffActor(makePool(client), IDENTITY, ORG, () => 'done');
+    assert.equal(client.queries.length, 4);
+    assert.match(client.queries[0].text, /set local role app_staff;/);
+    assert.match(client.queries[1].text, /resolve_staff_principal_v1/);
+    assert.equal(client.queries.at(-1).text, 'commit');
+    assert.deepEqual(client.releases, [null]);
+});
+
+test('actor rollback failure destroys the connection and preserves operation error', async () => {
+    const original = new Error('operation failed');
+    const rollback = new Error('rollback failed');
+    const client = makeClient({ onQuery(text) {
+        if (text === 'rollback') throw rollback;
+        if (text.includes('resolve_staff_principal_v1')) return { rows: [PRINCIPAL_ROW] };
+        return { rows: [] };
+    } });
+    await assert.rejects(
+        () => withStaffActor(makePool(client), IDENTITY, ORG, () => { throw original; }),
+        (error) => error === original,
+    );
+    assert.deepEqual(client.releases, [rollback]);
 });

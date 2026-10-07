@@ -55,6 +55,9 @@ export async function POST(request: Request) {
         }
         return Response.json({ ok: true, result });
     } catch (error) {
+        if (action === 'invite' && (error as { code?: string })?.code === '23505') {
+            return Response.json({ error: 'invite already exists' }, { status: 409 });
+        }
         return staffErrorResponse(error);
     }
 }

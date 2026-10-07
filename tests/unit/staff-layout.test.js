@@ -18,6 +18,7 @@ function staffLayout(loadStaffWorkspace) {
     const imports = {
         'react/jsx-runtime': jsxRuntime,
         '@/lib/workspace.server': { loadStaffWorkspace },
+        './auth-recovery-notice': { AuthRecoveryNotice: () => null },
         './staff-shell': {
             StaffShell: (props) => jsxs('div', {
                 'data-shell': 'true',

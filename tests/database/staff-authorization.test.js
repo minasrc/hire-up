@@ -39,6 +39,7 @@ const MIGRATIONS = [
     GOOGLE_MIGRATION,
     INVITES_MIGRATION,
     INVITE_DOMAINS_MIGRATION,
+    '20261002090000_staff_invite_recovery.sql',
 ];
 const readMigration = (name) => readFileSync(join(migrationsDir, name), 'utf8');
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
@@ -1543,6 +1544,38 @@ test('staff authorization core on PostgreSQL 17', async (t) => {
             (await claim('new.hire@example.com', '80808')).principal,
             null,
         );
+        const reinvite = () => withStaffTransaction(
+            pool, identity(SUBJECTS.ADMIN1), ORG_A, ['staff.manage'],
+            async ({ client }) => (await client.query(
+                'select app.invite_staff_member_v1($1,$2,$3,$4,$5,$6,$7) as result',
+                [randomUUID(), randomUUID(), 'Returning hire', 'new.hire@example.com',
+                    ROLE_A_RECRUITER, randomUUID(), randomUUID()],
+            )).rows[0].result,
+        );
+        await assert.rejects(reinvite, (error) => error.code === '23505');
+        await admin.query(`update app.organization_memberships
+            set status = 'revoked', revoked_at = now(), version = version + 1 where id = $1`,
+        [invitedMembership]);
+        const returning = await reinvite();
+        assert.equal(returning.userId, invitedUser);
+        assert.equal(returning.membershipId, invitedMembership);
+        // Matching email alone cannot replace the originally bound account.
+        await assert.rejects(() => claim('new.hire@example.com', '90909'),
+            (error) => error.code === '42501');
+        const reclaimed = await claim('new.hire@example.com', newSubject);
+        assert.equal(reclaimed.principal.membership_id, invitedMembership);
+        assert.equal((await admin.query(
+            'select count(*) as count from app.auth_identities where user_id = $1',
+            [invitedUser],
+        )).rows[0].count, '1');
+        await admin.query(`update app.organization_memberships
+            set status = 'revoked', revoked_at = now(), version = version + 1 where id = $1`,
+        [invitedMembership]);
+        await reinvite();
+        await admin.query('update app.auth_identities set revoked_at = now() where user_id = $1',
+            [invitedUser]);
+        await assert.rejects(() => claim('new.hire@example.com', newSubject),
+            (error) => error.code === '42501');
     });
 
     await t.test('staff invites deny invalid or unauthorized paths', async () => {

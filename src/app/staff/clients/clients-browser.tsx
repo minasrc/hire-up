@@ -33,6 +33,7 @@ import {
 } from '@/components/staff-preview/shared';
 import { cn } from '@/lib/utils';
 import { optionParam, textParam } from '../filter-params';
+import { RecordPreviewLink } from '../record-previews';
 
 export interface ClientRow {
     id: string;
@@ -239,12 +240,13 @@ export function ClientsBrowser({
                                     <TableCell>
                                         <div className="flex items-center gap-3">
                                             <InitialsAvatar name={client.name} size="sm" />
-                                            <Link
-                                                href={`/staff/clients/${client.id}`}
+                                            <RecordPreviewLink
+                                                kind="client"
+                                                id={client.id}
                                                 className="w-fit rounded-sm font-medium text-foreground outline-none hover:text-accent-foreground hover:underline focus-visible:ring-2 focus-visible:ring-ring"
                                             >
                                                 {client.name}
-                                            </Link>
+                                            </RecordPreviewLink>
                                         </div>
                                     </TableCell>
                                     <TableCell>
@@ -296,12 +298,13 @@ export function ClientsBrowser({
                                 <div className="flex items-center gap-3">
                                     <InitialsAvatar name={client.name} />
                                     <div className="flex min-w-0 flex-col">
-                                        <Link
-                                            href={`/staff/clients/${client.id}`}
+                                        <RecordPreviewLink
+                                            kind="client"
+                                            id={client.id}
                                             className="truncate rounded-sm text-sm font-semibold text-foreground outline-none after:absolute after:inset-0 hover:text-accent-foreground hover:underline focus-visible:ring-2 focus-visible:ring-ring"
                                         >
                                             {client.name}
-                                        </Link>
+                                        </RecordPreviewLink>
                                         <span className="text-xs text-muted-foreground">
                                             {client.status === 'draft' ? 'Draft client' : 'Active client'}
                                         </span>

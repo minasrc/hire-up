@@ -1,7 +1,7 @@
 "use client";
 
 import { useRouter } from 'next/navigation';
-import { useRef, useState, type ReactNode } from 'react';
+import { useId, useRef, useState, type ReactNode } from 'react';
 import { Plus, Trash2 } from 'lucide-react';
 
 import { Button } from '@/components/staff-ui/button';
@@ -24,14 +24,19 @@ import {
 } from '@/components/staff-ui/select';
 import { Textarea } from '@/components/staff-ui/textarea';
 import { RichTextEditor } from '@/components/staff-preview/rich-text-editor';
-import { RequiredMark } from '@/components/staff-preview/shared';
+import { RequiredMark, TagPill } from '@/components/staff-preview/shared';
 import {
     BONUS_TYPES,
     EMPTY_JOB_DOCUMENT,
     SOCIAL_PLATFORM_NAMES,
     SOCIAL_PLATFORMS,
 } from '@/lib/client-job-contracts.js';
+import {
+    LOCATION_OPTIONS,
+    canonicalLocationLabel,
+} from '@/lib/location-options.js';
 import { staffMutation } from '@/lib/staff-mutation';
+import { useUnsavedChangesGuard } from './form-guard';
 
 const nativeSelectClass =
     'w-full rounded-md border border-input bg-card px-3 py-2 text-sm text-foreground outline-none focus-visible:ring-2 focus-visible:ring-ring';
@@ -66,6 +71,23 @@ function Field({
 const parseList = (value: string) =>
     value.split(',').map((entry) => entry.trim()).filter(Boolean);
 
+const parseListField = (raw: string): string[] => {
+    const trimmed = raw.trim();
+    if (trimmed.startsWith('[')) {
+        try {
+            const parsed: unknown = JSON.parse(trimmed);
+            if (Array.isArray(parsed)) {
+                return parsed
+                    .map((entry) => String(entry).trim())
+                    .filter(Boolean);
+            }
+        } catch {
+            return parseList(raw);
+        }
+    }
+    return parseList(raw);
+};
+
 interface SocialLink {
     platform: string;
     url: string;
@@ -94,9 +116,11 @@ export function ClientForm({
     };
 }) {
     const router = useRouter();
+    const formRef = useRef<HTMLFormElement>(null);
     const [error, setError] = useState<string | null>(null);
     const [saved, setSaved] = useState(false);
     const [busy, setBusy] = useState(false);
+    const [dirty, setDirty] = useState(false);
     const [links, setLinks] = useState<SocialLink[]>(
         (initial?.socialLinks ?? []).map((link) => ({
             platform: link.platform,
@@ -104,7 +128,7 @@ export function ClientForm({
         })),
     );
 
-    const submit = async (form: HTMLFormElement) => {
+    const submit = async (form: HTMLFormElement): Promise<string | null> => {
         const data = new FormData(form);
         const stealth = data.get('isStealth') === 'on';
         const fields = {
@@ -129,17 +153,44 @@ export function ClientForm({
         if (clientId) {
             setSaved(true);
             router.refresh();
-            return;
+            return null;
         }
         const targetId = payload?.result?.id ?? payload?.result?.clientId;
         if (!targetId) {
             throw new Error('Could not save. Please try again.');
         }
-        router.push(`/staff/clients/${targetId}`);
-        router.refresh();
+        return `/staff/clients/${targetId}`;
     };
 
+    const runSave = async (navigate = true): Promise<boolean> => {
+        if (!formRef.current || busy) return false;
+        setError(null);
+        setSaved(false);
+        setBusy(true);
+        try {
+            const target = await submit(formRef.current);
+            setDirty(false);
+            if (navigate && target) {
+                router.push(target);
+                router.refresh();
+            }
+            return true;
+        } catch (caught) {
+            setError(
+                caught instanceof Error
+                    ? caught.message
+                    : 'Could not save. Please try again.',
+            );
+            return false;
+        } finally {
+            setBusy(false);
+        }
+    };
+
+    useUnsavedChangesGuard({ dirty, save: () => runSave(false) });
+
     const updateLink = (index: number, patch: Partial<SocialLink>) => {
+        setDirty(true);
         setLinks((current) =>
             current.map((link, position) =>
                 position === index ? { ...link, ...patch } : link,
@@ -149,21 +200,12 @@ export function ClientForm({
 
     return (
         <form
+            ref={formRef}
             className="flex max-w-xl flex-col gap-5"
+            onChange={() => setDirty(true)}
             onSubmit={(event) => {
                 event.preventDefault();
-                setError(null);
-                setSaved(false);
-                setBusy(true);
-                void submit(event.currentTarget)
-                    .catch((caught) =>
-                        setError(
-                            caught instanceof Error
-                                ? caught.message
-                                : 'Could not save. Please try again.',
-                        ),
-                    )
-                    .finally(() => setBusy(false));
+                void runSave();
             }}
         >
             <Field label="Client name" htmlFor="client-name" required>
@@ -255,11 +297,12 @@ export function ClientForm({
                             size="icon"
                             className="self-end"
                             aria-label={`Remove social link ${index + 1}`}
-                            onClick={() =>
+                            onClick={() => {
+                                setDirty(true);
                                 setLinks((current) =>
                                     current.filter((_, position) => position !== index),
-                                )
-                            }
+                                );
+                            }}
                         >
                             <Trash2 aria-hidden="true" />
                         </Button>
@@ -270,12 +313,13 @@ export function ClientForm({
                         variant="outline"
                         size="sm"
                         className="self-start"
-                        onClick={() =>
+                        onClick={() => {
+                            setDirty(true);
                             setLinks((current) => [
                                 ...current,
                                 { platform: 'linkedin', url: '' },
-                            ])
-                        }
+                            ]);
+                        }}
                     >
                         <Plus aria-hidden="true" />
                         Add social link
@@ -320,14 +364,119 @@ export function ClientForm({
     );
 }
 
+function LocationEditor({
+    label,
+    hint,
+    name,
+    inputId,
+    initial,
+    onDirty,
+}: {
+    label: string;
+    hint?: string;
+    name: string;
+    inputId: string;
+    initial?: string[];
+    onDirty?: () => void;
+}) {
+    const listId = useId();
+    const [values, setValues] = useState<string[]>(initial ?? []);
+    const [draft, setDraft] = useState('');
+
+    const add = () => {
+        const canonical = canonicalLocationLabel(draft) ?? draft.trim();
+        if (canonical === '') return;
+        onDirty?.();
+        setValues((current) =>
+            current.some((entry) => entry.toLowerCase() === canonical.toLowerCase())
+                ? current
+                : [...current, canonical],
+        );
+        setDraft('');
+    };
+
+    const pending = canonicalLocationLabel(draft) ?? draft.trim();
+    const serialized =
+        pending === ''
+            ? values
+            : values.some((entry) => entry.toLowerCase() === pending.toLowerCase())
+              ? values
+              : [...values, pending];
+
+    return (
+        <Field label={label} htmlFor={inputId}>
+            <input type="hidden" name={name} value={JSON.stringify(serialized)} />
+            <div className="flex flex-col gap-2">
+                {values.length > 0 ? (
+                    <div className="flex flex-wrap gap-1.5">
+                        {values.map((value) => (
+                            <TagPill key={value}>
+                                {value}
+                                <button
+                                    type="button"
+                                    aria-label={`Remove ${value}`}
+                                    className="rounded-full outline-none hover:text-destructive focus-visible:ring-1 focus-visible:ring-ring"
+                                    onClick={() => {
+                                        onDirty?.();
+                                        setValues((current) =>
+                                            current.filter((entry) => entry !== value),
+                                        );
+                                    }}
+                                >
+                                    ×
+                                </button>
+                            </TagPill>
+                        ))}
+                    </div>
+                ) : null}
+                <div className="flex items-center gap-2">
+                    <Input
+                        id={inputId}
+                        list={listId}
+                        value={draft}
+                        placeholder="Type a city, country or region…"
+                        onChange={(event) => setDraft(event.target.value)}
+                        onBlur={add}
+                        onKeyDown={(event) => {
+                            if (event.key === 'Enter') {
+                                event.preventDefault();
+                                add();
+                            }
+                        }}
+                    />
+                    <Button
+                        type="button"
+                        variant="outline"
+                        size="sm"
+                        disabled={draft.trim() === ''}
+                        onClick={add}
+                    >
+                        Add
+                    </Button>
+                </div>
+                <datalist id={listId}>
+                    {LOCATION_OPTIONS.map((option) => (
+                        <option key={option} value={option} />
+                    ))}
+                </datalist>
+                {hint ? (
+                    <span className="text-xs text-muted-foreground">{hint}</span>
+                ) : null}
+            </div>
+        </Field>
+    );
+}
+
 export function JobForm({
     clients,
     jobId,
     revisionId,
     expectedVersion,
+    preselectedClientId,
     initial,
 }: {
     clients: { id: string; name: string }[];
+    preselectedClientId?: string;
     jobId?: string;
     revisionId?: string;
     expectedVersion?: string;
@@ -348,8 +497,10 @@ export function JobForm({
     };
 }) {
     const router = useRouter();
+    const formRef = useRef<HTMLFormElement>(null);
     const [error, setError] = useState<string | null>(null);
     const [busy, setBusy] = useState(false);
+    const [dirty, setDirty] = useState(false);
     const documentRef = useRef<unknown>(
         initial?.descriptionDocument ?? EMPTY_JOB_DOCUMENT,
     );
@@ -360,15 +511,15 @@ export function JobForm({
         })),
     );
 
-    const submit = async (form: HTMLFormElement) => {
+    const submit = async (form: HTMLFormElement): Promise<string> => {
         const data = new FormData(form);
         const nullable = (key: string) => String(data.get(key) ?? '') || null;
         const fields = {
             title: String(data.get('title') ?? ''),
             employmentType: nullable('employmentType'),
             workplaceMode: nullable('workplaceMode'),
-            locations: parseList(String(data.get('locations') ?? '')),
-            remoteRegions: parseList(String(data.get('remoteRegions') ?? '')),
+            locations: parseListField(String(data.get('locations') ?? '')),
+            remoteRegions: parseListField(String(data.get('remoteRegions') ?? '')),
             compensationMin: nullable('compensationMin'),
             compensationMax: nullable('compensationMax'),
             currency: nullable('currency'),
@@ -389,11 +540,37 @@ export function JobForm({
                   }),
         });
         const targetId = jobId ?? payload?.result?.jobId;
-        router.push(targetId ? `/staff/jobs/${targetId}` : '/staff/jobs');
-        router.refresh();
+        return targetId ? `/staff/jobs/${targetId}` : '/staff/jobs';
     };
 
+    const runSave = async (navigate = true): Promise<boolean> => {
+        if (!formRef.current || busy) return false;
+        setError(null);
+        setBusy(true);
+        try {
+            const target = await submit(formRef.current);
+            setDirty(false);
+            if (navigate) {
+                router.push(target);
+            }
+            router.refresh();
+            return true;
+        } catch (caught) {
+            setError(
+                caught instanceof Error
+                    ? caught.message
+                    : 'Could not save. Please try again.',
+            );
+            return false;
+        } finally {
+            setBusy(false);
+        }
+    };
+
+    useUnsavedChangesGuard({ dirty, save: () => runSave(false) });
+
     const updateBonus = (index: number, patch: Partial<JobBonus>) => {
+        setDirty(true);
         setBonuses((current) =>
             current.map((bonus, position) =>
                 position === index ? { ...bonus, ...patch } : bonus,
@@ -403,20 +580,12 @@ export function JobForm({
 
     return (
         <form
+            ref={formRef}
             className="flex max-w-2xl flex-col gap-5"
+            onChange={() => setDirty(true)}
             onSubmit={(event) => {
                 event.preventDefault();
-                setError(null);
-                setBusy(true);
-                void submit(event.currentTarget)
-                    .catch((caught) =>
-                        setError(
-                            caught instanceof Error
-                                ? caught.message
-                                : 'Could not save. Please try again.',
-                        ),
-                    )
-                    .finally(() => setBusy(false));
+                void runSave();
             }}
         >
             {!jobId && (
@@ -426,7 +595,7 @@ export function JobForm({
                         name="clientId"
                         required
                         className={nativeSelectClass}
-                        defaultValue=""
+                        defaultValue={preselectedClientId ?? ''}
                     >
                         <option value="" disabled>
                             Select a client
@@ -494,20 +663,22 @@ export function JobForm({
                     </select>
                 </Field>
             </div>
-            <Field label="Locations (comma-separated)" htmlFor="job-locations">
-                <Input
-                    id="job-locations"
-                    name="locations"
-                    defaultValue={initial?.locations?.join(', ') ?? ''}
-                />
-            </Field>
-            <Field label="Remote regions (comma-separated)" htmlFor="job-remote-regions">
-                <Input
-                    id="job-remote-regions"
-                    name="remoteRegions"
-                    defaultValue={initial?.remoteRegions?.join(', ') ?? ''}
-                />
-            </Field>
+            <LocationEditor
+                label="Locations"
+                name="locations"
+                inputId="job-locations"
+                initial={initial?.locations ?? []}
+                onDirty={() => setDirty(true)}
+                hint="Add one or more cities, countries or regions. Suggestions appear as you type."
+            />
+            <LocationEditor
+                label="Remote regions"
+                name="remoteRegions"
+                inputId="job-remote-regions"
+                initial={initial?.remoteRegions ?? []}
+                onDirty={() => setDirty(true)}
+                hint="Regions candidates can work from when the role is remote."
+            />
             <div className="grid gap-4 sm:grid-cols-2">
                 <Field label="Compensation min" htmlFor="job-comp-min">
                     <Input
@@ -594,11 +765,12 @@ export function JobForm({
                             size="icon"
                             className="self-end"
                             aria-label={`Remove bonus ${index + 1}`}
-                            onClick={() =>
+                            onClick={() => {
+                                setDirty(true);
                                 setBonuses((current) =>
                                     current.filter((_, position) => position !== index),
-                                )
-                            }
+                                );
+                            }}
                         >
                             <Trash2 aria-hidden="true" />
                         </Button>
@@ -609,12 +781,13 @@ export function JobForm({
                         variant="outline"
                         size="sm"
                         className="self-start"
-                        onClick={() =>
+                        onClick={() => {
+                            setDirty(true);
                             setBonuses((current) => [
                                 ...current,
                                 { type: 'cash', details: '' },
-                            ])
-                        }
+                            ]);
+                        }}
                     >
                         <Plus aria-hidden="true" />
                         Add bonus
@@ -630,6 +803,7 @@ export function JobForm({
                     initialDocument={initial?.descriptionDocument ?? EMPTY_JOB_DOCUMENT}
                     onDocumentChange={(document) => {
                         documentRef.current = document;
+                        setDirty(true);
                     }}
                 />
             </div>
@@ -728,6 +902,92 @@ export function NewRevisionButton({ jobId, expectedJobVersion }: { jobId: string
     );
 }
 
+export function DuplicateJobButton({
+    sourceJobId,
+    clientId,
+    sourceRevisionId,
+    expectedSourceVersion,
+}: {
+    sourceJobId: string;
+    clientId: string;
+    sourceRevisionId: string;
+    expectedSourceVersion: string;
+}) {
+    const router = useRouter();
+    const [busy, setBusy] = useState(false);
+    const [error, setError] = useState<string | null>(null);
+    const idsRef = useRef({
+        jobId: crypto.randomUUID(),
+        revisionId: crypto.randomUUID(),
+        operationId: crypto.randomUUID(),
+    });
+    return (
+        <span className="inline-flex items-center gap-3">
+            <Button
+                variant="outline"
+                disabled={busy}
+                onClick={async () => {
+                    setBusy(true);
+                    setError(null);
+                    try {
+                        const response = await fetch(
+                            `/api/staff/jobs/${sourceJobId}/duplicate`,
+                            {
+                                method: 'POST',
+                                headers: { 'content-type': 'application/json' },
+                                body: JSON.stringify({
+                                    sourceRevisionId,
+                                    expectedSourceVersion,
+                                    clientId,
+                                    jobId: idsRef.current.jobId,
+                                    revisionId: idsRef.current.revisionId,
+                                    operationId: idsRef.current.operationId,
+                                }),
+                            },
+                        );
+                        const payload = await response.json().catch(() => ({}));
+                        if (!response.ok) {
+                            throw new Error(
+                                response.status === 409
+                                    ? 'This job changed. Reload and try again.'
+                                    : response.status === 401 || response.status === 428
+                                      ? 'Your session expired. Sign in again.'
+                                      : response.status === 403
+                                        ? 'You do not have permission to duplicate jobs.'
+                                        : payload.error
+                                          ?? 'Could not duplicate this job.',
+                            );
+                        }
+                        const newJobId = payload?.result?.jobId;
+                        if (
+                            typeof newJobId !== 'string'
+                            || !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
+                                .test(newJobId)
+                            || newJobId === sourceJobId
+                        ) {
+                            throw new Error(
+                                'The duplicate was not confirmed. Reload and try again.');
+                        }
+                        window.dispatchEvent(new Event('staff-workspace-updated'));
+                        router.push(`/staff/jobs/${newJobId}/edit`);
+                        router.refresh();
+                    } catch (caught) {
+                        setError(
+                            caught instanceof Error
+                                ? caught.message
+                                : 'Could not duplicate this job.');
+                    } finally {
+                        setBusy(false);
+                    }
+                }}
+            >
+                {busy ? 'Duplicating…' : 'Duplicate job'}
+            </Button>
+            {error && <span role="alert" className="text-sm text-destructive">{error}</span>}
+        </span>
+    );
+}
+
 export function MemberInviteForm({
     roles,
     inviteDomains,
@@ -739,6 +999,7 @@ export function MemberInviteForm({
     const [error, setError] = useState<string | null>(null);
     const [status, setStatus] = useState<string | null>(null);
     const [busy, setBusy] = useState(false);
+    const [invitation, setInvitation] = useState<string | null>(null);
 
     const submit = async (form: HTMLFormElement) => {
         const data = new FormData(form);
@@ -748,6 +1009,7 @@ export function MemberInviteForm({
             email: String(data.get('email') ?? ''),
             roleId: String(data.get('roleId') ?? ''),
         });
+        setInvitation(`You have been invited to Agora. Open ${window.location.origin}/staff/sign-in and sign in with ${String(data.get('email') ?? '').trim()}. Set up your authenticator when prompted.`);
         form.reset();
         setStatus('Invitation recorded — the person signs in with that Google account.');
         router.refresh();
@@ -760,6 +1022,7 @@ export function MemberInviteForm({
                 event.preventDefault();
                 setError(null);
                 setStatus(null);
+                setInvitation(null);
                 setBusy(true);
                 void submit(event.currentTarget)
                     .catch((caught) =>
@@ -806,6 +1069,15 @@ export function MemberInviteForm({
             )}
             {status && (
                 <p role="status" className="text-sm text-muted-foreground">{status}</p>
+            )}
+            {invitation && (
+                <div className="flex flex-col gap-2">
+                    <Label htmlFor="invitation-message">Share this invitation message</Label>
+                    <textarea id="invitation-message" readOnly value={invitation}
+                        className="min-h-24 rounded-md border bg-background p-3 text-sm"
+                        onFocus={(event) => event.currentTarget.select()} />
+                    <p className="text-xs text-muted-foreground">Select and copy this message to send it to the invited person.</p>
+                </div>
             )}
             <Button type="submit" disabled={busy} className="self-start">
                 {busy ? 'Recording…' : 'Record invitation'}

@@ -1,5 +1,8 @@
 # Agent verification notes
 
+- Keep PR descriptions short and in plain English: what changed, why it matters, and whether testing passed. Omit internal function names, database roles, and implementation jargon; explain any release requirements simply.
+- Deliver small, independently testable and reviewable chunks, with a working checkpoint and a focused PR for each user-visible workflow. Do not bundle a whole workspace rewrite into one change. Use separate worktrees for genuinely independent parallel chunks after shared interfaces are settled; give each its own ports, build output and test data. Keep shared database/auth changes coordinated. Run focused checks during iteration and the broader checks once before delivery, report blockers promptly, and do not start the next broad batch without showing the current chunk's result.
+
 - Node 22 is required (`.nvmrc`, `engines >=22 <23`); do not run checks under other majors.
 - `npm test` runs unit tests only (`tests/unit`). Playwright specs live in `tests/e2e` and need Chromium plus, for `E2E_REAL_BACKEND=1`, a local Supabase stack on `http://127.0.0.1:54321` guarded by `tests/support/nonproduction.js`.
 - `npm run test:db:foundation` runs `tests/database/foundation.test.js`. It needs a running Docker daemon and creates labeled, throwaway containers only. `FOUNDATION_TEST_MODE=supabase` instead spins an isolated Supabase CLI workdir under the OS temp dir with a unique project id; ports 54321 and 3000 must be free.
@@ -7,6 +10,7 @@
 - `npm run test:db:privacy` runs `tests/database/privacy-foundation.test.js` against labeled, throwaway PostgreSQL 17/16 containers covering the document and privacy foundation migrations.
 - `npm run test:db:privacy-operations` runs `tests/database/privacy-operations.test.js` against labeled, throwaway PostgreSQL 17/16 containers covering the auditable privacy-operations procedures and their `withStaffTransaction` seam.
 - `npm run test:db:client-jobs` runs `tests/database/client-job-workflows.test.js` against labeled, throwaway PostgreSQL 17/16 containers covering the client/job contract validators, draft-revision workflow, stealth public projection, and operation-receipt idempotent retries.
+- `npm run test:db:recruitment` runs `tests/database/recruitment-workspace.test.js` against labeled, throwaway PostgreSQL 17 containers covering the staff recruitment workspace read models, candidate CRUD/tagging/job-link procedures, restricted-record redaction, directory pagination, date-range filters, CSV import review, and job duplication.
 - `npm run dev:design` starts the local-only staff design preview (Next.js entry `design-preview/`, `127.0.0.1:3100`). It renders synthetic in-memory data only — no env files, providers, auth, or backend services are touched. Its smoke spec lives in `tests/design-preview` with its own config at `design-preview/playwright.config.ts`.
 - Design-preview test artifacts must stay under repo-level `test-results/`; writing them into `design-preview/` triggers Next Fast Refresh while Playwright is interacting with the page.
 - Business schema SQL lives in `supabase/migrations` and must stay portable PostgreSQL 17 (no provider schemas, no extensions); the migration operator must be able to `set role app_owner` and bypass forced RLS for the seed.

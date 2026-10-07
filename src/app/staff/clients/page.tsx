@@ -4,7 +4,7 @@ import { requireStaffVerified } from '@/lib/staff-gate.server';
 import { loadStaffWorkspace } from '@/lib/workspace.server';
 import { PageHeader } from '@/components/staff-preview/shared';
 import { Card, CardContent } from '@/components/staff-ui/card';
-import { ClientsBrowser } from './clients-browser';
+import { ClientsBrowser, type ClientRow } from './clients-browser';
 
 export const dynamic = 'force-dynamic';
 
@@ -14,18 +14,19 @@ const LIST_LIMIT = 500;
 
 export default async function StaffClientsPage() {
     const gate = await requireStaffVerified();
-    const { summary } = await loadStaffWorkspace();
-
-    let clients: any[] | null = null;
-    try {
-        clients = await listClients(gate.pool, gate.identity, gate.organizationId, {
-            limit: LIST_LIMIT,
-        });
-    } catch (error) {
-        if (!(error instanceof StaffAuthorizationError && error.code === 'FORBIDDEN')) {
-            throw error;
+    const clientsPromise: Promise<ClientRow[] | null> = listClients(
+        gate.pool, gate.identity, gate.organizationId, { limit: LIST_LIMIT },
+    ).catch((error: unknown) => {
+        if (error instanceof StaffAuthorizationError && error.code === 'FORBIDDEN') {
+            return null;
         }
-    }
+        throw error;
+    });
+    // Both reads authorize independently; keep concurrency bounded to two.
+    const [{ summary }, clients] = await Promise.all([
+        loadStaffWorkspace(),
+        clientsPromise,
+    ]);
 
     if (clients === null) {
         return (

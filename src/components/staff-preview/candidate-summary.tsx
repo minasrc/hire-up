@@ -9,7 +9,7 @@ export function CandidateSummary({
     candidate,
     compact = false,
 }: {
-    candidate: Candidate;
+    candidate: Pick<Candidate, 'summary' | 'experience' | 'skills'>;
     compact?: boolean;
 }) {
     const experience = candidate.experience ?? [];

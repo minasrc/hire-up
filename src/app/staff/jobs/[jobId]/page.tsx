@@ -4,15 +4,19 @@ import type { ReactNode } from 'react';
 import { ArrowLeft } from 'lucide-react';
 import {
     getClient,
-    getJobWorkspace,
     previewJobPublic,
 } from '@/lib/client-job-operations';
+import { getJobWorkspace } from '@/lib/recruitment-operations';
 import { StaffAuthorizationError } from '@/lib/staff-authorization';
 import { requireStaffVerified } from '@/lib/staff-gate.server';
 import { loadStaffWorkspace } from '@/lib/workspace.server';
 import { FieldLabel, PageHeader, StatusBadge, TagPill } from '@/components/staff-preview/shared';
 import { JobDocumentView } from '@/components/staff-preview/job-document';
-import { jobStatusLabel } from '@/lib/job-display';
+import {
+    employmentTypeLabel,
+    jobStatusLabel,
+    workplaceModeLabel,
+} from '@/lib/job-display';
 import { Button } from '@/components/staff-ui/button';
 import {
     Card,
@@ -21,13 +25,24 @@ import {
     CardHeader,
     CardTitle,
 } from '@/components/staff-ui/card';
-import { JobListingToggle, NewRevisionButton, PublishButton } from '../../workspace-forms';
+import {
+    DuplicateJobButton,
+    JobListingToggle,
+    NewRevisionButton,
+    PublishButton,
+} from '../../workspace-forms';
+import { RecordPreviewLink } from '../../record-previews';
 
 export const dynamic = 'force-dynamic';
 
 export const metadata = { title: 'Job · Agora staff' };
 
-const formatCompensation = (revision: any) => {
+const formatCompensation = (revision: {
+    compensationMin?: string | null;
+    compensationMax?: string | null;
+    currency?: string | null;
+    payPeriod?: string | null;
+} | null | undefined) => {
     const min = revision?.compensationMin;
     const max = revision?.compensationMax;
     if (!min && !max) return null;
@@ -54,7 +69,7 @@ export default async function StaffJobPage(
     let workspace = null;
     try {
         workspace = await getJobWorkspace(
-            gate.pool, gate.identity, gate.organizationId, { jobId });
+            gate.pool, gate.identity, gate.organizationId, jobId);
     } catch (error) {
         if (error instanceof StaffAuthorizationError && error.code === 'FORBIDDEN') {
             return (
@@ -85,32 +100,32 @@ export default async function StaffJobPage(
 
     const { job, draft, published, publicationNeedsReview } = workspace;
     const { summary } = await loadStaffWorkspace();
-    const canWrite = summary?.capabilities.writeJobs === true;
-    let client = null;
-    let clientError = false;
-    try {
-        const result = await getClient(
-            gate.pool, gate.identity, gate.organizationId,
-            { clientId: job.clientId });
-        client = result?.client ?? result;
-    } catch {
-        clientError = true;
-    }
-    let preview = null;
-    let previewError = false;
-    if (draft) {
-        try {
-            preview = await previewJobPublic(
-                gate.pool, gate.identity, gate.organizationId,
-                { revisionId: draft.id });
-        } catch {
-            previewError = true;
-        }
-    }
+    const capabilities = workspace.context?.capabilities ?? summary?.capabilities;
+    const canWrite = capabilities?.writeJobs === true;
+    const canReadApplications = capabilities?.readApplications === true;
+    // Client details and the public preview are independent, optional reads.
+    // Settling both preserves their separate error states without a waterfall.
+    const [clientResult, previewResult] = await Promise.allSettled([
+        getClient(gate.pool, gate.identity, gate.organizationId,
+            { clientId: job.clientId }),
+        draft
+            ? previewJobPublic(gate.pool, gate.identity, gate.organizationId,
+                { revisionId: draft.id })
+            : Promise.resolve(null),
+    ]);
+    const client = clientResult.status === 'fulfilled'
+        ? clientResult.value?.client ?? clientResult.value
+        : null;
+    const clientError = clientResult.status === 'rejected';
+    const preview = previewResult.status === 'fulfilled' ? previewResult.value : null;
+    const previewError = previewResult.status === 'rejected';
 
     const field = (label: string, value: ReactNode) => (
         <FieldLabel label={label}>{value ?? '—'}</FieldLabel>
     );
+
+    const duplicateSource = draft ?? published;
+    const shownRevision = draft ?? published;
 
     return (
         <section className="mx-auto flex w-full max-w-5xl flex-col gap-6">
@@ -154,6 +169,63 @@ export default async function StaffJobPage(
                     </>
                 }
             />
+
+            <div className="flex flex-wrap items-center gap-2 text-sm text-muted-foreground">
+                {client?.name ? (
+                    <RecordPreviewLink
+                        kind="client"
+                        id={job.clientId}
+                        className="rounded-sm font-medium text-foreground outline-none hover:underline focus-visible:ring-2 focus-visible:ring-ring"
+                    >
+                        {client.name}
+                    </RecordPreviewLink>
+                ) : null}
+                {shownRevision?.locations?.length ? (
+                    <span>· {shownRevision.locations.join(', ')}</span>
+                ) : null}
+                {shownRevision?.employmentType ? (
+                    <span>· {employmentTypeLabel(shownRevision.employmentType)}</span>
+                ) : null}
+                {shownRevision?.workplaceMode ? (
+                    <span>· {workplaceModeLabel(shownRevision.workplaceMode)}</span>
+                ) : null}
+                {job.applicationCount !== null && job.applicationCount !== undefined ? (
+                    <span>
+                        ·{' '}
+                        {canReadApplications ? (
+                            <Link
+                                href={`/staff/applications?client=${job.clientId}&job=${job.id}`}
+                                className="rounded-sm underline-offset-4 outline-none hover:underline focus-visible:ring-2 focus-visible:ring-ring"
+                            >
+                                {job.applicationCount} application
+                                {job.applicationCount === 1 ? '' : 's'}
+                            </Link>
+                        ) : (
+                            `${job.applicationCount} application${
+                                job.applicationCount === 1 ? '' : 's'
+                            }`
+                        )}
+                    </span>
+                ) : null}
+            </div>
+
+            <div className="flex flex-wrap items-center gap-2">
+                {canWrite && duplicateSource ? (
+                    <DuplicateJobButton
+                        sourceJobId={job.id}
+                        clientId={job.clientId}
+                        sourceRevisionId={duplicateSource.id}
+                        expectedSourceVersion={duplicateSource.version}
+                    />
+                ) : null}
+                {canReadApplications ? (
+                    <Button variant="outline" size="sm" asChild>
+                        <Link href={`/staff/applications?client=${job.clientId}&job=${job.id}`}>
+                            View applications
+                        </Link>
+                    </Button>
+                ) : null}
+            </div>
 
             {clientError ? (
                 <p className="rounded-md border border-warning/40 bg-warning/10 px-3 py-2 text-sm text-warning-foreground">

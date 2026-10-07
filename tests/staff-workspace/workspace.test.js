@@ -61,6 +61,9 @@ const MIGRATIONS = [
     '20260926140000_public_intake.sql',
     '20260928100000_staff_workspace.sql',
     '20260928220000_job_visibility.sql',
+    '20260930090000_staff_candidate_management.sql',
+    '20260930090100_staff_workspace_views.sql',
+    '20260930090200_candidate_intake_safety.sql',
 ];
 
 const NEXTAUTH_SECRET = 'synthetic-workspace-secret';
@@ -96,13 +99,8 @@ const relativeLuminance = ({ r, g, b }) =>
     0.2126 * srgb(r) + 0.7152 * srgb(g) + 0.0722 * srgb(b);
 
 const gotoStaff = async (page, url) => {
-    const summaryFetch = page.waitForResponse(
-        (response) => response.url().includes('/api/staff/workspace')
-            && response.request().method() === 'GET',
-        { timeout: 90_000 },
-    );
     await page.goto(url, { waitUntil: 'domcontentloaded' });
-    await summaryFetch;
+    await page.getByRole('main').last().waitFor();
     await page.waitForLoadState('networkidle');
 };
 
@@ -157,6 +155,33 @@ test('staff workspace end-to-end in a real browser', async (t) => {
     }
     const runtimePassword = installStaffFixture(container);
     psql(container, clientJobFixtureSql);
+    const privacyCaseId = randomUUID();
+    psql(container, `
+        insert into app.role_permissions (organization_id, role_id, permission_key)
+            values ('${ORG_ID}', '${AUTHZ_ID.ROLE_B_ADMIN}', 'privacy.manage')
+            on conflict do nothing;
+        insert into app.privacy_requests
+            (id, organization_id, candidate_id, kind, status, received_at,
+             verified_at, verification_method, verified_by_membership_id, due_at)
+            values
+            ('${privacyCaseId}', '${ORG_ID}', '${CJ_ID.CANDIDATE_B}', 'access',
+             'in_progress', now() - interval '2 days', now() - interval '1 day',
+             'email match', '${CJ_ID.MEMBER_B_ADMIN}', now() + interval '28 days');
+        insert into app.privacy_request_subjects
+            (id, organization_id, request_id, candidate_id, candidate_version,
+             reviewed_by_membership_id, reviewed_at) values
+            ('${randomUUID()}', '${ORG_ID}', '${privacyCaseId}',
+             '${CJ_ID.CANDIDATE_B}', 1, '${CJ_ID.MEMBER_B_ADMIN}', now());
+        insert into app.privacy_events
+            (id, organization_id, request_id, sequence, action,
+             actor_membership_id, occurred_at, evidence_code) values
+            ('${randomUUID()}', '${ORG_ID}', '${privacyCaseId}', 1,
+             'privacy.request.created', '${CJ_ID.MEMBER_B_ADMIN}',
+             now() - interval '2 days', 'intake-form'),
+            ('${randomUUID()}', '${ORG_ID}', '${privacyCaseId}', 2,
+             'privacy.request.verified', '${CJ_ID.MEMBER_B_ADMIN}',
+             now() - interval '1 day', 'staff-review');
+    `);
     psql(container, `
         insert into app.totp_credentials
             (id, organization_id, user_id, secret, status, verified_at)
@@ -317,7 +342,20 @@ test('staff workspace end-to-end in a real browser', async (t) => {
     page.setDefaultTimeout(90_000);
 
     await t.test('overview renders live metrics, tasks, review queue and clients hiring', async () => {
-        await gotoStaff(page, `${baseURL}/staff`);
+        const summaryRequests = [];
+        const trackSummary = (request) => {
+            if (new URL(request.url()).pathname === '/api/staff/workspace') {
+                summaryRequests.push(request.url());
+            }
+        };
+        page.on('request', trackSummary);
+        try {
+            await gotoStaff(page, `${baseURL}/staff`);
+            assert.equal(summaryRequests.length, 0,
+                'fresh server summary must not be fetched again during hydration');
+        } finally {
+            page.off('request', trackSummary);
+        }
         await page.getByRole('heading', { name: 'Overview', level: 1 }).waitFor();
 
         await page.getByRole('link', { name: /^Candidates 1$/ }).waitFor();
@@ -360,12 +398,30 @@ test('staff workspace end-to-end in a real browser', async (t) => {
                 && response.request().method() === 'POST'
                 && response.ok(),
         );
+        await page.waitForLoadState('networkidle');
+        const redundantReads = [];
+        const trackCompletion = (request) => {
+            const url = new URL(request.url());
+            if (request.method() === 'GET' && (
+                url.pathname === '/api/staff/tasks'
+                || url.pathname === '/api/staff/recruitment/context'
+                || (url.pathname === '/staff' && url.searchParams.has('_rsc'))
+            )) redundantReads.push(request.url());
+        };
+        page.on('request', trackCompletion);
         let posted = taskPosts();
-        await todo.getByRole('checkbox', {
-            name: 'Mark Synthetic browser task complete',
-        }).click();
-        await posted;
-        await todo.getByText('Synthetic browser task').waitFor({ state: 'detached' });
+        try {
+            await todo.getByRole('checkbox', {
+                name: 'Mark Synthetic browser task complete',
+            }).click();
+            await posted;
+            await todo.getByText('Synthetic browser task').waitFor({ state: 'detached' });
+            await page.waitForLoadState('networkidle');
+            assert.deepEqual(redundantReads, [],
+                'task completion must not reload tasks, recruitment context or the page');
+        } finally {
+            page.off('request', trackCompletion);
+        }
 
         let reloadFetch = page.waitForResponse(
             (response) => response.url().includes('/api/staff/tasks?')
@@ -415,6 +471,8 @@ test('staff workspace end-to-end in a real browser', async (t) => {
             await page.goto(`${baseURL}/staff/jobs`, {
                 waitUntil: 'domcontentloaded',
             });
+            await page.waitForLoadState('networkidle');
+            await page.evaluate(() => window.dispatchEvent(new Event('focus')));
             await failedRefresh;
             await page.getByRole('button', {
                 name: 'Workspace updates unavailable',
@@ -582,10 +640,10 @@ test('staff workspace end-to-end in a real browser', async (t) => {
         await page.getByText('Synthetic Browser Client').first().waitFor();
 
         await page.reload({ waitUntil: 'domcontentloaded' });
-        const body = await page.getByRole('main').last().innerText();
-        assert.match(body, /Synthetic Browser Client/);
-        assert.match(body, /Casey Example/);
-        assert.match(body, /1 configured/);
+        const body = page.getByRole('main').last();
+        await expect(body).toContainText('Synthetic Browser Client');
+        await expect(body).toContainText('Casey Example');
+        await expect(body).toContainText('LinkedIn · https://linkedin.com/company/synthetic');
         await expect(page.getByRole('combobox', { name: 'Social link 1 platform' }))
             .toContainText('LinkedIn');
         await expect(page.locator('#social-url-0'))
@@ -1126,6 +1184,9 @@ test('staff workspace end-to-end in a real browser', async (t) => {
         await gotoStaff(page, `${baseURL}/staff`);
         await page.locator('#review-queue')
             .getByRole('link', { name: 'Synthetic Candidate B' }).click();
+        const preview = page.getByRole('dialog').last();
+        await preview.getByText('Synthetic Candidate B').first().waitFor();
+        await preview.getByRole('link', { name: 'Open full profile' }).click();
         await page.waitForURL(/\/staff\/candidates\/[0-9a-f-]{36}/);
     });
 
@@ -1164,6 +1225,8 @@ test('staff workspace end-to-end in a real browser', async (t) => {
 
     await t.test('candidate stage select is readable and the transition persists', async () => {
         await gotoStaff(page, `${baseURL}/staff/candidates/${CJ_ID.CANDIDATE_B}`);
+        await page.getByRole('tab', { name: /Applications/ }).click();
+        await page.waitForURL(/tab=applications/);
         const trigger = page.getByRole('combobox', {
             name: 'Stage for application AG-AAAA00000001',
         });
@@ -1185,12 +1248,7 @@ test('staff workspace end-to-end in a real browser', async (t) => {
         );
         await option.click();
         await stagePosted;
-        const stageFetch = page.waitForResponse(
-            (response) => response.url().includes('/api/staff/workspace')
-                && response.request().method() === 'GET',
-        );
         await page.reload({ waitUntil: 'domcontentloaded' });
-        await stageFetch;
         const reloaded = page.getByRole('combobox', {
             name: 'Stage for application AG-AAAA00000001',
         });
@@ -1217,7 +1275,8 @@ test('staff workspace end-to-end in a real browser', async (t) => {
             (response) => response.url().includes('/api/staff/candidates')
                 && response.request().method() === 'POST' && response.ok(),
         );
-        await page.getByRole('button', { name: 'Add note' }).click();
+        await page.getByRole('tabpanel', { name: /Notes/ })
+            .getByRole('button', { name: 'Add note' }).click();
         await notePosted;
         await page.getByText('Note added.').waitFor();
         await page.getByText('Synthetic browser note').waitFor();
@@ -1230,7 +1289,7 @@ test('staff workspace end-to-end in a real browser', async (t) => {
         const notesTab = page.getByRole('tab', { name: /Notes/ });
         const documentsTab = page.getByRole('tab', { name: /Documents/ });
         await expect(
-            page.getByRole('tab', { name: /Applications/ }),
+            page.getByRole('tab', { name: /Overview/ }),
         ).toHaveAttribute('aria-selected', 'true');
 
         await documentsTab.click();
@@ -1244,6 +1303,360 @@ test('staff workspace end-to-end in a real browser', async (t) => {
         await page.waitForLoadState('networkidle');
         await expect(notesTab).toHaveAttribute('aria-selected', 'true');
         await page.locator('#note-body').waitFor();
+    });
+
+    const addedEmail = `browser-add-${randomUUID().slice(0, 8)}@synthetic.test`;
+    let addedCandidateId = null;
+
+    await t.test('adding a candidate through the dialog lands on the overview', async () => {
+        await gotoStaff(page, `${baseURL}/staff/candidates`);
+        await clickUntil(
+            () => page.getByRole('button', { name: 'Add candidate' }).first().click(),
+            page.getByRole('dialog'));
+        const dialog = page.getByRole('dialog');
+        await fillWhenReady(
+            dialog.locator('#add-candidate-name'), 'Browser Added Candidate');
+        await fillWhenReady(
+            dialog.locator('#add-candidate-headline'), 'Protocol Engineer');
+        await fillWhenReady(
+            dialog.locator('#add-candidate-location'), 'Berlin, Germany');
+        await fillWhenReady(dialog.locator('#add-candidate-email'), addedEmail);
+        await fillWhenReady(
+            dialog.locator('#add-candidate-url'), 'https://added.synthetic.test');
+        await dialog.locator('#add-candidate-availability').selectOption('open');
+        await fillWhenReady(
+            dialog.locator('#add-candidate-tags'), 'browser-e2e, priority');
+        await fillWhenReady(
+            dialog.locator('#add-candidate-skills'), 'typescript; rust');
+        await fillWhenReady(
+            dialog.locator('#add-candidate-summary'), 'Synthetic profile summary.');
+        const noteField = dialog.locator('#add-candidate-note');
+        if ((await noteField.count()) > 0) {
+            await fillWhenReady(noteField, 'Added during browser coverage.');
+        }
+        const posted = page.waitForResponse(
+            (response) => response.url().includes('/api/staff/candidates')
+                && !response.url().includes('/import')
+                && response.request().method() === 'POST' && response.ok());
+        await dialog.getByRole('button', { name: 'Add candidate' }).click();
+        await posted;
+        await page.waitForURL(/\/staff\/candidates\/[0-9a-f-]{36}$/);
+        addedCandidateId = page.url().split('/').pop();
+        await page.getByText('Browser Added Candidate').first().waitFor();
+        await page.getByText('Synthetic profile summary.').waitFor();
+        await page.getByText('browser-e2e').first().waitFor();
+
+        await page.reload({ waitUntil: 'domcontentloaded' });
+        await page.getByText('Browser Added Candidate').first().waitFor();
+        await page.getByText(addedEmail).first().waitFor();
+    });
+
+    await t.test('the add dialog blocks invalid CV files before submission', async () => {
+        await gotoStaff(page, `${baseURL}/staff/candidates`);
+        await clickUntil(
+            () => page.getByRole('button', { name: 'Add candidate' }).first().click(),
+            page.getByRole('dialog'));
+        const dialog = page.getByRole('dialog');
+        await fillWhenReady(
+            dialog.locator('#add-candidate-name'), 'File Guard Candidate');
+        await dialog.locator('#add-candidate-cv').setInputFiles({
+            name: 'notes.txt',
+            mimeType: 'text/plain',
+            buffer: Buffer.from('not a cv'),
+        });
+        await dialog.getByRole('alert').waitFor();
+        const submit = dialog.getByRole('button', { name: 'Add candidate' });
+        await expect(submit).toBeDisabled();
+        await dialog.locator('#add-candidate-cv').setInputFiles([]);
+        await expect(submit).toBeEnabled();
+        await dialog.getByRole('button', { name: 'Cancel' }).click();
+        await expect(dialog).toBeHidden();
+    });
+
+    await t.test('a duplicate email offers the existing record', async () => {
+        await gotoStaff(page, `${baseURL}/staff/candidates`);
+        await clickUntil(
+            () => page.getByRole('button', { name: 'Add candidate' }).first().click(),
+            page.getByRole('dialog'));
+        const dialog = page.getByRole('dialog');
+        await fillWhenReady(
+            dialog.locator('#add-candidate-name'), 'Browser Added Candidate');
+        await fillWhenReady(dialog.locator('#add-candidate-email'), addedEmail);
+        const conflicted = page.waitForResponse(
+            (response) => response.url().includes('/api/staff/candidates')
+                && !response.url().includes('/import')
+                && response.request().method() === 'POST'
+                && response.status() === 409);
+        await dialog.getByRole('button', { name: 'Add candidate' }).click();
+        await conflicted;
+        await page.getByText('A candidate with this email already exists.').waitFor();
+        await page.getByRole('button', { name: 'View existing candidate' }).click();
+        await page.waitForURL(`**/staff/candidates/${addedCandidateId}`);
+        await page.getByText('Browser Added Candidate').first().waitFor();
+    });
+
+    await t.test('a candidate can be added to a job from the dialog', async () => {
+        await gotoStaff(page, `${baseURL}/staff/candidates`);
+        await clickUntil(
+            () => page.getByRole('button', { name: 'Add candidate' }).first().click(),
+            page.getByRole('dialog'));
+        const dialog = page.getByRole('dialog');
+        await fillWhenReady(
+            dialog.locator('#add-candidate-name'), 'Applicant Via Job');
+        await dialog.locator('#add-candidate-job').selectOption(unlistedJobId);
+        const posted = page.waitForResponse(
+            (response) => response.url().includes('/api/staff/candidates')
+                && !response.url().includes('/import')
+                && response.request().method() === 'POST' && response.ok());
+        await dialog.getByRole('button', { name: 'Add candidate' }).click();
+        await posted;
+        await page.waitForURL(/\/staff\/candidates\/[0-9a-f-]{36}$/);
+        const candidateId = page.url().split('/').pop();
+        const count = psql(container, `
+            select count(*)::text from app.applications
+            where organization_id = '${ORG_ID}'
+                and candidate_id = '${candidateId}'
+                and job_id = '${unlistedJobId}'`).trim();
+        assert.equal(count, '1', 'the selected job received one application');
+        await page.getByRole('tab', { name: /Applications/ }).click();
+        await page.waitForURL(/tab=applications/);
+        await page.getByText('Synthetic Private Role').first().waitFor();
+    });
+
+    await t.test('the candidate drawer previews detail and opens the full record', async () => {
+        await gotoStaff(page, `${baseURL}/staff/candidates`);
+        const link = page.getByRole('link', {
+            name: 'Browser Added Candidate',
+        }).first();
+        await link.click();
+        const sheet = page.getByRole('dialog').last();
+        await sheet.getByText('Browser Added Candidate').first().waitFor();
+        assert.match(
+            page.url(), /\/staff\/candidates$/,
+            'the drawer must not navigate away from the list',
+        );
+        await page.keyboard.press('Escape');
+        await expect(sheet).toBeHidden();
+        await link.click();
+        await sheet.getByText('Browser Added Candidate').first().waitFor();
+        await sheet.getByRole('link', { name: 'Open full profile' }).click();
+        await page.waitForURL(`**/staff/candidates/${addedCandidateId}`);
+        await page.getByText('Browser Added Candidate').first().waitFor();
+    });
+
+    let duplicatedJobId = null;
+
+    await t.test('duplicating a job through the UI creates a separate draft', async () => {
+        const jobsBefore = Number(psql(container, `
+            select count(*)::text from app.jobs
+            where organization_id = '${ORG_ID}'`).trim());
+        await gotoStaff(page, `${baseURL}/staff/jobs/${createdJobId}`);
+        const duplicated = page.waitForResponse(
+            (response) => response.url()
+                .includes(`/api/staff/jobs/${createdJobId}/duplicate`)
+                && response.request().method() === 'POST' && response.ok());
+        await page.getByRole('button', { name: 'Duplicate job' }).click();
+        await duplicated;
+        await page.waitForURL(/\/staff\/jobs\/[0-9a-f-]{36}\/edit$/);
+        duplicatedJobId = page.url().split('/').at(-2);
+        assert.notEqual(
+            duplicatedJobId, createdJobId,
+            'the duplicate must be a new job, not the source',
+        );
+        const sourceTitle = psql(container, `
+            select r.title from app.jobs j
+            join app.job_revisions r
+                on r.organization_id = j.organization_id
+                and r.job_id = j.id
+            where j.id = '${createdJobId}' and r.status = 'draft'`).trim();
+        await expect(page.locator('#job-title')).toHaveValue(sourceTitle);
+        await expect(
+            page.getByRole('combobox', { name: 'Bonus 1 type' }),
+        ).toContainText('equity');
+        const jobsAfter = Number(psql(container, `
+            select count(*)::text from app.jobs
+            where organization_id = '${ORG_ID}'`).trim());
+        assert.equal(
+            jobsAfter, jobsBefore + 1,
+            'duplicating adds exactly one job; the source remains',
+        );
+        const state = psql(container, `
+            select publication_state, publicly_listed::text from app.jobs
+            where organization_id = '${ORG_ID}' and id = '${duplicatedJobId}'`).trim();
+        assert.match(state, /^draft\|/, 'the duplicate starts as a draft');
+        assert.ok(
+            !(await publicJobTitles()).includes('Synthetic Browser Job v2'),
+            'a draft duplicate must not appear on the public board',
+        );
+    });
+
+    await t.test('unsaved job edits warn on navigation and can be discarded', async () => {
+        await gotoStaff(
+            page, `${baseURL}/staff/jobs/${duplicatedJobId}/edit`);
+        await fillWhenReady(
+            page.locator('#job-title'), 'Duplicated Job dirty');
+        await page.getByRole('link', { name: 'Overview', exact: true }).first()
+            .click();
+        await page.getByText('unsaved changes').first().waitFor();
+        await page.getByRole('button', { name: 'Stay' }).click();
+        assert.match(page.url(), /\/staff\/jobs\/.*\/edit$/);
+        await page.getByRole('link', { name: 'Overview', exact: true }).first()
+            .click();
+        await page.getByText('unsaved changes').first().waitFor();
+        await page.getByRole('button', { name: 'Discard and continue' }).click();
+        await page.waitForURL(/\/staff$/);
+    });
+
+    await t.test('CSV import reviews, skips invalid rows and commits selected', async () => {
+        const importedEmail =
+            `imported-one-${randomUUID().slice(0, 8)}@synthetic.test`;
+        const possibleEmail =
+            `possible-${randomUUID().slice(0, 8)}@synthetic.test`;
+        const csv = [
+            'name,email,role,location,notes',
+            `Imported One,${importedEmail},Engineer,Lisbon,first import note`,
+            `Browser Added Candidate,${addedEmail},Engineer,,`,
+            `,${possibleEmail},,,`,
+            `Browser Added Candidate,${`pm-${randomUUID().slice(0, 8)}@synthetic.test`},,,`,
+        ].join('\n');
+        await gotoStaff(page, `${baseURL}/staff/candidates/import`);
+        await page.locator('[data-testid="import-file-input"]').setInputFiles({
+            name: 'candidates.csv',
+            mimeType: 'text/csv',
+            buffer: Buffer.from(csv, 'utf8'),
+        });
+        await page.getByRole('heading', { name: 'Map columns' }).waitFor();
+        await expect(page.locator('#map-fullName')).toHaveValue('0');
+        await expect(page.locator('#map-email')).toHaveValue('1');
+        const reviewed = page.waitForResponse(
+            (response) => response.url().includes('/api/staff/candidates/import')
+                && response.request().method() === 'POST' && response.ok());
+        await page.getByRole('button', { name: 'Review import' }).click();
+        const reviewResponse = await reviewed;
+        await expect(page.getByRole('heading', { name: 'Review rows' }))
+            .toBeVisible({ timeout: 15_000 }).catch(async (error) => {
+                t.diagnostic(JSON.stringify({
+                    review: await reviewResponse.json(),
+                    page: await page.getByRole('main').last().innerText(),
+                }));
+                throw error;
+            });
+        await page.getByText('invalid').first().waitFor();
+        await expect(
+            page.getByRole('checkbox', { name: 'Include row 3' }),
+        ).toBeDisabled();
+        await expect(
+            page.getByRole('checkbox', { name: 'Include row 4' }),
+        ).toBeDisabled();
+        const importButton = page.getByRole('button', {
+            name: /Import \d+ candidate/,
+        });
+        await expect(importButton).toBeDisabled();
+        await page.locator('#import-confirm').click();
+        await expect(importButton).toBeEnabled();
+        const possibleRow = page.getByRole('checkbox', { name: 'Include row 5' });
+        if (await possibleRow.isEnabled() && !(await possibleRow.isChecked())) {
+            await possibleRow.click();
+        }
+        const committed = page.waitForResponse(
+            (response) => response.url().includes('/api/staff/candidates/import')
+                && response.request().method() === 'POST' && response.ok());
+        await importButton.click();
+        await committed;
+        await page.getByRole('heading', { name: 'Import complete' }).waitFor();
+        await page.getByText('Added').first().waitFor();
+        const imported = psql(container, `
+            select count(*)::text from app.candidate_identifiers
+            where organization_id = '${ORG_ID}'
+                and kind = 'email'
+                and normalized_value = '${importedEmail}'`).trim();
+        assert.equal(imported, '1', 'the ready row was imported once');
+    });
+
+    await t.test('applications stage cards clear the review-only filter', async () => {
+        await gotoStaff(page, `${baseURL}/staff/applications?review=1`);
+        await page.getByText('Synthetic Candidate B').waitFor();
+        const cards = page.getByRole('group', { name: 'Stage filter cards' });
+        const interview = cards.getByRole('button', { name: /Interview/ });
+        await interview.click();
+        await page.waitForURL((url) => !url.searchParams.has('review'));
+        await page.waitForURL((url) => url.searchParams.get('stage') === 'interview');
+        assert.equal(
+            await page.getByText('Synthetic Candidate B').count(), 0,
+            'the review-stage application is not under Interview',
+        );
+        await cards.getByRole('button', { name: /All applications/ }).click();
+        await page.waitForURL((url) => url.searchParams.get('stage') === null
+            && !url.searchParams.has('review'));
+        await page.getByText('Synthetic Candidate B').waitFor();
+    });
+
+    await t.test('privacy cases show real statuses and audit events', async () => {
+        await gotoStaff(page, `${baseURL}/staff/privacy`);
+        await page.getByRole('heading', {
+            name: /privacy|data requests/i,
+        }).first().waitFor();
+        await page.getByText('Access request').first().waitFor();
+        await page.getByText('In progress').first().waitFor();
+        await page.getByText('Request received').first().waitFor();
+        await page.getByText('Identity verified').first().waitFor();
+        await page.getByRole('button', {
+            name: 'View reviewed records',
+        }).waitFor();
+    });
+
+    await t.test('privacy denies members without privacy.manage', async () => {
+        const context = await browser.newContext({
+            viewport: { width: 1440, height: 1000 },
+        });
+        try {
+            await context.addCookies(recruiterCookies);
+            const recruiter = await context.newPage();
+            recruiter.setDefaultTimeout(90_000);
+            await gotoStaff(recruiter, `${baseURL}/staff/privacy`);
+            await recruiter.getByText(/privacy\.manage permission/).waitFor();
+            assert.equal(
+                await recruiter.getByRole('link', {
+                    name: /Privacy|Data requests/,
+                }).count(),
+                0,
+                'the privacy nav entry is hidden without privacy.manage',
+            );
+        } finally {
+            await context.close();
+        }
+    });
+
+    await t.test('the mobile viewport keeps the candidate overview usable', async () => {
+        const mobile = await browser.newContext({
+            viewport: { width: 390, height: 844 },
+        });
+        try {
+            await mobile.addCookies(staffCookies);
+            const mPage = await mobile.newPage();
+            mPage.setDefaultTimeout(90_000);
+            await gotoStaff(
+                mPage, `${baseURL}/staff/candidates/${addedCandidateId}`);
+            await mPage.getByText('Browser Added Candidate').first().waitFor();
+            await mPage.getByRole('tab', { name: /Overview/ }).waitFor();
+            await mPage.getByRole('tab', { name: /Applications/ }).waitFor();
+            const overflow = await mPage.evaluate(
+                () => document.documentElement.scrollWidth
+                    - document.documentElement.clientWidth);
+            assert.ok(
+                overflow <= 1,
+                `horizontal overflow on mobile overview: ${overflow}px`,
+            );
+            await gotoStaff(mPage, `${baseURL}/staff/candidates`);
+            await mPage.getByRole('link', {
+                name: 'Browser Added Candidate',
+            }).first().click();
+            const sheet = mPage.getByRole('dialog').last();
+            await sheet.getByText('Browser Added Candidate').first().waitFor();
+            await mPage.keyboard.press('Escape');
+        } finally {
+            await mobile.close();
+        }
     });
 
     await t.test('member invitation records locally without claiming email delivery', async () => {
@@ -1452,7 +1865,7 @@ test('staff workspace end-to-end in a real browser', async (t) => {
             await context.addCookies(sessionOnlyCookies);
             const pending = await context.newPage();
             const response = await pending.goto(`${baseURL}/staff`, { waitUntil: 'domcontentloaded' });
-            assert.match(pending.url(), /\/staff\/mfa\/verify/);
+            await expect(pending).toHaveURL(/\/staff\/mfa\/verify/);
             assert.ok(response === null || response.status() < 400);
         } finally {
             await context.close();
@@ -1474,7 +1887,7 @@ test('staff workspace end-to-end in a real browser', async (t) => {
             await mobile.getByRole('heading', { name: 'Clients hiring' }).waitFor();
             await mobile.getByRole('link', {
                 name: /Synthetic Browser Client Renamed/,
-            }).waitFor();
+            }).first().waitFor();
             await mobile.getByRole('link', {
                 name: 'Synthetic Candidate B',
             }).first().waitFor();
@@ -1582,7 +1995,7 @@ test('staff workspace end-to-end in a real browser', async (t) => {
             await context.addCookies(staffCookies);
             const denied = await context.newPage();
             await denied.goto(`${baseURL}/staff`, { waitUntil: 'domcontentloaded' });
-            assert.match(denied.url(), /\/staff\/(no-access|signin)/);
+            await expect(denied).toHaveURL(/\/staff\/(no-access|sign-in)/);
         } finally {
             await context.close();
         }

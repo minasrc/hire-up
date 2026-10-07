@@ -13,7 +13,10 @@ export const metadata = {
 
 export default async function StaffMfaEnrollPage() {
     const gate = await staffGate();
-    if (gate.stage === 'signed-out') {
+    if (gate.stage === 'unavailable') {
+        redirect('/staff/unavailable');
+    }
+    if (gate.stage === 'signed-out' || gate.stage === 'reauthenticate') {
         redirect('/staff/sign-in');
     }
     if (gate.stage === 'unresolved') {

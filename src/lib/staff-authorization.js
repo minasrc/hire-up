@@ -24,6 +24,18 @@ const KNOWN_PERMISSION_KEYS = new Set([
     'staff.manage',
 ]);
 
+// Static commands use one simple-protocol exchange. Keep untrusted values in
+// the parameterized statements below, after the transaction context is cleared.
+const TRANSACTION_SETUP = `begin isolation level read committed;
+    set local lock_timeout = '2s';
+    set local statement_timeout = '10s';
+    select
+        pg_catalog.set_config('app.actor_id', '', true),
+        pg_catalog.set_config('app.organization_id', '', true),
+        pg_catalog.set_config('app.identity_provider', '', true),
+        pg_catalog.set_config('app.identity_issuer', '', true),
+        pg_catalog.set_config('app.identity_subject', '', true);`;
+
 export const STAFF_PROVIDER = 'google';
 export const STAFF_ISSUER = 'https://accounts.google.com';
 const SUBJECT_PATTERN = /^[1-9][0-9]{0,20}$/;
@@ -79,17 +91,7 @@ export async function withStaffTransaction(
     };
 
     try {
-        await client.query('begin isolation level read committed');
-        await client.query(`set local lock_timeout = '2s'`);
-        await client.query(`set local statement_timeout = '10s'`);
-        await client.query(
-            `select
-                pg_catalog.set_config('app.actor_id', '', true),
-                pg_catalog.set_config('app.organization_id', '', true),
-                pg_catalog.set_config('app.identity_provider', '', true),
-                pg_catalog.set_config('app.identity_issuer', '', true),
-                pg_catalog.set_config('app.identity_subject', '', true)`,
-        );
+        await client.query(TRANSACTION_SETUP);
         const resolved = await client.query(
             'select user_id, membership_id, role_id'
                 + ' from app.resolve_staff_principal_v1($1, $2, $3, $4)',
@@ -113,17 +115,17 @@ export async function withStaffTransaction(
                 pg_catalog.set_config('app.organization_id', $2, true)`,
             [principal.user_id, organizationId],
         );
-        for (const key of requiredPermissions) {
-            const permission = await client.query(
-                'select app.has_permission_v1($1) as allowed',
-                [key],
+        const permissions = await client.query(
+            `select app.has_permission_v1(permission.key) as allowed
+             from pg_catalog.unnest($1::text[]) as permission(key)`,
+            [requiredPermissions],
+        );
+        if (permissions.rows.length !== requiredPermissions.length
+            || permissions.rows.some(({ allowed }) => allowed !== true)) {
+            throw new StaffAuthorizationError(
+                'FORBIDDEN',
+                'a required permission is not granted',
             );
-            if (permission.rows[0]?.allowed !== true) {
-                throw new StaffAuthorizationError(
-                    'FORBIDDEN',
-                    'a required permission is not granted',
-                );
-            }
         }
         const result = await operation({
             client,
@@ -175,19 +177,9 @@ export async function withStaffActor(pool, identity, organizationId, operation) 
     }
 
     const client = await pool.connect();
+    let releaseError;
     try {
-        await client.query('begin isolation level read committed');
-        await client.query(`set local lock_timeout = '2s'`);
-        await client.query(`set local statement_timeout = '10s'`);
-        await client.query('set local role app_staff');
-        await client.query(
-            `select
-                pg_catalog.set_config('app.actor_id', '', true),
-                pg_catalog.set_config('app.organization_id', '', true),
-                pg_catalog.set_config('app.identity_provider', '', true),
-                pg_catalog.set_config('app.identity_issuer', '', true),
-                pg_catalog.set_config('app.identity_subject', '', true)`,
-        );
+        await client.query(`${TRANSACTION_SETUP} set local role app_staff;`);
         const resolved = await client.query(
             'select user_id, membership_id, role_id'
                 + ' from app.resolve_staff_principal_v1($1, $2, $3, $4)',
@@ -220,9 +212,9 @@ export async function withStaffActor(pool, identity, organizationId, operation) 
         await client.query('commit');
         return result;
     } catch (error) {
-        await client.query('rollback').catch(() => {});
+        await client.query('rollback').catch((error) => { releaseError = error; });
         throw error;
     } finally {
-        client.release();
+        client.release(releaseError);
     }
 }

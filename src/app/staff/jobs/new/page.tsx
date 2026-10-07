@@ -1,6 +1,7 @@
 import Link from 'next/link';
 import { ArrowLeft } from 'lucide-react';
-import { listClients } from '@/lib/client-job-operations';
+import { getClient, listClients } from '@/lib/client-job-operations';
+import { isUuid } from '@/lib/recruitment-contracts';
 import { requireStaffVerified } from '@/lib/staff-gate.server';
 import { loadStaffWorkspace } from '@/lib/workspace.server';
 import { EmptyState, PageHeader } from '@/components/staff-preview/shared';
@@ -13,14 +14,43 @@ export const dynamic = 'force-dynamic';
 
 export const metadata = { title: 'New job · Agora staff' };
 
-export default async function StaffJobNewPage() {
+export default async function StaffJobNewPage({
+    searchParams,
+}: {
+    searchParams: Promise<Record<string, string | string[] | undefined>>;
+}) {
     const gate = await requireStaffVerified();
     const { summary } = await loadStaffWorkspace();
     const canWrite = summary?.capabilities.writeJobs === true;
+    const params = await searchParams;
+    const requestedClient = typeof params.client === 'string' ? params.client : null;
 
-    const clients = canWrite
-        ? await listClients(gate.pool, gate.identity, gate.organizationId, {})
+    type ClientOption = { id: string; name: string; status?: string };
+    const clients: ClientOption[] = canWrite
+        ? (await listClients(gate.pool, gate.identity, gate.organizationId, { limit: 500 }))
+            .filter((client: ClientOption) => client.status === 'active')
         : [];
+    let preselectedClientId = clients.some((client) => client.id === requestedClient)
+        ? requestedClient
+        : undefined;
+    if (!preselectedClientId && requestedClient && isUuid(requestedClient)) {
+        try {
+            const result = await getClient(
+                gate.pool, gate.identity, gate.organizationId,
+                { clientId: requestedClient });
+            const requested = result?.client ?? result;
+            if (requested?.status === 'active' && requested?.id && requested?.name) {
+                clients.push({
+                    id: requested.id,
+                    name: requested.name,
+                    status: requested.status,
+                });
+                preselectedClientId = requested.id;
+            }
+        } catch {
+            preselectedClientId = undefined;
+        }
+    }
 
     return (
         <section className="mx-auto flex w-full max-w-5xl flex-col gap-6">
@@ -63,10 +93,11 @@ export default async function StaffJobNewPage() {
                 <Card>
                     <CardContent className="pt-6">
                         <JobForm
-                            clients={clients.map((client: any) => ({
+                            clients={clients.map((client) => ({
                                 id: client.id,
                                 name: client.name,
                             }))}
+                            preselectedClientId={preselectedClientId}
                         />
                     </CardContent>
                 </Card>

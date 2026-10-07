@@ -72,6 +72,9 @@ const PIPELINE_MIGRATION = '20260925140000_application_pipeline.sql';
 const INTAKE_MIGRATION = '20260926140000_public_intake.sql';
 const WORKSPACE_MIGRATION = '20260928100000_staff_workspace.sql';
 const VISIBILITY_MIGRATION = '20260928220000_job_visibility.sql';
+const CANDIDATE_MGMT_MIGRATION = '20260930090000_staff_candidate_management.sql';
+const WORKSPACE_VIEWS_MIGRATION = '20260930090100_staff_workspace_views.sql';
+const INTAKE_SAFETY_MIGRATION = '20260930090200_candidate_intake_safety.sql';
 const FOUNDATION_MIGRATIONS = [
     '20260922090000_foundation_roles.sql',
     '20260922090100_foundation_schema.sql',
@@ -1952,6 +1955,16 @@ test('supabase legacy upgrade without reset', { skip: mode !== 'supabase' }, asy
             join(migrationsDir, VISIBILITY_MIGRATION),
             join(tempMigrations, VISIBILITY_MIGRATION),
         );
+        for (const fileName of [
+            CANDIDATE_MGMT_MIGRATION,
+            WORKSPACE_VIEWS_MIGRATION,
+            INTAKE_SAFETY_MIGRATION,
+        ]) {
+            copyFileSync(
+                join(migrationsDir, fileName),
+                join(tempMigrations, fileName),
+            );
+        }
         runCli(['migration', 'up', '--local'], { timeout: 120_000, verifyDb: true });
 
         assert.equal(supabasePsql(`
@@ -2024,21 +2037,31 @@ test('supabase legacy upgrade without reset', { skip: mode !== 'supabase' }, asy
         const statusOutput = runCli(['status', '-o', 'env'], { verifyDb: true });
         const envValue = (key) => statusOutput.match(new RegExp(`^${key}="([^"]*)"`, 'm'))?.[1] ?? '';
         try {
-            execFileSync(playwrightBin, ['test', 'tests/e2e/application-backend.spec.js'], {
+            execFileSync(playwrightBin, [
+                'test',
+                'tests/e2e/application-backend.spec.js',
+                'tests/e2e/staff-candidate-backend.spec.js',
+                '--timeout=120000',
+                '--retries=1',
+            ], {
                 cwd: repoRoot,
                 encoding: 'utf8',
                 stdio: ['pipe', 'pipe', 'pipe'],
-                timeout: 10 * 60 * 1000,
+                timeout: 15 * 60 * 1000,
                 maxBuffer: 32 * 1024 * 1024,
                 env: {
                     ...process.env,
                     E2E_REAL_BACKEND: '1',
+                    NODE_OPTIONS: `${process.env.NODE_OPTIONS ?? ''} --require ${join(repoRoot, 'tests', 'staff-workspace', 'google-token-preload.cjs')}`.trim(),
                     NEXT_PUBLIC_SUPABASE_URL: envValue('API_URL'),
                     NEXT_PUBLIC_SUPABASE_ANON_KEY: envValue('ANON_KEY'),
                     SUPABASE_SERVICE_ROLE_KEY: envValue('SERVICE_ROLE_KEY'),
                     NEXTAUTH_URL: 'http://127.0.0.1:3000',
                     NEXTAUTH_SECRET: `foundation-playwright-${RUN_ID}`,
+                    GOOGLE_CLIENT_ID: 'synthetic-workspace-client',
+                    GOOGLE_CLIENT_SECRET: 'synthetic-workspace-client-secret',
                     INTAKE_DATABASE_URL: envValue('DB_URL'),
+                    STAFF_DATABASE_URL: envValue('DB_URL'),
                     STAFF_ORGANIZATION_ID: '9c4edd11-2571-490b-a87c-ef30b9e0a001',
                     E2E_DATABASE_URL: envValue('DB_URL'),
                     RESEND_API_KEY: '',

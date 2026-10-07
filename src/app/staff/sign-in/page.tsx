@@ -12,7 +12,8 @@ export const metadata = {
 
 export default async function StaffSignInPage() {
     // A fully-gated member should never see the sign-in form inside the shell.
-    if ((await staffGate()).stage === 'verified') {
+    const gate = await staffGate();
+    if (gate.stage === 'verified') {
         redirect('/staff');
     }
     const session = await getServerSession(authOptions);
@@ -23,13 +24,14 @@ export default async function StaffSignInPage() {
             <p className="text-sm uppercase tracking-widest text-foreground/50">Agora staff</p>
             <h1 className="mt-3 text-2xl font-semibold">Sign in to the workspace</h1>
             <p className="mt-4 text-sm leading-6 text-foreground/60">
-                Staff access uses Google sign-in. An administrator must link your
-                account to a workspace membership before you can continue.
+                {gate.stage === 'reauthenticate'
+                    ? 'Your Google authorization needs renewal. Sign in again with the same account to restore access.'
+                    : 'Sign in with the exact Google email on your invitation. You will then set up an authenticator to access the workspace.'}
             </p>
             <div className="mt-8">
                 <StaffSignInButton />
             </div>
-            {signedInWithGoogle && (
+            {signedInWithGoogle && gate.stage !== 'reauthenticate' && (
                 <a href="/staff" className="mt-6 text-sm text-foreground/60 underline underline-offset-4 hover:opacity-70">
                     Continue to the workspace
                 </a>

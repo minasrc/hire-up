@@ -1,4 +1,5 @@
 import { loadStaffWorkspace } from '@/lib/workspace.server';
+import { AuthRecoveryNotice } from './auth-recovery-notice';
 import { StaffShell } from './staff-shell';
 
 export const metadata = {
@@ -20,6 +21,7 @@ export default async function StaffLayout({ children }: { children: React.ReactN
 
     return (
         <div className="staff-scope min-h-screen bg-background font-sans text-sm text-foreground antialiased">
+            <AuthRecoveryNotice />
             <StaffShell
                 userName={gate.session?.user?.name ?? gate.session?.user?.email ?? 'Staff'}
                 userEmail={gate.session?.user?.email ?? ''}
