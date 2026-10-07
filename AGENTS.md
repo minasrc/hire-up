@@ -1,5 +1,6 @@
 # Agent verification notes
 
+- Before merging or deploying user-visible changes, review each chunk locally with synthetic records and isolated test database/storage, then fix feedback in the existing PR. Automated tests and CI remain required but do not replace the user's local review. Never point local review or PR previews at production data. Keep each parallel test run's resources separate and use only its own label-checked cleanup.
 - Node 22 is required (`.nvmrc`, `engines >=22 <23`); do not run checks under other majors.
 - `npm test` runs unit tests only (`tests/unit`). Playwright specs live in `tests/e2e` and need Chromium plus, for `E2E_REAL_BACKEND=1`, a local Supabase stack on `http://127.0.0.1:54321` guarded by `tests/support/nonproduction.js`.
 - `npm run test:db:foundation` runs `tests/database/foundation.test.js`. It needs a running Docker daemon and creates labeled, throwaway containers only. `FOUNDATION_TEST_MODE=supabase` instead spins an isolated Supabase CLI workdir under the OS temp dir with a unique project id; ports 54321 and 3000 must be free.
