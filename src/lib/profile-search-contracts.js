@@ -4,24 +4,28 @@ import { ClientJobContractError } from './client-job-contracts.js';
 export const PROFILE_INDEX_VERSION = 'intfloat/multilingual-e5-small@614241f622f53c4eeff9890bdc4f31cfecc418b3:e5-prefix:l2:384:v1';
 export const PROFILE_PROJECTION_VERSION = 'candidate-profile-v1';
 export const PROFILE_CHUNKER_VERSION = 'e5-utf8-448-v1';
+export const CV_PROJECTION_VERSION = 'candidate-reviewed-cv-v1';
+export const CV_SEARCH_MAX_READY_CHUNKS = 100000; // Provisional until concurrent capacity acceptance.
 export const PROFILE_SOURCE_BYTE_LIMIT = 65536;
 export const PROFILE_WORKER_BODY_LIMIT = 262144;
 const bad = field => { throw new ClientJobContractError({ [field]: 'Invalid search input.' }); };
 const object = (v, keys) => { if (!v || typeof v !== 'object' || Array.isArray(v) || Object.keys(v).some(k => !keys.includes(k))) bad('input'); return v; };
 export function profileSearchScope(scope = 'approved') { if (!['approved', 'my_drafts', 'all'].includes(scope)) bad('scope'); return scope; }
 export function profileSearchStaffInput(input) {
-    object(input, ['action', 'operationId', 'query', 'scope', 'readyOnly', 'queryId']);
+    object(input, ['action', 'operationId', 'query', 'scope', 'readyOnly', 'queryId', 'includeCv']);
+    if (input.includeCv != null && typeof input.includeCv !== 'boolean') bad('includeCv');
+    if (input.includeCv && input.scope === 'my_drafts') bad('includeCv');
     if (input.action === 'cancel') return { action: 'cancel', queryId: assertUuid(input.queryId, 'queryId') };
     if (input.action === 'retryIndex') {
-        object(input, ['action', 'scope', 'readyOnly']);
+        object(input, ['action', 'scope', 'readyOnly', 'includeCv']);
         if (input.readyOnly != null && typeof input.readyOnly !== 'boolean') bad('readyOnly');
-        return { action: 'retryIndex', scope: profileSearchScope(input.scope), readyOnly: input.readyOnly ?? false };
+        return { action: 'retryIndex', scope: profileSearchScope(input.scope), readyOnly: input.readyOnly ?? false, includeCv: input.includeCv ?? false };
     }
     if (input.action !== 'search') bad('action');
     const query = typeof input.query === 'string' ? input.query.trim() : '';
     if (!query || !query.isWellFormed() || query.length > 2000 || Buffer.byteLength(query) > 8000 || /[\u0000]/u.test(query)) bad('query');
     if (input.readyOnly != null && typeof input.readyOnly !== 'boolean') bad('readyOnly');
-    return { action: 'search', operationId: assertUuid(input.operationId, 'operationId'), query, scope: profileSearchScope(input.scope), readyOnly: input.readyOnly ?? false };
+    return { action: 'search', operationId: assertUuid(input.operationId, 'operationId'), query, scope: profileSearchScope(input.scope), readyOnly: input.readyOnly ?? false, includeCv: input.includeCv ?? false };
 }
 export function validateProfileVector(vector) {
     if (!Array.isArray(vector) || vector.length !== 384 || !vector.every(v => typeof v === 'number' && Number.isFinite(v))) bad('embedding');
@@ -29,14 +33,14 @@ export function validateProfileVector(vector) {
     return vector;
 }
 export function profileSearchWorkerInput(action, input = {}) {
-    if (action === 'claim') return object(input, []);
+    if (action === 'claim') { object(input, ['capabilities']); if (input.capabilities !== undefined && (!Array.isArray(input.capabilities) || input.capabilities.length !== 1 || input.capabilities[0] !== 'approved-cv-v1')) bad('capabilities'); return input; }
     const common = ['jobId', 'leaseToken', 'kind'];
     if (action === 'fail') {
         object(input, [...common, 'code', 'retryAfterSeconds']);
         if (!['EMBEDDING_UNAVAILABLE', 'INVALID_RESULT', 'INPUT_TOO_LONG', 'WORKER_ERROR'].includes(input.code) || !Number.isInteger(input.retryAfterSeconds) || input.retryAfterSeconds < 1 || input.retryAfterSeconds > 3600) bad('code');
     } else if (action === 'complete') {
         object(input, [...common, 'indexVersion', 'projectionVersion', 'chunkerVersion', 'querySha256', 'sourceRevision', 'sourceSha256', 'manifestSha256', 'result']);
-        if (input.indexVersion !== PROFILE_INDEX_VERSION || input.projectionVersion !== PROFILE_PROJECTION_VERSION || input.chunkerVersion !== PROFILE_CHUNKER_VERSION) bad('version');
+        if (input.indexVersion !== PROFILE_INDEX_VERSION || ![PROFILE_PROJECTION_VERSION, CV_PROJECTION_VERSION].includes(input.projectionVersion) || input.chunkerVersion !== PROFILE_CHUNKER_VERSION) bad('version');
         if (input.kind === 'query') { object(input.result, ['embedding']); validateProfileVector(input.result.embedding); if (!/^[a-f0-9]{64}$/.test(input.querySha256)) bad('querySha256'); }
         else {
             if (!Number.isSafeInteger(input.sourceRevision) || input.sourceRevision < 1 || !/^[a-f0-9]{64}$/.test(input.sourceSha256)) bad('source');

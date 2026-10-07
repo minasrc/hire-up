@@ -10,8 +10,9 @@ async function handle(request: Request) {
     try {
         if (request.method === 'GET') {
             const q = new URL(request.url).searchParams;
+            if (q.has('includeCv') && !['true', 'false'].includes(q.get('includeCv')!)) return telegramJson({ error: 'Invalid CV filter.' }, 400);
             if (q.has('readyOnly') && !['true', 'false'].includes(q.get('readyOnly')!)) return telegramJson({ error: 'Invalid readiness filter.' }, 400);
-            return telegramJson(await profileSearchStatus(...args, { scope: q.get('scope') ?? 'approved', readyOnly: q.get('readyOnly') === 'true', queryId: q.get('queryId') || null, after: q.get('after') || null }));
+            return telegramJson(await profileSearchStatus(...args, { scope: q.get('scope') ?? 'approved', readyOnly: q.get('readyOnly') === 'true', includeCv: q.get('includeCv') === 'true', queryId: q.get('queryId') || null, after: q.get('after') || null }));
         }
         const input = await readTelegramJson(request, 16384);
         return telegramJson(await profileSearchAction(...args, input), input.action === 'search' ? 202 : 200);
