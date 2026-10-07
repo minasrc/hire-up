@@ -38,6 +38,11 @@ import {
     saveCandidateProfile,
 } from '../../src/lib/candidate-profile-operations.js';
 import { submitPublicApplication } from '../../src/lib/intake-operations.js';
+import {
+    getCandidateDuplicateComparison,
+    listCandidateDuplicateReviews,
+    reviewCandidateDuplicate,
+} from '../../src/lib/duplicate-review-operations.js';
 
 const repoRoot = fileURLToPath(new URL('../../', import.meta.url));
 const migrationsDir = join(repoRoot, 'supabase', 'migrations');
@@ -68,6 +73,7 @@ const MIGRATIONS = [
     '20260928220000_job_visibility.sql',
     PROFILE_MIGRATION,
     SERIALIZATION_MIGRATION,
+    '20261001090000_public_intake_duplicate_review.sql',
 ];
 
 const readMigration = (name) => readFileSync(join(migrationsDir, name), 'utf8');
@@ -85,6 +91,8 @@ const CANDIDATE_RESTRICTED = '90000000-0000-4000-8000-0000000000f3';
 const RACE_JOB = '90000000-0000-4000-8000-0000000000f4';
 
 const profileFixtureSql = `
+insert into app.role_permissions (organization_id, role_id, permission_key)
+    values ('${ORG_B}', '${CJ_ID.ROLE_B_ADMIN}', 'duplicates.review');
 insert into app.users (id, display_name, status) values
     ('${USER_B_GONE}', 'Departed Member B', 'active');
 insert into app.organization_memberships
@@ -182,6 +190,7 @@ test('candidate profiles on PostgreSQL 17', async (t) => {
         assert.equal(profile.candidate.ownerMembershipId, null);
         assert.equal(profile.candidate.professionalSummary, null);
         assert.equal(profile.profileOptions.canWrite, true);
+        assert.equal(profile.profileOptions.canReviewDuplicates, true);
     });
 
     await t.test('all seven fields edit, clear and read back in get and list', async () => {
@@ -390,27 +399,161 @@ test('candidate profiles on PostgreSQL 17', async (t) => {
                 and public_reference = 'AG-CDEF00000001'`), '1');
     });
 
-    await t.test('concurrent staff and public submissions share one candidate', async () => {
+    await t.test('public intake never joins a staff candidate by unverified email', async () => {
         const email = `race-${randomUUID()}@example.test`;
-        const [staffResult, intakeResult] = await Promise.all([
-            admin(saveCandidateProfile, {
-                candidateId: randomUUID(),
-                expectedVersion: null,
-                fields: { fullName: 'Race Staff', email },
-                operationId: randomUUID(),
-            }),
-            intake(intakeInput(email, 'AG-CDEF00000002')),
-        ]);
+        const staffResult = await admin(saveCandidateProfile, {
+            candidateId: randomUUID(),
+            expectedVersion: null,
+            fields: { fullName: 'Staff Candidate', email },
+            operationId: randomUUID(),
+        });
+        const intakeResult = await intake(intakeInput(email, 'AG-CDEF00000002'));
         assert.equal(intakeResult.accepted, true);
-        assert.ok(
-            staffResult.status === 'created' || staffResult.status === 'duplicate',
-            `unexpected staff result ${JSON.stringify(staffResult)}`);
-        assert.equal(candidateCount(pg17, email), '1',
-            'staff and public submissions for the same email share one candidate');
+        assert.equal(staffResult.status, 'created');
+        assert.equal(candidateCount(pg17, email), '2',
+            'matching unverified emails remain separate people until reviewed');
+        assert.notEqual(intakeResult.candidateId, staffResult.candidateId);
         assert.equal(scalar(pg17, `
             select count(*) from app.applications
             where organization_id = '${ORG_B}'
                 and public_reference = 'AG-CDEF00000002'`), '1');
+    });
+
+    await t.test('repeat public application creates its own CV-independent record', async () => {
+        const email = `repeat-${randomUUID()}@example.test`;
+        const first = await intake(intakeInput(email, 'AG-CDEF00000003'));
+        const second = await intake(intakeInput(email, 'AG-CDEF00000004'));
+        assert.equal(first.duplicate, false);
+        assert.equal(second.duplicate, false);
+        assert.notEqual(first.candidateId, second.candidateId);
+        assert.equal(candidateCount(pg17, email), '2');
+        const sameTransport = await intake(intakeInput(email, 'AG-CDEF00000004'));
+        assert.equal(sameTransport.duplicate, true);
+        assert.equal(sameTransport.applicationId, second.applicationId);
+
+        const queue = await admin(listCandidateDuplicateReviews, {});
+        const pair = queue.reviews.find((review) =>
+            [review.candidateAId, review.candidateBId].includes(first.candidateId)
+            && [review.candidateAId, review.candidateBId].includes(second.candidateId));
+        assert.ok(pair, 'the two provisional records appear for human review');
+        assert.equal(pair.evidence.emails.length, 1);
+        assert.notEqual(pair.evidence.emails[0], email,
+            'the review record does not copy the raw address');
+        assert.equal(pair.status, 'pending');
+
+        const comparison = await admin(getCandidateDuplicateComparison, { reviewId: pair.id });
+        assert.equal(comparison.candidateA.candidate.candidateId, pair.candidateAId);
+        assert.equal(comparison.candidateB.candidate.candidateId, pair.candidateBId);
+        assert.deepEqual(comparison.matchedEmails, [email]);
+        assert.deepEqual(comparison.matchedDocuments, []);
+
+        await assert.rejects(
+            recruiter(listCandidateDuplicateReviews, {}),
+            (error) => error.code === 'FORBIDDEN',
+            'members without duplicates.review cannot read suggestions');
+        await assert.rejects(
+            recruiter(getCandidateDuplicateComparison, { reviewId: pair.id }),
+            (error) => error.code === 'FORBIDDEN',
+            'members without duplicates.review cannot read the profiles together');
+        const reviewed = await admin(reviewCandidateDuplicate, {
+            reviewId: pair.id, expectedVersion: Number(pair.version),
+            decision: 'different_people',
+        });
+        assert.equal(reviewed.status, 'different_people');
+        const pending = await admin(listCandidateDuplicateReviews, {});
+        assert.ok(!pending.reviews.some((review) => review.id === pair.id));
+        const dismissed = await admin(listCandidateDuplicateReviews, {
+            status: 'different_people',
+        });
+        assert.ok(dismissed.reviews.some((review) => review.id === pair.id));
+        await rejectCode(admin(reviewCandidateDuplicate, {
+            reviewId: pair.id, expectedVersion: Number(pair.version),
+            decision: 'same_person',
+        }), '40001', 'stale decisions cannot overwrite another review');
+        const hash = Buffer.from(randomUUID()).toString('hex').slice(0, 64)
+            .padEnd(64, '0');
+        const blobA = randomUUID();
+        const blobB = randomUUID();
+        const documentA = randomUUID();
+        const documentB = randomUUID();
+        psql(pg17, `
+            insert into app.file_blobs
+                (id, organization_id, candidate_id, sha256, size_bytes,
+                    mime_type, extension, lifecycle, scan_state)
+            values
+                ('${blobA}', '${ORG_B}', '${first.candidateId}',
+                    decode('${hash}', 'hex'), 100, 'application/pdf', 'pdf',
+                    'live', 'unscanned'),
+                ('${blobB}', '${ORG_B}', '${second.candidateId}',
+                    decode('${hash}', 'hex'), 100, 'application/pdf', 'pdf',
+                    'live', 'unscanned');
+            insert into app.documents (id, organization_id, candidate_id, blob_id,
+                purpose, original_filename, received_at, lifecycle) values
+                ('${documentA}', '${ORG_B}', '${first.candidateId}', '${blobA}',
+                    'cv', 'first.pdf', now(), 'active'),
+                ('${documentB}', '${ORG_B}', '${second.candidateId}', '${blobB}',
+                    'cv', 'second.pdf', now(), 'active');
+        `);
+        const newEvidence = await admin(listCandidateDuplicateReviews, {
+            status: 'different_people',
+        });
+        const changed = newEvidence.reviews.find((review) => review.id === pair.id);
+        assert.equal(changed.newEvidence, true);
+        assert.deepEqual(changed.evidence.cvHashes, [hash]);
+        const withDocuments = await admin(getCandidateDuplicateComparison, {
+            reviewId: pair.id,
+        });
+        assert.deepEqual(withDocuments.matchedDocuments, [{
+            candidateADocumentId: pair.candidateAId === first.candidateId
+                ? documentA : documentB,
+            candidateAFilename: pair.candidateAId === first.candidateId
+                ? 'first.pdf' : 'second.pdf',
+            candidateBDocumentId: pair.candidateBId === second.candidateId
+                ? documentB : documentA,
+            candidateBFilename: pair.candidateBId === second.candidateId
+                ? 'second.pdf' : 'first.pdf',
+        }]);
+        const reopened = await admin(reviewCandidateDuplicate, {
+            reviewId: pair.id, expectedVersion: Number(changed.version),
+            decision: 'reopen',
+        });
+        assert.equal(reopened.status, 'reopen');
+        const pendingAgain = await admin(listCandidateDuplicateReviews, {});
+        assert.ok(pendingAgain.reviews.some((review) => review.id === pair.id));
+        const confirmed = await admin(reviewCandidateDuplicate, {
+            reviewId: pair.id, expectedVersion: Number(reopened.version),
+            decision: 'same_person',
+        });
+        assert.equal(confirmed.status, 'same_person');
+        assert.equal(scalar(pg17, `
+            select string_agg(decision, ',' order by occurred_at)
+            from app.candidate_duplicate_review_events
+            where organization_id = '${ORG_B}' and review_id = '${pair.id}'`),
+            'different_people,reopen,same_person',
+            'all decisions remain in the immutable review history');
+        assert.equal(candidateCount(pg17, email), '2',
+            'a review decision does not merge or delete candidates');
+    });
+
+    await t.test('request IDs replay only the same submission content', async () => {
+        const submissionId = randomUUID();
+        const email = `idempotent-${randomUUID()}@example.test`;
+        const first = await intake({
+            ...intakeInput(email, 'AG-CDEF00000005'), submissionId,
+        });
+        const replay = await intake({
+            ...intakeInput(email, 'AG-CDEF00000006'), submissionId,
+        });
+        assert.equal(replay.duplicate, true);
+        assert.equal(replay.applicationId, first.applicationId);
+        assert.equal(replay.publicReference, first.publicReference);
+        await rejectCode(intake({
+            ...intakeInput(email, 'AG-CDEF00000007'),
+            fullName: 'A different applicant', submissionId,
+        }), '23505', 'the same request ID cannot represent changed content');
+        assert.equal(scalar(pg17, `
+            select count(*) from app.applications
+            where organization_id = '${ORG_B}' and intake_request_id = '${submissionId}'`), '1');
     });
 
     await t.test('role boundaries hold on the new and private functions', async () => {
@@ -422,6 +565,7 @@ test('candidate profiles on PostgreSQL 17', async (t) => {
         }), 'FORBIDDEN', 'a candidates.read-only member cannot write');
         const options = await recruiter(getCandidateProfileOptions);
         assert.equal(options.canWrite, false);
+        assert.equal(options.canReviewDuplicates, false);
         assert.ok(Array.isArray(options.owners));
         assert.equal(options.currentMembershipId, CJ_ID.MEMBER_B_REC);
 
@@ -438,6 +582,8 @@ test('candidate profiles on PostgreSQL 17', async (t) => {
             `app.get_candidate_profile_v1('${randomUUID()}')`,
             'app.get_candidate_profile_options_v1()',
             'app.list_candidate_profiles_v1(null, 10)',
+            'app.list_candidate_duplicate_reviews_v1(null, 10)',
+            `app.get_candidate_duplicate_comparison_v1('${randomUUID()}')`,
         ]) {
             assertSqlstate(pg17, `
                 set role app_intake;

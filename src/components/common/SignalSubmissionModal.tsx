@@ -40,6 +40,7 @@ const SignalSubmissionModal: React.FC<SignalSubmissionModalProps> = ({
     const [checking, setChecking] = useState(false);
     const generationRef = useRef(0);
     const busyRef = useRef(false);
+    const submissionRef = useRef<{ signature: string; id: string } | null>(null);
     const [availabilityOverride, setAvailabilityOverride] = useState<JobAvailability | null>(null);
     const [seenAvailability, setSeenAvailability] = useState(availability);
     if (seenAvailability !== availability) {
@@ -78,6 +79,7 @@ const SignalSubmissionModal: React.FC<SignalSubmissionModalProps> = ({
         setSelectedFile(null);
         setWebsite('');
         setSubmissionRefId('');
+        submissionRef.current = null;
         setData({
             fullName: '',
             email: '',
@@ -196,6 +198,17 @@ const SignalSubmissionModal: React.FC<SignalSubmissionModalProps> = ({
             }
 
             const formData = new FormData();
+            const signature = JSON.stringify([
+                fieldValidation.job.id,
+                fieldValidation.fields,
+                selectedFile.name,
+                selectedFile.size,
+                selectedFile.lastModified,
+            ]);
+            if (submissionRef.current?.signature !== signature) {
+                submissionRef.current = { signature, id: crypto.randomUUID() };
+            }
+            formData.append('submissionId', submissionRef.current.id);
             formData.append('jobId', fieldValidation.job.id);
             formData.append('fullName', fieldValidation.fields.fullName);
             formData.append('email', fieldValidation.fields.email);

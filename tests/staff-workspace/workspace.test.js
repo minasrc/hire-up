@@ -1054,6 +1054,7 @@ test('staff workspace end-to-end in a real browser', async (t) => {
         const result = await boardPage.evaluate(async (jobId) => {
             const form = new FormData();
             form.append('jobId', jobId);
+            form.append('submissionId', crypto.randomUUID());
             form.append('fullName', 'Ada Lovelace');
             form.append('email', 'ada@example.com');
             const response = await fetch(

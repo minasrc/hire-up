@@ -16,6 +16,7 @@ import { rateLimitAllow } from '@/lib/rate-limit';
 export const runtime = 'nodejs';
 
 const CV_BUCKET = 'cv-submissions';
+const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 // Per-IP submission throttle. Best-effort across serverless instances; the
 // durable per-address cap lives in submit_public_application_v1.
 const SUBMIT_RATE_LIMIT = { limit: 5, windowMs: 10 * 60 * 1000 };
@@ -77,6 +78,11 @@ export async function POST(req: Request) {
         }
 
         const fields = readApplicationFields(formData);
+        const submissionId = formData.get('submissionId');
+        if (typeof submissionId !== 'string'
+            || !UUID_PATTERN.test(submissionId)) {
+            return jsonError('INVALID_APPLICATION', 'Please reopen the application and try again.', 400);
+        }
         const fieldValidation = validateApplicationFields(
             fields,
             listedJobs.map((job: any) => ({ id: job.slug })),
@@ -143,6 +149,7 @@ export async function POST(req: Request) {
             result = await submitPublicApplication(pool, organizationId, {
                 jobSlug: fieldValidation.job.id,
                 reference: refId,
+                submissionId,
                 fullName: fieldValidation.fields.fullName,
                 email: fieldValidation.fields.email,
                 professionalUrl: fieldValidation.fields.professionalUrl || null,
@@ -158,11 +165,20 @@ export async function POST(req: Request) {
                 },
             });
         } catch (error: any) {
-            const { error: cleanupError } = await supabase.storage
-                .from(CV_BUCKET)
-                .remove([filePath]);
-            if (cleanupError) {
-                console.error('Failed to clean up orphaned CV:', cleanupError);
+            if (['54000', 'P0002', '22023', '23505'].includes(error?.code)) {
+                const { error: cleanupError } = await supabase.storage
+                    .from(CV_BUCKET)
+                    .remove([filePath]);
+                if (cleanupError) {
+                    console.error('Failed to clean up rejected CV upload:', cleanupError);
+                }
+            }
+            if (error?.code === '23505') {
+                return jsonError(
+                    'SUBMISSION_CONFLICT',
+                    'This submission changed while it was being retried. Reopen the form and try again.',
+                    409,
+                );
             }
             if (error?.code === '54000') {
                 return jsonError(

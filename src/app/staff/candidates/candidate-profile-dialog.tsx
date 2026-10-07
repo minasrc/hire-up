@@ -26,6 +26,7 @@ import {
 export interface CandidateProfileOptions {
     currentMembershipId: string;
     canWrite: boolean;
+    canReviewDuplicates?: boolean;
     owners: { id: string; name: string }[];
 }
 

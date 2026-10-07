@@ -7,7 +7,7 @@ import Footer from './Footer';
 // the workspace's top content and swallows clicks.
 export default function FooterVisibility() {
     const pathname = usePathname();
-    if (pathname?.startsWith('/staff')) {
+    if (pathname?.startsWith('/staff') || pathname === '/dev/duplicate-review') {
         return null;
     }
     return <Footer />;

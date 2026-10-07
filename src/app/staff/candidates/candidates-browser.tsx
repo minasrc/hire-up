@@ -1,6 +1,7 @@
 'use client';
 
 import { useMemo } from 'react';
+import Link from 'next/link';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { FileText, Search, X } from 'lucide-react';
 
@@ -76,11 +77,11 @@ export function CandidatesBrowser({
                 </p>
                 <h1 className="text-[26px] leading-8 font-medium text-foreground">Candidates</h1>
                 <p className="max-w-2xl text-sm text-muted-foreground">
-                    Everyone who has applied or been added, deduplicated by email.
+                    People who have applied or been added to the workspace.
                 </p>
             </div>
 
-            <div className="flex items-end gap-3 rounded-lg border border-border bg-card p-4">
+            <div className="flex flex-wrap items-end gap-3 rounded-lg border border-border bg-card p-4">
                 <div className="flex flex-1 flex-col gap-1.5">
                     <Label htmlFor="candidate-search">Search</Label>
                     <div className="relative">
@@ -101,6 +102,11 @@ export function CandidatesBrowser({
                     <Button variant="ghost" size="sm" onClick={() => updateQuery('')}>
                         <X aria-hidden="true" />
                         Clear
+                    </Button>
+                ) : null}
+                {profileOptions?.canReviewDuplicates ? (
+                    <Button asChild variant="outline">
+                        <Link href="/staff/candidates/duplicates">Review matches</Link>
                     </Button>
                 ) : null}
                 {profileOptions?.canWrite === true ? (

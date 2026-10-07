@@ -1,7 +1,8 @@
-import { notFound } from 'next/navigation';
+import { notFound, redirect } from 'next/navigation';
 import {
     getCandidateProfile,
     isMissingProfileFunctionError,
+    resolveCandidateRedirect,
 } from '@/lib/candidate-profile-operations';
 import { getCandidateWorkspace } from '@/lib/pipeline-operations';
 import { StaffAuthorizationError } from '@/lib/staff-authorization';
@@ -48,6 +49,9 @@ export default async function StaffCandidatePage({
             return denied;
         }
         if ((error as { code?: string })?.code === 'P0002') {
+            const target = await resolveCandidateRedirect(
+                gate.pool, gate.identity, gate.organizationId, candidateId);
+            if (target) redirect(`/staff/candidates/${target}`);
             notFound();
         }
         if (!isMissingProfileFunctionError(error)) {

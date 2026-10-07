@@ -80,6 +80,17 @@ export async function getCandidateProfile(pool, identity, organizationId, input)
         });
 }
 
+export async function resolveCandidateRedirect(pool, identity, organizationId, candidateId) {
+    const normalizedId = assertUuid(candidateId, 'candidateId');
+    return withStaffTransaction(
+        pool, identity, organizationId, CANDIDATE_READ, async ({ client }) => {
+            const { rows } = await client.query(
+                'select app.resolve_candidate_redirect_v1($1::uuid) as target_id',
+                [normalizedId]);
+            return rows[0]?.target_id ?? null;
+        });
+}
+
 export async function listCandidateProfiles(
     pool, identity, organizationId, input = {},
 ) {

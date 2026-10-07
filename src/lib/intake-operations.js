@@ -1,4 +1,4 @@
-import { randomUUID } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import { ClientJobContractError } from './client-job-contracts.js';
 
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -71,7 +71,7 @@ export async function submitPublicApplication(pool, organizationId, input) {
         input, 'input',
         [
             'jobSlug', 'reference', 'fullName', 'email', 'professionalUrl',
-            'achievement', 'document',
+            'achievement', 'document', 'submissionId',
         ],
     );
     const jobSlug = typeof record.jobSlug === 'string' ? record.jobSlug.trim() : '';
@@ -82,6 +82,18 @@ export async function submitPublicApplication(pool, organizationId, input) {
     if (!REFERENCE_PATTERN.test(reference)) {
         throw invalidInput('reference must match the AG-XXXXXXXXXXXX format');
     }
+    if (record.submissionId !== undefined
+        && (typeof record.submissionId !== 'string'
+            || !UUID_PATTERN.test(record.submissionId))) {
+        throw invalidInput('submissionId must be a UUID');
+    }
+    const referenceHash = createHash('sha256').update(reference).digest('hex');
+    const fallbackSubmissionId = [
+        referenceHash.slice(0, 8), referenceHash.slice(8, 12),
+        referenceHash.slice(12, 16), referenceHash.slice(16, 20),
+        referenceHash.slice(20, 32),
+    ].join('-');
+    const submissionId = record.submissionId ?? fallbackSubmissionId;
     const fullName = typeof record.fullName === 'string' ? record.fullName.trim() : '';
     if (!fullName || fullName.length > 120) {
         throw invalidInput('fullName is required', { fullName: 'required' });
@@ -148,7 +160,7 @@ export async function submitPublicApplication(pool, organizationId, input) {
             ) as result`,
             [
                 randomUUID(), randomUUID(), randomUUID(), randomUUID(),
-                randomUUID(), randomUUID(), randomUUID(), randomUUID(),
+                randomUUID(), randomUUID(), randomUUID(), submissionId,
                 blobId, locationId, documentId,
                 jobSlug, reference, fullName, email, professionalUrl,
                 achievement,

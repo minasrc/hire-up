@@ -305,6 +305,10 @@ export function CandidateDetail({
     const email = candidate.email !== undefined
         ? candidate.email
         : identifiers.find((entry) => entry.kind === 'email')?.value;
+    const otherEmails = Array.from(new Set(identifiers
+        .filter((entry) => entry.kind === 'email'
+            && entry.value.trim().toLowerCase() !== email?.trim().toLowerCase())
+        .map((entry) => entry.value)));
     const professionalUrl = candidate.professionalUrl !== undefined
         ? candidate.professionalUrl
         : identifiers.find(
@@ -360,6 +364,9 @@ export function CandidateDetail({
                             <span>· Owner: {candidate.ownerName}</span>
                         ) : null}
                     </div>
+                    {otherEmails.length > 0 ? <p className="text-xs text-muted-foreground">
+                        Other emails: {otherEmails.join(', ')}
+                    </p> : null}
                 </div>
                 {canEditProfile ? (
                     <div className="w-full sm:ml-auto sm:w-auto">

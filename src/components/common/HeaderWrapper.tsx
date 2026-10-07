@@ -8,7 +8,7 @@ const HeaderWrapper = () => {
     const pathname = usePathname();
     const isHeaderVisible = useScrollHandler();
 
-    if (pathname?.startsWith('/staff')) {
+    if (pathname?.startsWith('/staff') || pathname === '/dev/duplicate-review') {
         return null;
     }
     return <Header isVisible={isHeaderVisible} />;
