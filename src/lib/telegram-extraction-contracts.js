@@ -6,6 +6,7 @@ export const EXTRACTION_SCHEMA_VERSION = 'candidate-extraction-v1';
 export const EXTRACTION_PROMPT_VERSION = 'candidate-extraction-prompt-v1';
 export const EXTRACTION_BODY_LIMIT = 131072;
 export const EXTRACTION_SOURCE_LIMIT = 49152;
+export const EXTRACTION_SINGLE_SOURCE_LIMIT = 327680;
 export const EXTRACTION_MESSAGE_LIMIT = 40;
 export const EXTRACTION_FIELDS = ['firstName', 'lastName', 'primaryEmail', 'secondaryEmails', 'headline', 'location', 'professionalUrl', 'professionalSummary', 'compensationPreference'];
 const objectSchema = properties => ({ type: 'object', additionalProperties: false, properties, required: Object.keys(properties) });
