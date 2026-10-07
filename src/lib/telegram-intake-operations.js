@@ -47,6 +47,10 @@ export function decideTelegramDraft(pool, identity, org, draftId, input) {
         const current = await read(client, draftId);
         if (input.action === 'approve' && current.status !== 'approved') {
             const assessment = assessTelegramDraft(current.fields, current.cv);
+            if (current.pendingProposalCount > 0) {
+                assessment.ready = false;
+                assessment.fieldErrors.proposals = 'Apply or dismiss the pending extraction suggestions before approval.';
+            }
             if (!assessment.ready) {
                 const error = new ClientJobContractError(assessment.fieldErrors);
                 error.code = 'DRAFT_INCOMPLETE';

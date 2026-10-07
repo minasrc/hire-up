@@ -76,7 +76,7 @@ function normalizeField(key, value) {
             if (typeof value !== 'string') fail(key, 'Enter a valid Telegram username.');
             const username = value.trim().replace(/^@/, '');
             if (!username && !value.trim()) return null;
-            if (!/^[A-Za-z0-9_]{5,32}$/.test(username)) fail(key, 'Enter a valid Telegram username.');
+            if (!/^[A-Za-z0-9_]{1,32}$/.test(username)) fail(key, 'Enter a valid Telegram username.');
             return username;
         }
         case 'telegramUserId':
