@@ -6,6 +6,7 @@ export const EXTRACTION_SCHEMA_VERSION = 'candidate-extraction-v1';
 export const EXTRACTION_PROMPT_VERSION = 'candidate-extraction-prompt-v1';
 export const EXTRACTION_BODY_LIMIT = 131072;
 export const EXTRACTION_SOURCE_LIMIT = 49152;
+export const EXTRACTION_SINGLE_SOURCE_LIMIT = 327680;
 export const EXTRACTION_MESSAGE_LIMIT = 40;
 export const EXTRACTION_FIELDS = ['firstName', 'lastName', 'primaryEmail', 'secondaryEmails', 'headline', 'location', 'professionalUrl', 'professionalSummary', 'compensationPreference'];
 const objectSchema = properties => ({ type: 'object', additionalProperties: false, properties, required: Object.keys(properties) });
@@ -84,6 +85,18 @@ export function validateExtractionResult(input, source) {
 }
 
 export function extractionStaffAction(input) {
+    if (input?.action === 'setExtraction') {
+        object(input, ['action', 'chats', 'enabled']); list(input.chats, 1, 50);
+        if (typeof input.enabled !== 'boolean') invalid();
+        const chats = input.chats.map(c => { object(c, ['chatId', 'expectedVersion']); if (!Number.isSafeInteger(c.expectedVersion) || c.expectedVersion < 1) invalid(); return { chatId: assertUuid(c.chatId, 'chatId'), expectedVersion: c.expectedVersion }; });
+        if (new Set(chats.map(c => c.chatId)).size !== chats.length) invalid(); return { action: input.action, chats, enabled: input.enabled };
+    }
+    if (input?.action === 'sourceRetention') {
+        object(input, ['action', 'jobId', 'expectedSourceVersion', 'mode']);
+        if (!Number.isSafeInteger(input.expectedSourceVersion) || input.expectedSourceVersion < 1 || !['keep', 'release_after_review'].includes(input.mode)) invalid();
+        return { ...input, jobId: assertUuid(input.jobId, 'jobId') };
+    }
+
     if (input?.action === 'enqueue') {
         object(input, ['action', 'chatIds']); list(input.chatIds, 1, 50);
         const chatIds = input.chatIds.map(id => assertUuid(id, 'chatIds'));
