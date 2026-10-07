@@ -13,6 +13,10 @@ export function telegramCvStatus(pool, identity, org, draftId, after = null) {
     const cursor = cvAttachmentCursor(after);
     return staff(pool, identity, org, ({ client }) => result(client, 'select app.telegram_cv_status_v1($1,$2,$3,$4) as result', [assertUuid(draftId, 'draftId'), cursor?.jobId ?? null, cursor?.messageId ?? null, cursor?.attachmentIndex ?? null]));
 }
+export function telegramCvBatchStatus(pool, identity, org, extractionJobId, after = null) {
+    const cursor = after == null ? null : cvAttachmentCursor(`${extractionJobId}:${after}`);
+    return staff(pool, identity, org, ({ client }) => result(client, 'select app.cv_bootstrap_status_v1($1,$2,$3) result', [assertUuid(extractionJobId, 'extractionJobId'), cursor?.messageId ?? null, cursor?.attachmentIndex ?? null]));
+}
 export function telegramCvAction(pool, identity, org, input) {
     const action = cvStaffAction(input);
     return staff(pool, identity, org, ({ client }) => result(client, 'select app.telegram_cv_action_v1($1::jsonb) as result', [JSON.stringify(action)]));

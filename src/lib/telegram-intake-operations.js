@@ -18,7 +18,7 @@ const read = (client, id) => result(client, 'select app.telegram_get_draft_v1($1
 export function listTelegramDrafts(pool, identity, org, filters = {}) {
     const { view = 'ready', missing = null, q = '', page = 1 } = filters;
     if (!['ready', 'needs_information', 'snoozed', 'duplicates', 'all'].includes(view)) invalid('view', 'Choose a supported view.');
-    if (missing != null && !['firstName', 'lastName', 'primaryEmail', 'cv'].includes(missing)) invalid('missing', 'Choose a required field.');
+    if (missing != null && !['firstName', 'lastName', 'primaryEmail', 'cv', 'cvAnalysis'].includes(missing)) invalid('missing', 'Choose a required field.');
     if (typeof q !== 'string' || q.length > 200 || !Number.isInteger(page) || page < 1 || page > 10000) invalid('query', 'Invalid inbox query.');
     return transact(pool, identity, org, ({ client }) => result(client, 'select app.telegram_list_drafts_v1($1,$2,$3,$4) as result', [view, missing, q, page]));
 }
@@ -51,6 +51,7 @@ export function decideTelegramDraft(pool, identity, org, draftId, input) {
                 assessment.ready = false;
                 assessment.fieldErrors.proposals = 'Apply or dismiss the pending extraction suggestions before approval.';
             }
+            if (current.analysisReviewRequired) { assessment.ready = false; assessment.fieldErrors.cvAnalysis = 'Finish or skip CV analysis and resolve its suggestions before approval.'; }
             if (!assessment.ready) {
                 const error = new ClientJobContractError(assessment.fieldErrors);
                 error.code = 'DRAFT_INCOMPLETE';

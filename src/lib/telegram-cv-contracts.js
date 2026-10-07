@@ -17,6 +17,10 @@ export function cvAttachmentCursor(value) {
     return { jobId: assertUuid(parts[0], 'after'), messageId: messageId(parts[1]), attachmentIndex: integer(Number(parts[2]), 0, 15, 'after') };
 }
 export function cvStaffAction(input) {
+    if (input?.action === 'createDraft') {
+        exact(input, ['action', 'extractionJobId', 'messageId', 'attachmentIndex', 'expectedSourceVersion', 'operationId']);
+        return { ...input, extractionJobId: assertUuid(input.extractionJobId, 'extractionJobId'), messageId: messageId(input.messageId), attachmentIndex: integer(input.attachmentIndex, 0, 15, 'attachmentIndex'), expectedSourceVersion: integer(input.expectedSourceVersion, 1, Number.MAX_SAFE_INTEGER, 'expectedSourceVersion'), operationId: assertUuid(input.operationId, 'operationId') };
+    }
     if (input?.action === 'retrieve') {
         exact(input, ['action', 'draftId', 'expectedDocumentRevision', 'extractionJobId', 'messageId', 'attachmentIndex']);
         return { action: input.action, draftId: assertUuid(input.draftId, 'draftId'), expectedDocumentRevision: integer(input.expectedDocumentRevision, 0, Number.MAX_SAFE_INTEGER, 'expectedDocumentRevision'), extractionJobId: assertUuid(input.extractionJobId, 'extractionJobId'), messageId: messageId(input.messageId), attachmentIndex: integer(input.attachmentIndex, 0, 15, 'attachmentIndex') };
