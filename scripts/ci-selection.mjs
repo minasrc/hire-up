@@ -1,4 +1,5 @@
 import { appendFileSync, readFileSync } from 'node:fs';
+import { createHash } from 'node:crypto';
 import { execFileSync } from 'node:child_process';
 import { resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
@@ -14,10 +15,20 @@ const STAFF = JOBS.filter((job) => !['quality', 'database-foundation'].includes(
 const STAFF_BROWSER = STAFF.filter((job) => !job.startsWith('database-'));
 const TELEGRAM = JOBS.filter((job) => job.startsWith('telegram-'));
 const all = () => ({ selection: Object.fromEntries(JOBS.map((job) => [job, true])), appChecks: true });
+// A reviewed function-only migration can use its owning workflow suite, which
+// applies this migration and checks its permissions, lifecycle and audit rules.
+// Pin its contents: editing or deleting it must restore full schema coverage.
+const SCOPED_MIGRATIONS = {
+    'supabase/migrations/20261009090000_document_preview_versions.sql': {
+        sha256: 'b4651b4fab822ef00bd063035cb8d437a2a759fc5b91b65b1127514da1d87577',
+        jobs: ['staff-workspace'],
+    },
+};
+const readRepoFile = (file) => readFileSync(new URL(`../${file}`, import.meta.url));
 
 // Unknown paths and shared security/schema changes deliberately fail closed.
 // Expand this map only with evidence of the affected suites' dependencies.
-export function selectJobs(files, full = false) {
+export function selectJobs(files, full = false, readFile = readRepoFile) {
     if (full || files === null) return all();
     const selected = new Set();
     let appChecks = false;
@@ -28,9 +39,19 @@ export function selectJobs(files, full = false) {
             || file.startsWith('tests/unit/')) continue;
         appChecks = true;
         let jobs;
-        if (/^(supabase\/|tests\/support\/)/.test(file)
+        if (file.startsWith('supabase/')) {
+            const reviewed = SCOPED_MIGRATIONS[file];
+            if (!reviewed) return all();
+            try {
+                if (createHash('sha256').update(readFile(file)).digest('hex') !== reviewed.sha256) return all();
+            } catch { return all(); }
+            jobs = reviewed.jobs;
+        } else if (/^tests\/support\//.test(file)
             || /^(package(?:-lock)?\.json|\.nvmrc|next\.config\.mjs|tsconfig\.json)$/.test(file)) return all();
-        if (/^src\/app\/staff\/(applications|clients|jobs)\//.test(file)) jobs = ['staff-workspace'];
+        else if (/^src\/app\/api\/staff\/documents\//.test(file)
+            || file === 'src/lib/staff-document-preview-cache.js'
+            || /^src\/components\/staff-preview\/(document-preview-provider|pdf-document-preview|real-candidate-documents)\.tsx$/.test(file)) jobs = ['staff-workspace'];
+        else if (/^src\/app\/staff\/(applications|clients|jobs)\//.test(file)) jobs = ['staff-workspace'];
         else if (/^src\/app\/staff\/candidates\/search\//.test(file)) jobs = ['profile-search', 'cv-search'];
         else if (/^src\/app\/staff\/candidates\/duplicates\//.test(file)) jobs = ['duplicate-review'];
         else if (/^src\/app\/staff\/candidates\//.test(file)) jobs = ['staff-workspace', 'duplicate-review', 'profile-search', 'cv-analysis'];

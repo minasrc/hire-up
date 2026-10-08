@@ -25,6 +25,32 @@ test('directory and search UI changes run dependent workflows, without unrelated
     assert.deepEqual(selected(['src/app/for-employers/page.jsx']), ['quality', 'browser-tests']);
 });
 
+test('document preview consumers run their authenticated workflow, not unrelated worker suites', () => {
+    for (const file of ['src/app/api/staff/documents/[documentId]/route.ts',
+        'src/lib/staff-document-preview-cache.js',
+        'src/components/staff-preview/document-preview-provider.tsx',
+        'src/components/staff-preview/pdf-document-preview.tsx',
+        'src/components/staff-preview/real-candidate-documents.tsx']) {
+        assert.deepEqual(selected([file]), ['quality', 'staff-workspace']);
+        assert.equal(selectJobs([file]).appChecks, true);
+    }
+});
+
+test('a reviewed document migration is scoped only while its exact contents are unchanged', () => {
+    const file = 'supabase/migrations/20261009090000_document_preview_versions.sql';
+    assert.deepEqual(selected([file]), ['quality', 'staff-workspace']);
+    assert.deepEqual(selectJobs([file], false, () => 'alter table app.users drop column id;').selection,
+        Object.fromEntries(JOBS.map(job => [job, true])));
+    assert.deepEqual(selectJobs([file], false, () => { throw new Error('deleted'); }).selection,
+        Object.fromEntries(JOBS.map(job => [job, true])));
+    assert.deepEqual(selected([file, 'src/lib/staff-authorization.js']),
+        selected(['src/lib/staff-authorization.js']));
+    assert.deepEqual(selected([file, 'supabase/migrations/unknown.sql']), JOBS);
+    const suite = readFileSync(new URL('../../tests/database/candidate-upload.test.js', import.meta.url), 'utf8');
+    assert.ok(suite.includes(file.split('/').at(-1)), 'selected database suite must apply the scoped migration');
+    assert.ok(suite.includes('getDocumentDownload'), 'the suite must exercise the changed function');
+});
+
 test('shared security keeps staff coverage; schema, dependencies and unknown files get everything', () => {
     const staff = selected(['src/lib/staff-authorization.js']);
     assert.ok(staff.includes('database-staff-authorization'));
