@@ -53,6 +53,19 @@ export async function GET(
                     headers: { 'cache-control': 'private, no-store' },
                 });
             }
+            // The database checks fresh permissions/lifecycle before revealing
+            // this version. Older databases safely fall back to a full response.
+            const version = typeof document.previewVersion === 'string'
+                && /^[a-f0-9]{64}$/.test(document.previewVersion)
+                ? `"preview-v1-${view}-${document.previewVersion}"` : null;
+            const privateHeaders = {
+                'cache-control': 'private, no-store',
+                'x-content-type-options': 'nosniff',
+                ...(version ? { etag: version } : {}),
+            };
+            if (version && request.headers.get('if-none-match') === version) {
+                return new Response(null, { status: 304, headers: privateHeaders });
+            }
             const { data: file, error: downloadError } = await supabase.storage
                 .from(document.bucket).download(document.objectKey);
             if (downloadError || !file) {
@@ -67,17 +80,13 @@ export async function GET(
                     headers: {
                         'content-type': 'application/pdf',
                         'content-disposition': 'inline',
-                        'cache-control': 'private, no-store',
-                        'x-content-type-options': 'nosniff',
+                        ...privateHeaders,
                     },
                 });
             }
             const { value } = await mammoth.extractRawText({ buffer });
             return Response.json({ text: value.slice(0, 200_000) }, {
-                headers: {
-                    'cache-control': 'private, no-store',
-                    'x-content-type-options': 'nosniff',
-                },
+                headers: privateHeaders,
             });
         }
         if (view === 'inline' && document.mimeType !== 'application/pdf') {

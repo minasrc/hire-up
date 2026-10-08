@@ -36,8 +36,9 @@ function setup() {
     process.env.SUPABASE_SERVICE_ROLE_KEY = 'synthetic-service-role';
 }
 
-function request(view) {
-    return new Request(`http://localhost/api/staff/documents/${ID}${view ? `?view=${view}` : ''}`);
+function request(view, version) {
+    return new Request(`http://localhost/api/staff/documents/${ID}${view ? `?view=${view}` : ''}`,
+        { headers: version ? { 'if-none-match': version } : {} });
 }
 
 function storageStub(mimeType) {
@@ -108,6 +109,55 @@ test('preview refuses mismatched content type and unauthenticated requests', asy
     stubs.set('@/lib/staff-api.server:staffApiContext', async () => ({ status: 'unauthorized' }));
     const denied = await documents.GET(request('inline'), { params: Promise.resolve({ documentId: ID }) });
     assert.equal(denied.status, 401);
+});
+
+test('conditional preview rechecks authorization and avoids storage only for the current version', async () => {
+    setup();
+    const calls = storageStub('application/pdf');
+    let reads = 0, version = 'a'.repeat(64);
+    stubs.set('@/lib/pipeline-operations:getDocumentDownload', async () => {
+        reads++;
+        return { bucket: 'private-cvs', objectKey: 'one.pdf', filename: 'one.pdf',
+            mimeType: 'application/pdf', previewVersion: version };
+    });
+    const params = { params: Promise.resolve({ documentId: ID }) };
+    const first = await documents.GET(request('bytes'), params);
+    const etag = first.headers.get('etag');
+    assert.ok(etag); assert.equal(first.status, 200);
+    const unchanged = await documents.GET(request('bytes', etag), params);
+    assert.equal(unchanged.status, 304);
+    assert.equal(unchanged.headers.get('cache-control'), 'private, no-store');
+    assert.equal((await unchanged.arrayBuffer()).byteLength, 0);
+    assert.equal(reads, 2, 'cached reuse must recheck document access');
+    assert.equal(calls.filter(([name]) => name === 'download').length, 1);
+    version = 'b'.repeat(64);
+    const changed = await documents.GET(request('bytes', etag), params);
+    assert.equal(changed.status, 200); assert.notEqual(changed.headers.get('etag'), etag);
+    assert.equal(calls.filter(([name]) => name === 'download').length, 2);
+    const differentView = await documents.GET(request('text', etag), params);
+    assert.equal(differentView.status, 415);
+});
+
+test('a matching cached version cannot bypass lost membership, permissions or document availability', async () => {
+    setup(); const calls = storageStub('application/pdf');
+    stubs.set('@/lib/staff-api.server:staffErrorResponse', (error) => Response.json({ error: 'denied' }, { status: error.status }));
+    const params = { params: Promise.resolve({ documentId: ID }) };
+    for (const status of [403, 404]) {
+        stubs.set('@/lib/pipeline-operations:getDocumentDownload', async () => { throw Object.assign(new Error('Denied'), { status }); });
+        const response = await documents.GET(request('bytes', `"preview-v1-bytes-${'a'.repeat(64)}"`), params);
+        assert.equal(response.status, status);
+    }
+    stubs.set('@/lib/staff-api.server:staffApiContext', async () => ({ status: 'unauthorized' }));
+    const denied = await documents.GET(request('bytes', `"preview-v1-bytes-${'a'.repeat(64)}"`), params);
+    assert.equal(denied.status, 401); assert.deepEqual(calls, []);
+});
+
+test('an older database without a document version never approves cached reuse', async () => {
+    setup(); const calls = storageStub(DOCX);
+    const response = await documents.GET(request('text', '"preview-v1-text-old"'),
+        { params: Promise.resolve({ documentId: ID }) });
+    assert.equal(response.status, 200); assert.equal(response.headers.get('etag'), null);
+    assert.equal(calls.filter(([name]) => name === 'download').length, 1);
 });
 
 test('job preview reads the authorized workspace and client', async () => {

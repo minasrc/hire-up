@@ -56,6 +56,7 @@ const MIGRATIONS = [
     '20261001090000_public_intake_duplicate_review.sql',
     '20261001100000_candidate_merge.sql',
     '20261002100000_candidate_upload.sql',
+    '20261009090000_document_preview_versions.sql',
 ];
 
 const readMigration = (name) => readFileSync(join(migrationsDir, name), 'utf8');
@@ -71,6 +72,7 @@ import { saveCandidateUpload, candidateUploadReferenced, getCandidateUploadDetai
 import { submitPublicApplication } from '../../src/lib/intake-operations.js';
 import { listCandidateDuplicateReviews, getCandidateDuplicateComparison, mergeCandidateDuplicates } from '../../src/lib/duplicate-review-operations.js';
 import { getCandidateProfile, resolveCandidateRedirect } from '../../src/lib/candidate-profile-read.js';
+import { getDocumentDownload } from '../../src/lib/pipeline-operations.js';
 
 test('candidate upload PostgreSQL atomicity, email safety and retry receipts', async (t) => {
     assertLocalTestEnvironment();
@@ -178,6 +180,36 @@ test('candidate upload PostgreSQL atomicity, email safety and retry receipts', a
             const details = await getCandidateUploadDetails(pool, actor, ORG_B, { candidateId: targetId });
             assert.deepEqual(details.secondaryEmails, [], 'promoted upload secondary is not duplicated beneath current primary');
         }
+    });
+    await t.test('preview versions remain authorized, audited and sensitive to document state', async () => {
+        const previewCandidate = await save(makeInput('preview-version@example.test', []));
+        const candidateId = previewCandidate.candidateId;
+        const documentId = scalar(container, `select current_document_id from app.candidates where id = '${candidateId}'`);
+        const read = () => getDocumentDownload(pool, actor, ORG_B, { documentId });
+        const first = await read();
+        assert.match(first.previewVersion, /^[a-f0-9]{64}$/);
+        assert.equal((await read()).previewVersion, first.previewVersion);
+        assert.equal(scalar(container, `select count(*) from app.audit_events where target_id = '${documentId}' and action = 'document.downloaded'`), '2');
+        psql(container, `update app.documents set original_filename = 'Revised.pdf', version = version + 1 where id = '${documentId}'`);
+        assert.notEqual((await read()).previewVersion, first.previewVersion);
+        for (const lifecycle of ['restricted', 'retired']) {
+            psql(container, `update app.documents set lifecycle = '${lifecycle}' where id = '${documentId}'`);
+            await assert.rejects(read(), { code: 'P0002' });
+        }
+        psql(container, `update app.documents set lifecycle = 'active' where id = '${documentId}';
+            update app.file_blobs set scan_state = 'infected' where candidate_id = '${candidateId}'`);
+        await assert.rejects(read(), { code: '42501' });
+        psql(container, `update app.file_blobs set scan_state = 'unscanned' where candidate_id = '${candidateId}';
+            update app.candidates set lifecycle = 'restricted' where id = '${candidateId}'`);
+        await assert.rejects(read(), { code: 'P0002' });
+        psql(container, `update app.candidates set lifecycle = 'active' where id = '${candidateId}';
+            delete from app.role_permissions where organization_id = '${ORG_B}' and role_id = '${CJ_ID.ROLE_B_ADMIN}' and permission_key = 'documents.download'`);
+        await assert.rejects(read(), { code: 'FORBIDDEN' });
+        psql(container, `insert into app.role_permissions(organization_id, role_id, permission_key) values ('${ORG_B}', '${CJ_ID.ROLE_B_ADMIN}', 'documents.download');
+            update app.organization_memberships set status = 'revoked', revoked_at = now() where id = '${CJ_ID.MEMBER_B_ADMIN}'`);
+        await assert.rejects(read(), { code: 'UNAUTHORIZED' });
+        psql(container, `update app.organization_memberships set status = 'active', revoked_at = null where id = '${CJ_ID.MEMBER_B_ADMIN}'`);
+        assert.ok((await read()).previewVersion);
     });
     psql(container, `update app.candidates set lifecycle = 'restricted' where id = '${input.candidateId}'`);
     await assert.rejects(save(makeInput('secondary@example.test', [])), { code: '42501' });

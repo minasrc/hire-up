@@ -49,6 +49,7 @@ const migrations = [
     '20261002110000_staff_shell_capabilities.sql',
     '20261002120000_staff_list_pagination.sql',
     '20261004100000_staff_candidate_directory.sql',
+    '20261009090000_document_preview_versions.sql',
 ];
 
 async function waitForServer(url) {
@@ -128,6 +129,7 @@ test('staff previews records in place and opens CV content', async (t) => {
     await context.addInitScript(() => {
         const OriginalWorker = window.Worker;
         window.__pdfRequestsBeforeReady = 0;
+        window.__pdfParses = 0;
         window.Worker = class extends OriginalWorker {
             constructor(...args) {
                 super(...args);
@@ -138,6 +140,7 @@ test('staff previews records in place and opens CV content', async (t) => {
                 const send = this.postMessage.bind(this);
                 this.postMessage = (message, ...options) => {
                     if (message?.action === 'GetDocRequest' && !ready) window.__pdfRequestsBeforeReady++;
+                    if (message?.action === 'GetDocRequest') window.__pdfParses++;
                     return send(message, ...options);
                 };
             }
@@ -199,15 +202,43 @@ test('staff previews records in place and opens CV content', async (t) => {
                 filename: 'Synthetic.pdf', purpose: 'cv', lifecycle: 'active',
                 scanState: 'clean', sizeBytes: 512, receivedAt: new Date().toISOString(),
             });
+            payload.result.documents.push({
+                documentId: 'dddddddd-4444-4444-8444-444444444444',
+                filename: 'Second.pdf', purpose: 'cv', lifecycle: 'active',
+                scanState: 'clean', sizeBytes: 512, receivedAt: new Date().toISOString(),
+            });
             payload.result.capabilities.downloadDocuments = true;
             await route.fulfill({ response, json: payload });
         });
+        let textTransfers = 0, pdfTransfers = 0, validations = 0, denyPdf = false;
+        let holdText = false, resumeText;
+        const versions = new Map();
+        const validate = async (route) => {
+            validations++;
+            if (denyPdf && route.request().url().endsWith('?view=bytes')) {
+                await route.fulfill({ status: 403, json: { error: 'FORBIDDEN' } });
+                return null;
+            }
+            const etag = versions.get(route.request().url()) ?? '"synthetic-v1"';
+            if (route.request().headers()['if-none-match'] === etag) {
+                await route.fulfill({ status: 304, headers: { etag } });
+                return null;
+            }
+            return etag;
+        };
         await page.route('**/api/staff/documents/*?view=text', async (route) => {
+            if (holdText) await new Promise(resolve => { resumeText = resolve; });
+            const etag = await validate(route); if (!etag) return;
+            textTransfers++;
             await route.fulfill({ status: 200, contentType: 'application/json',
+                headers: { etag },
                 body: JSON.stringify({ text: 'Synthetic extracted resume text' }) });
         });
         await page.route('**/api/staff/documents/*?view=bytes', async (route) => {
+            const etag = await validate(route); if (!etag) return;
+            pdfTransfers++;
             await route.fulfill({ status: 200, contentType: 'application/pdf',
+                headers: { etag },
                 body: createSyntheticPdf() });
         });
         await page.evaluate(() => window.dispatchEvent(
@@ -237,6 +268,49 @@ test('staff previews records in place and opens CV content', async (t) => {
             return dark;
         }), { timeout: 20_000, message: 'the rendered PDF page contains visible ink' }).toBeGreaterThan(100);
         assert.equal(await page.evaluate(() => window.__pdfRequestsBeforeReady), 0, 'PDF parsing must wait for the worker readiness handshake');
+        await documentPreview.getByRole('button', { name: 'Zoom in', exact: true }).click();
+        await expect(documentPreview.getByText('125%', { exact: true })).toBeVisible();
+        await documentPreview.getByRole('button', { name: 'Second.pdf', exact: true }).click();
+        await expect(documentPreview.getByText(syntheticCvText, { exact: true })).toBeAttached();
+        const initialValidations = validations;
+        await documentPreview.getByRole('button', { name: 'Synthetic.pdf', exact: true }).click();
+        await expect(documentPreview.getByText('125%', { exact: true })).toBeVisible();
+        await expect(documentPreview.getByText(syntheticCvText, { exact: true })).toBeAttached();
+        assert.equal(pdfTransfers, 2, 'A to B to A transfers each PDF only once');
+        assert.equal(await page.evaluate(() => window.__pdfParses), 2, 'A to B to A prepares each PDF only once');
+        assert.equal(validations, initialValidations + 1, 'cached PDF reuse still validates access');
+        holdText = true;
+        await documentPreview.getByRole('button', { name: 'Synthetic.docx', exact: true }).click();
+        await expect(documentPreview.getByText('Checking document access…', { exact: true })).toBeVisible();
+        await expect(documentPreview.getByText('Synthetic extracted resume text')).toHaveCount(0);
+        await expect.poll(() => !!resumeText).toBe(true);
+        holdText = false; resumeText();
+        await expect(documentPreview.getByText('Synthetic extracted resume text')).toBeVisible();
+        assert.equal(textTransfers, 1, 'a cached DOCX does not extract or transfer text again');
+        await documentPreview.getByRole('button', { name: 'Synthetic.pdf', exact: true }).click();
+        await expect(documentPreview.getByText('125%', { exact: true })).toBeVisible();
+        await page.evaluate(() => window.dispatchEvent(new Event('focus')));
+        // Focus also refreshes the candidate preview and resets its selected file.
+        await expect(documentPreview.getByRole('button', { name: 'Synthetic.docx', exact: true })).toHaveAttribute('aria-pressed', 'true');
+        await documentPreview.getByRole('button', { name: 'Synthetic.pdf', exact: true }).click();
+        await expect(documentPreview.getByText(syntheticCvText, { exact: true })).toBeAttached();
+        assert.equal(pdfTransfers, 2, 'focus revalidates without retransferring an unchanged PDF');
+        assert.equal(await page.evaluate(() => window.__pdfParses), 2);
+        // Changed content and revoked access must override a cached preparation.
+        versions.set(`${baseURL}/api/staff/documents/cccccccc-3333-4333-8333-333333333333?view=bytes`, '"synthetic-v2"');
+        await documentPreview.getByRole('button', { name: 'Second.pdf', exact: true }).click();
+        await expect(documentPreview.getByText(syntheticCvText, { exact: true })).toBeAttached();
+        await documentPreview.getByRole('button', { name: 'Synthetic.pdf', exact: true }).click();
+        await expect(documentPreview.getByText('100%', { exact: true })).toBeVisible();
+        await expect(documentPreview.getByText(syntheticCvText, { exact: true })).toBeAttached();
+        assert.equal(pdfTransfers, 3); assert.equal(await page.evaluate(() => window.__pdfParses), 3);
+        denyPdf = true;
+        await documentPreview.getByRole('button', { name: 'Synthetic.docx', exact: true }).click();
+        await expect(documentPreview.getByText('Synthetic extracted resume text')).toBeVisible();
+        await documentPreview.getByRole('button', { name: 'Synthetic.pdf', exact: true }).click();
+        await expect(documentPreview.getByRole('alert')).toHaveText('You do not have permission to view this document.');
+        await expect(documentPreview.locator('canvas')).toHaveCount(0);
+        assert.equal(pdfTransfers, 3, 'denial never falls back to previously authorized bytes');
         await documentPreview.getByRole('button', { name: 'Close' }).click();
         await page.unroute('**/api/staff/candidates/*');
         await page.unroute('**/api/staff/documents/*?view=text');

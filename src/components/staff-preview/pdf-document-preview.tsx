@@ -5,6 +5,7 @@ import { ChevronLeft, ChevronRight, ExternalLink, ZoomIn, ZoomOut } from 'lucide
 import type { PDFDocumentProxy } from 'pdfjs-dist';
 
 import { Button } from '@/components/staff-ui/button';
+import { useDocumentPreview, type PdfPreviewValue } from './document-preview-provider';
 
 function PdfPage({
     pdf, number, width, zoom,
@@ -69,12 +70,21 @@ export function PdfDocumentPreview({
     documentId: string;
     filename: string;
 }) {
+    const { value, error, checking } = useDocumentPreview(documentId, 'bytes');
+    if (error) return <p role="alert" className="p-4 text-sm text-destructive">{error}</p>;
+    if (value?.kind !== 'pdf') return <p role="status" className="p-4 text-sm text-muted-foreground">
+        {checking ? 'Checking document access…' : 'Loading PDF…'}</p>;
+    return <LoadedPdfPreview documentId={documentId} filename={filename} value={value} />;
+}
+
+function LoadedPdfPreview({ documentId, filename, value }: {
+    documentId: string; filename: string; value: PdfPreviewValue;
+}) {
     const containerRef = useRef<HTMLDivElement>(null);
-    const [pdf, setPdf] = useState<PDFDocumentProxy | null>(null);
-    const [error, setError] = useState('');
+    const pdf = value.pdf;
     const [width, setWidth] = useState(0);
-    const [zoom, setZoom] = useState(1);
-    const [pageNumber, setPageNumber] = useState(1);
+    const [zoom, setZoom] = useState(() => value.getView().zoom);
+    const [pageNumber, setPageNumber] = useState(() => value.getView().page);
 
     useEffect(() => {
         const container = containerRef.current;
@@ -83,33 +93,6 @@ export function PdfDocumentPreview({
         observer.observe(container);
         return () => observer.disconnect();
     }, []);
-
-    useEffect(() => {
-        const controller = new AbortController();
-        let loadingTask: ReturnType<typeof import('pdfjs-dist')['getDocument']> | null = null;
-        fetch(`/api/staff/documents/${documentId}?view=bytes`, {
-            signal: controller.signal, cache: 'no-store',
-        }).then(async (response) => {
-            if (!response.ok) throw new Error('This PDF could not be previewed.');
-            const data = new Uint8Array(await response.arrayBuffer());
-            const pdfjs = await import('pdfjs-dist');
-            // Let PDF.js own the worker and complete its readiness handshake.
-            // The webpack helper supplies a shared port and skips that handshake.
-            pdfjs.GlobalWorkerOptions.workerSrc = new URL(
-                'pdfjs-dist/build/pdf.worker.min.mjs', import.meta.url,
-            ).toString();
-            if (controller.signal.aborted) return;
-            loadingTask = pdfjs.getDocument({ data });
-            const loaded = await loadingTask.promise;
-            if (!controller.signal.aborted) setPdf(loaded);
-        }).catch(() => {
-            if (!controller.signal.aborted) setError('This PDF could not be previewed.');
-        });
-        return () => {
-            controller.abort();
-            void loadingTask?.destroy();
-        };
-    }, [documentId]);
 
     return <div>
         <div className="flex flex-wrap items-center justify-between gap-2 border-b border-border px-3 py-2">
@@ -120,7 +103,8 @@ export function PdfDocumentPreview({
                 <Button size="icon" variant="ghost" title="Previous page"
                     aria-label="Previous page" disabled={!pdf || pageNumber <= 1}
                     onClick={() => {
-                        setPageNumber((value) => value - 1);
+                        value.rememberView({ page: pageNumber - 1 });
+                        setPageNumber(pageNumber - 1);
                         containerRef.current?.scrollTo({ top: 0 });
                     }}>
                     <ChevronLeft className="h-4 w-4" />
@@ -131,20 +115,21 @@ export function PdfDocumentPreview({
                 <Button size="icon" variant="ghost" title="Next page"
                     aria-label="Next page" disabled={!pdf || pageNumber >= pdf.numPages}
                     onClick={() => {
-                        setPageNumber((value) => value + 1);
+                        value.rememberView({ page: pageNumber + 1 });
+                        setPageNumber(pageNumber + 1);
                         containerRef.current?.scrollTo({ top: 0 });
                     }}>
                     <ChevronRight className="h-4 w-4" />
                 </Button>
                 <Button size="icon" variant="ghost" title="Zoom out"
                     aria-label="Zoom out" disabled={zoom <= 0.75}
-                    onClick={() => setZoom((value) => Math.max(0.75, value - 0.25))}>
+                    onClick={() => { const next = Math.max(0.75, zoom - 0.25); value.rememberView({ zoom: next }); setZoom(next); }}>
                     <ZoomOut className="h-4 w-4" />
                 </Button>
                 <span className="w-11 text-center text-xs tabular-nums">{Math.round(zoom * 100)}%</span>
                 <Button size="icon" variant="ghost" title="Zoom in"
                     aria-label="Zoom in" disabled={zoom >= 2}
-                    onClick={() => setZoom((value) => Math.min(2, value + 0.25))}>
+                    onClick={() => { const next = Math.min(2, zoom + 0.25); value.rememberView({ zoom: next }); setZoom(next); }}>
                     <ZoomIn className="h-4 w-4" />
                 </Button>
                 <Button size="icon" variant="ghost" asChild>
@@ -157,8 +142,7 @@ export function PdfDocumentPreview({
             </div>
         </div>
         <div ref={containerRef} className="max-h-[min(70vh,720px)] overflow-auto bg-muted p-4">
-            {error ? <p role="alert" className="text-sm text-destructive">{error}</p>
-                : pdf && width ? <PdfPage key={pageNumber} pdf={pdf}
+            {width ? <PdfPage key={pageNumber} pdf={pdf}
                     number={pageNumber} width={width} zoom={zoom} />
                     : <p role="status" className="text-sm text-muted-foreground">
                     Loading PDF…</p>}
