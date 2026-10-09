@@ -1,10 +1,11 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useState } from 'react';
 import { Download, FileText } from 'lucide-react';
 
 import { Button } from '@/components/staff-ui/button';
 import { PdfDocumentPreview } from './pdf-document-preview';
+import { useDocumentPreview } from './document-preview-provider';
 
 export interface CandidateDocumentRecord {
     documentId: string;
@@ -24,8 +25,6 @@ export function RealCandidateDocuments({
     canView: boolean;
 }) {
     const [selectedId, setSelectedId] = useState<string | null>(null);
-    const [text, setText] = useState<string | null>(null);
-    const [error, setError] = useState('');
     const canOpen = (document: CandidateDocumentRecord) => canView
         && document.lifecycle === 'active'
         && document.scanState !== 'infected';
@@ -37,22 +36,8 @@ export function RealCandidateDocuments({
     const isPdf = selected?.filename.toLowerCase().endsWith('.pdf');
     const isDocx = selected?.filename.toLowerCase().endsWith('.docx');
     const selectedDocxId = isDocx ? selected.documentId : null;
-
-    useEffect(() => {
-        if (!selectedDocxId) return;
-        const controller = new AbortController();
-        fetch(`/api/staff/documents/${selectedDocxId}?view=text`, {
-            signal: controller.signal,
-            cache: 'no-store',
-        }).then(async (response) => {
-            if (!response.ok) throw new Error('This document could not be previewed.');
-            const payload = await response.json();
-            setText(payload.text || 'No readable text was found in this document.');
-        }).catch(() => {
-            if (!controller.signal.aborted) setError('This document could not be previewed.');
-        });
-        return () => controller.abort();
-    }, [selectedDocxId]);
+    const { value, error, checking } = useDocumentPreview(selectedDocxId, 'text');
+    const text = value?.kind === 'text' ? value.text : null;
 
     if (documents.length === 0) {
         return <p className="text-sm text-muted-foreground">No documents on file.</p>;
@@ -67,8 +52,6 @@ export function RealCandidateDocuments({
                 <div className="min-w-0 flex-1">
                     {canOpen(document) ? <button type="button"
                         onClick={() => {
-                            setText(null);
-                            setError('');
                             setSelectedId(document.documentId);
                         }}
                         aria-pressed={selected?.documentId === document.documentId}
@@ -102,7 +85,7 @@ export function RealCandidateDocuments({
                 : isDocx ? <div className="max-h-[min(70vh,720px)] overflow-auto px-4 py-5">
                     {error ? <p role="alert" className="text-sm text-destructive">{error}</p>
                         : text === null ? <p role="status" className="text-sm text-muted-foreground">
-                            Loading document…</p>
+                            {checking ? 'Checking document access…' : 'Loading document…'}</p>
                             : <pre className="whitespace-pre-wrap break-words font-sans text-sm leading-6">
                                 {text}
                             </pre>}

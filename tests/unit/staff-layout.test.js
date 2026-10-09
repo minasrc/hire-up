@@ -22,7 +22,7 @@ function staffLayout(loadStaffCapabilities) {
         '@/lib/workspace.server': { loadStaffCapabilities, loadStaffWorkspace: () => {
             assert.fail('layout must not block on workspace metrics');
         } },
-        './session-provider': { StaffSessionProvider: ({ children }) => jsx('div', { 'data-session': 'true', children }) },
+        './session-provider': { StaffSessionProvider: ({ children, scope }) => jsx('div', { 'data-session': 'true', 'data-scope': scope, children }) },
         './auth-recovery-notice': { AuthRecoveryNotice: () => null },
         './staff-shell': {
             StaffShell: (props) => jsx('div', {
@@ -62,6 +62,7 @@ test('verified members get the shell with the lightweight capabilities', async (
     const Layout = staffLayout(async () => ({
         gate: {
             stage: 'verified',
+            organizationId: 'organization-a', principal: { user_id: 'user-a' },
             session: { user: { email: 'staff@example.test' } },
         },
         capabilities: { candidates: true },
@@ -72,6 +73,7 @@ test('verified members get the shell with the lightweight capabilities', async (
     assert.match(html, /data-shell="true"/);
     assert.match(html, /data-capabilities="present"/);
     assert.match(html, /data-session="true"/);
+    assert.match(html, /data-scope="organization-a:user-a"/);
     assert.match(html, /data-stream="true"/);
     assert.match(html, /data-user="staff@example\.test"/);
     assert.match(html, /page-body/);
@@ -81,6 +83,7 @@ test('a capability outage still renders the shell so pages stay usable', async (
     const Layout = staffLayout(async () => ({
         gate: {
             stage: 'verified',
+            organizationId: 'organization-a', principal: { user_id: 'user-a' },
             session: { user: { email: 'staff@example.test' } },
         },
         capabilities: null,

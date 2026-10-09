@@ -10,14 +10,16 @@ test('public routes keep their chrome without fetching a session; staff sign-in 
     page.on('pageerror', (error) => errors.push(error.message));
 
     for (const path of ['/', '/jobs', '/for-employers']) {
-        await page.goto(path);
+        // This checks the route's rendered chrome, not completion of every
+        // image or external asset loaded by the page.
+        await page.goto(path, { waitUntil: 'domcontentloaded' });
         await expect(page.getByRole('banner')).toBeVisible();
         await expect(page.getByRole('contentinfo')).toBeVisible();
         await expect(page.locator('.bg-noise')).toHaveCount(1);
     }
     expect(sessionRequests).toEqual([]);
 
-    await page.goto('/staff/sign-in');
+    await page.goto('/staff/sign-in', { waitUntil: 'domcontentloaded' });
     await expect(page.getByRole('button', { name: 'Sign in with Google' })).toBeVisible();
     await expect(page.getByRole('banner')).toHaveCount(0);
     await expect(page.getByRole('contentinfo')).toHaveCount(0);

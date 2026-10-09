@@ -2604,7 +2604,7 @@ test('staff workspace end-to-end in a real browser', async (t) => {
             await recovered.addCookies(recruiterCookies);
             const userPage = await recovered.newPage();
             await userPage.goto(`${baseURL}/staff`, { waitUntil: 'domcontentloaded' });
-            await expect(userPage).toHaveURL(/\/staff\/mfa\/enroll/);
+            await userPage.waitForURL(/\/staff\/mfa\/enroll/, { waitUntil: 'domcontentloaded', timeout: 30_000 });
             const secret = psql(container, `select secret from app.totp_credentials where organization_id = '${ORG_ID}' and user_id = '${CJ_ID.USER_B_REC}' and status = 'pending'`).trim();
             await expect(async () => {
                 const input = userPage.getByLabel('Authenticator code');
@@ -2619,8 +2619,11 @@ test('staff workspace end-to-end in a real browser', async (t) => {
             assert.equal(newCodes.length, 10);
             assert.notDeepEqual(newCodes, oldCodes);
             await userPage.getByLabel('I saved my backup codes').check();
-            await userPage.getByRole('button', { name: 'Continue to workspace' }).click();
-            await expect(userPage).toHaveURL(`${baseURL}/staff`);
+            await Promise.all([
+                userPage.waitForURL(`${baseURL}/staff`, { waitUntil: 'domcontentloaded', timeout: 30_000 }),
+                userPage.getByRole('button', { name: 'Continue to workspace' }).click({ noWaitAfter: true }),
+            ]);
+            await expect(userPage.getByRole('heading', { name: 'Overview', exact: true })).toBeVisible();
             const oldCode = await recovered.request.post(`${baseURL}/api/staff/mfa/verify`, { data: { method: 'backup', code: oldCodes[0] } });
             assert.equal(oldCode.status(), 401);
         } finally { await recovered.close(); }
@@ -2678,12 +2681,19 @@ test('staff workspace end-to-end in a real browser', async (t) => {
             assert.equal(psql(container, `select count(*) from app.audit_events where action = 'staff.totp.activated' and target_id = '${credential}'`).trim(), '1');
             assert.equal(psql(container, `select count(*) from app.staff_mfa_backup_codes where credential_id = '${credential}'`).trim(), '10');
             await tabs[winner].getByLabel('I saved my backup codes').check();
-            await tabs[winner].getByRole('button', { name: 'Continue to workspace' }).click();
-            await expect(tabs[winner]).toHaveURL(`${baseURL}/staff`);
-            await tabs[loser].getByRole('link', { name: 'Continue to staff' }).click();
-            await expect(tabs[loser]).toHaveURL(`${baseURL}/staff`);
+            // The overview streams data. Wait for the target document and UI,
+            // rather than implicitly waiting for every page asset to load.
+            await Promise.all([
+                tabs[winner].waitForURL(`${baseURL}/staff`, { waitUntil: 'domcontentloaded', timeout: 30_000 }),
+                tabs[winner].getByRole('button', { name: 'Continue to workspace' }).click({ noWaitAfter: true }),
+            ]);
+            await expect(tabs[winner].getByRole('heading', { name: 'Overview', exact: true })).toBeVisible();
+            await Promise.all([
+                tabs[loser].waitForURL(`${baseURL}/staff`, { waitUntil: 'domcontentloaded', timeout: 30_000 }),
+                tabs[loser].getByRole('link', { name: 'Continue to staff' }).click({ noWaitAfter: true }),
+            ]);
             await tabs[loser].goto(`${baseURL}/staff/mfa/enroll`, { waitUntil: 'domcontentloaded' });
-            await expect(tabs[loser]).toHaveURL(`${baseURL}/staff`);
+            await tabs[loser].waitForURL(`${baseURL}/staff`, { waitUntil: 'domcontentloaded', timeout: 30_000 });
             const replay = await context.request.post(`${baseURL}/api/staff/mfa/verify`, { data: { code } });
             assert.equal(replay.status(), 401);
             const savedCode = await context.request.post(`${baseURL}/api/staff/mfa/verify`, { data: { method: 'backup', code: backup[0] } });
