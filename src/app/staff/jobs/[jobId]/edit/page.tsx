@@ -4,7 +4,7 @@ import { ArrowLeft } from 'lucide-react';
 import { getJobWorkspace } from '@/lib/client-job-operations';
 import { StaffAuthorizationError } from '@/lib/staff-authorization';
 import { requireStaffVerified } from '@/lib/staff-gate.server';
-import { loadStaffWorkspace } from '@/lib/workspace.server';
+import { loadStaffCapabilities } from '@/lib/workspace.server';
 import { PageHeader } from '@/components/staff-preview/shared';
 import { Card, CardContent } from '@/components/staff-ui/card';
 import { JobForm } from '../../../workspace-forms';
@@ -60,8 +60,8 @@ export default async function StaffJobEditPage(
         redirect(`/staff/jobs/${jobId}`);
     }
 
-    const { summary } = await loadStaffWorkspace();
-    const canWrite = summary?.capabilities.writeJobs === true;
+    const { capabilities } = await loadStaffCapabilities();
+    const canWrite = capabilities?.writeJobs === true;
     const { job, draft } = workspace;
     return (
         <section className="mx-auto flex w-full max-w-5xl flex-col gap-6">
@@ -103,7 +103,7 @@ export default async function StaffJobEditPage(
                         />
                     ) : (
                         <p className="py-4 text-center text-sm text-muted-foreground">
-                            {summary === null
+                            {capabilities === null
                                 ? 'Editing is temporarily unavailable.'
                                 : 'Editing this job requires the jobs.write permission.'}
                         </p>

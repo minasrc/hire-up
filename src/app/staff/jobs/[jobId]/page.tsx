@@ -9,7 +9,7 @@ import {
 } from '@/lib/client-job-operations';
 import { StaffAuthorizationError } from '@/lib/staff-authorization';
 import { requireStaffVerified } from '@/lib/staff-gate.server';
-import { loadStaffWorkspace } from '@/lib/workspace.server';
+import { loadStaffCapabilities } from '@/lib/workspace.server';
 import { FieldLabel, PageHeader, StatusBadge, TagPill } from '@/components/staff-preview/shared';
 import { JobDocumentView } from '@/components/staff-preview/job-document';
 import { jobStatusLabel } from '@/lib/job-display';
@@ -83,8 +83,8 @@ export default async function StaffJobPage(
     }
 
     const { job, draft, published, publicationNeedsReview } = workspace;
-    const { summary } = await loadStaffWorkspace();
-    const canWrite = summary?.capabilities.writeJobs === true;
+    const { capabilities } = await loadStaffCapabilities();
+    const canWrite = capabilities?.writeJobs === true;
     // Optional reads settle independently, preserving each failure message.
     const [clientResult, previewResult] = await Promise.allSettled([
         getClient(gate.pool, gate.identity, gate.organizationId,
