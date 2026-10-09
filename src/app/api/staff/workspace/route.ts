@@ -1,4 +1,4 @@
-import { getStaffWorkspace } from '@/lib/workspace-operations';
+import { getStaffNotifications } from '@/lib/workspace-operations';
 import {
     staffApiContext,
     staffErrorResponse,
@@ -34,7 +34,7 @@ export async function GET() {
         return privateResponse(denied);
     }
     try {
-        const result = await getStaffWorkspace(
+        const result = await getStaffNotifications(
             context.pool, context.identity, context.organizationId);
         return Response.json({ ok: true, result }, { headers: PRIVATE_HEADERS });
     } catch (error) {
@@ -42,11 +42,11 @@ export async function GET() {
             return privateResponse(staffErrorResponse(error));
         } catch {
             console.error(
-                'staff workspace summary failed',
+                'staff notifications failed',
                 (error as { code?: string })?.code ?? 'UNKNOWN',
             );
             return Response.json(
-                { error: 'workspace summary unavailable' },
+                { error: 'workspace notifications unavailable' },
                 { status: 503, headers: PRIVATE_HEADERS },
             );
         }

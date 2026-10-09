@@ -43,6 +43,11 @@ export interface StaffWorkspaceRecentApplication {
     receivedAt: string;
 }
 
+export interface StaffWorkspaceNotifications {
+    capabilities: StaffWorkspaceCapabilities;
+    attention: StaffWorkspaceAttention;
+}
+
 export interface StaffWorkspaceSummary {
     capabilities: StaffWorkspaceCapabilities;
     metrics: StaffWorkspaceMetrics;

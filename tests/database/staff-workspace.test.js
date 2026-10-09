@@ -33,6 +33,7 @@ import {
     createStaffTask,
     getStaffWorkspace,
     getStaffCapabilities,
+    getStaffNotifications,
     listStaffTasks,
     setStaffTaskCompleted,
 } from '../../src/lib/workspace-operations.js';
@@ -52,6 +53,7 @@ const WORKSPACE_MIGRATION = '20260928100000_staff_workspace.sql';
 const WORKSPACE_FUNCTIONS = [
     'get_staff_workspace_v1',
     'get_staff_capabilities_v1',
+    'get_staff_notifications_v1',
     'list_staff_tasks_v1',
     'create_staff_task_v1',
     'set_staff_task_completed_v1',
@@ -74,6 +76,7 @@ const MIGRATIONS = [
     WORKSPACE_MIGRATION,
     '20260928220000_job_visibility.sql',
     '20261002110000_staff_shell_capabilities.sql',
+    '20261010090000_staff_notifications.sql',
 ];
 
 const readMigration = (name) => readFileSync(join(migrationsDir, name), 'utf8');
@@ -168,6 +171,58 @@ test('staff workspace on PostgreSQL 17', async (t) => {
         }
         staffBad(pg17, '', ORG_B, 'select app.get_staff_capabilities_v1()', '42501');
         staffBad(pg17, CJ_ID.USER_B_REC, '', 'select app.get_staff_capabilities_v1()', '42501');
+    });
+
+    await t.test('notifications contain only authorized counts and capabilities', async () => {
+        for (const run of [admin, recruiter, viewer, orgA]) {
+            const summary = await run(getStaffWorkspace);
+            assert.deepEqual(await run(getStaffNotifications), {
+                capabilities: summary.capabilities,
+                attention: summary.attention,
+            });
+        }
+        staffBad(pg17, '', ORG_B, 'select app.get_staff_notifications_v1()', '42501');
+        staffBad(pg17, CJ_ID.USER_B_REC, '', 'select app.get_staff_notifications_v1()', '42501');
+    });
+
+    await t.test('notification counts recheck each dependent permission', async () => {
+        for (const permission of [
+            'candidates.read', 'clients.read', 'jobs.read', 'applications.read',
+            'staff.manage', 'collaboration.read',
+        ]) {
+            psql(pg17, `delete from app.role_permissions where organization_id = '${ORG_B}' and role_id = '${AUTHZ_ID.ROLE_B_ADMIN}' and permission_key = '${permission}'`);
+            try {
+                const result = await admin(getStaffNotifications);
+                const field = permission === 'staff.manage'
+                    ? 'pendingInvites'
+                    : permission === 'collaboration.read'
+                        ? 'openTasks'
+                        : 'reviewApplications';
+                assert.equal(result.attention[field], null);
+                const summary = await admin(getStaffWorkspace);
+                assert.deepEqual(result, {
+                    capabilities: summary.capabilities,
+                    attention: summary.attention,
+                });
+            } finally {
+                psql(pg17, `insert into app.role_permissions (organization_id, role_id, permission_key) values ('${ORG_B}', '${AUTHZ_ID.ROLE_B_ADMIN}', '${permission}')`);
+            }
+        }
+    });
+
+    await t.test('notifications reject revoked membership and remain independent of summary availability', async () => {
+        psql(pg17, 'alter function app.get_staff_workspace_v1() rename to get_staff_workspace_outage_test');
+        try {
+            assert.equal((await admin(getStaffNotifications)).attention.reviewApplications, 1);
+        } finally {
+            psql(pg17, 'alter function app.get_staff_workspace_outage_test() rename to get_staff_workspace_v1');
+        }
+        psql(pg17, `update app.organization_memberships set status = 'revoked', revoked_at = now() where id = '${AUTHZ_ID.MEMBER_B_ADMIN}'`);
+        try {
+            await rejectCode(admin(getStaffNotifications), 'UNAUTHORIZED');
+        } finally {
+            psql(pg17, `update app.organization_memberships set status = 'active', revoked_at = null where id = '${AUTHZ_ID.MEMBER_B_ADMIN}'`);
+        }
     });
 
     await t.test('workspace summary reports exact fixture baseline', async () => {
@@ -326,6 +381,7 @@ test('staff workspace on PostgreSQL 17', async (t) => {
         assert.equal(summary.metrics.candidates, 502);
         assert.equal(summary.metrics.applications, 502);
         assert.equal(summary.attention.reviewApplications, 502);
+        assert.equal((await admin(getStaffNotifications)).attention.reviewApplications, 502);
         assert.equal(summary.recentApplications.length, 5,
             'recent applications stay capped while counts aggregate');
 
@@ -336,6 +392,7 @@ test('staff workspace on PostgreSQL 17', async (t) => {
         assert.equal(restricted.metrics.candidates, 501);
         assert.equal(restricted.metrics.applications, 501);
         assert.equal(restricted.attention.reviewApplications, 501);
+        assert.equal((await admin(getStaffNotifications)).attention.reviewApplications, 501);
         psql(pg17, `
             update app.candidates set lifecycle = 'active'
             where id = '${CJ_ID.CANDIDATE_B}'`);
@@ -448,6 +505,7 @@ test('staff workspace on PostgreSQL 17', async (t) => {
 
         const summary = await admin(getStaffWorkspace);
         assert.equal(summary.attention.openTasks, 3);
+        assert.equal((await admin(getStaffNotifications)).attention.openTasks, 3);
     });
 
     await t.test('other members and other organizations cannot touch tasks', async () => {
@@ -459,6 +517,10 @@ test('staff workspace on PostgreSQL 17', async (t) => {
         });
 
         const recruiterList = await recruiter(listStaffTasks, {});
+        assert.equal(
+            (await recruiter(getStaffNotifications)).attention.openTasks,
+            recruiterList.counts.open,
+        );
         assert.equal(
             recruiterList.tasks.some((task) => task.id === taskId),
             false,
@@ -475,6 +537,10 @@ test('staff workspace on PostgreSQL 17', async (t) => {
             expectedVersion: '1',
         }), 'P0002', 'another organization cannot complete the task');
         const orgAList = await orgA(listStaffTasks, {});
+        assert.equal(
+            (await orgA(getStaffNotifications)).attention.openTasks,
+            orgAList.counts.open,
+        );
         assert.equal(
             orgAList.tasks.some((task) => task.id === taskId),
             false,
@@ -500,6 +566,7 @@ test('staff workspace on PostgreSQL 17', async (t) => {
             for (const fn of [
                 'app.get_staff_workspace_v1()',
                 'app.get_staff_capabilities_v1()',
+                'app.get_staff_notifications_v1()',
                 'app.list_staff_tasks_v1(false, null, 20, 0)',
                 `app.create_staff_task_v1('${randomUUID()}'::uuid, 'x', 'review',
                     '${randomUUID()}'::uuid, '${randomUUID()}'::uuid)`,
