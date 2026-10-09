@@ -650,8 +650,9 @@ test('staff workspace end-to-end in a real browser', async (t) => {
             await page.getByRole('button', {
                 name: 'Workspace updates unavailable',
             }).click();
-            await page.getByText('Your staff session is no longer valid.').waitFor();
-            await page.getByRole('link', { name: 'Sign in again' }).waitFor();
+            await page.getByText('You do not have permission to view workspace updates.').waitFor();
+            assert.equal(await page.getByRole('link', { name: 'Sign in again' }).count(), 0,
+                'workspace permission denial must not ask for sign-in');
             assert.equal(
                 await page.getByRole('link', { name: 'Members', exact: true })
                     .count(),
@@ -735,9 +736,12 @@ test('staff workspace end-to-end in a real browser', async (t) => {
                 body: '{}',
             }));
         await page.reload({ waitUntil: 'domcontentloaded' });
-        await todo.getByRole('link', { name: 'Sign in' }).waitFor();
+        await todo.getByRole('link', { name: 'Sign in again' }).waitFor();
         assert.equal(await todo.locator('ul li').count(), 0);
         await page.unroute('**/api/staff/tasks?*');
+        await todo.getByRole('button', { name: 'Retry access' }).click();
+        await expect(todo.getByRole('link', { name: 'Sign in again' })).toHaveCount(0);
+        await expect(page.getByRole('complementary', { name: 'Access recovery' })).toHaveCount(0);
 
         await page.route('**/api/staff/tasks?*', (route) =>
             route.fulfill({

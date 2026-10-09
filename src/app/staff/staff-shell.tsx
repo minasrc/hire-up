@@ -2,6 +2,7 @@
 
 import { createStaffRefresh } from '@/lib/staff-refresh';
 import { staffAuthRecovery } from '@/lib/staff-auth-recovery';
+import { StaffAuthRecoveryPrompt, useStaffAuthRecovery } from './auth-recovery';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { signOut } from 'next-auth/react';
@@ -123,6 +124,7 @@ function AttentionBell({
     onRetry: () => void;
 }) {
     const [open, setOpen] = useState(false);
+    const recovery = useStaffAuthRecovery();
     const entries = summary
         ? ([
               {
@@ -178,15 +180,10 @@ function AttentionBell({
                 </p>
                 {loadError === 'denied' ? (
                     <div className="flex flex-col gap-2 px-4 py-6">
-                        <p className="text-sm text-muted-foreground">
-                            Your staff session is no longer valid.
-                        </p>
-                        <a
-                            href="/staff/sign-in"
-                            className="w-fit rounded-sm text-sm font-medium text-accent-foreground underline-offset-4 outline-none hover:underline focus-visible:ring-2 focus-visible:ring-ring"
-                        >
-                            Sign in again
-                        </a>
+                        {recovery.required ? <StaffAuthRecoveryPrompt /> :
+                            <p className="text-sm text-muted-foreground">
+                                You do not have permission to view workspace updates.
+                            </p>}
                     </div>
                 ) : !summary && !loadError ? (
                     <p role="status" className="px-4 py-6 text-sm text-muted-foreground">
