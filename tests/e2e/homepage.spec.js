@@ -10,7 +10,7 @@ test('hydrates the homepage without client errors', async ({ page }) => {
     });
     page.on('pageerror', (error) => browserErrors.push(error.message));
 
-    await page.goto('/');
+    await page.goto('/', { waitUntil: 'domcontentloaded' });
     await expect(page.getByRole('heading', { name: /High-Fidelity Talent Infrastructure/ })).toBeVisible();
     await page.waitForTimeout(500);
 
