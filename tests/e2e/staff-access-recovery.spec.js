@@ -14,6 +14,8 @@ const compile = (file) => ts.transpileModule(
 ).outputText;
 const notice = compile('src/app/staff/auth-recovery-notice.tsx');
 const mutation = compile('src/lib/staff-mutation.ts');
+const authState = compile('src/lib/staff-auth-recovery.js');
+const authComponents = compile('src/app/staff/auth-recovery.tsx');
 
 for (const scenario of [
     { status: 428, message: 'Verify your authenticator', label: 'Verify authenticator', href: '/staff/mfa/verify' },
@@ -29,7 +31,20 @@ for (const scenario of [
         await page.goto('http://127.0.0.1:3000/__recovery-test');
         for (const content of reactScripts) await page.addScriptTag({ content });
         await page.addScriptTag({ content: `
-            const recovery = (() => { const exports = {}; const require = () => React; ${notice}; return exports; })();
+            const state = (() => { const exports = {}; ${authState}; return exports; })();
+            const imports = {
+                react: React,
+                '@/lib/staff-auth-recovery': state,
+                './staff-auth-recovery': state,
+                'next-auth/react': { useSession: () => ({ update: async () => ({ user: { email: 'synthetic@test.invalid' } }) }) },
+                '@/components/staff-ui/button': { Button: ({ children, size, variant, ...props }) => React.createElement('button', props, children) },
+            };
+            const require = name => {
+                if (!Object.hasOwn(imports, name)) throw new Error('Unexpected dependency: ' + name);
+                return imports[name];
+            };
+            imports['./auth-recovery'] = (() => { const exports = {}; ${authComponents}; return exports; })();
+            const recovery = (() => { const exports = {}; ${notice}; return exports; })();
             const mutations = (() => { const exports = {}; ${mutation}; return exports; })();
             ReactDOM.createRoot(document.getElementById('notice')).render(React.createElement(recovery.AuthRecoveryNotice));
             document.getElementById('save').onclick = async () => {

@@ -1,3 +1,7 @@
+'use client';
+
+import { staffAuthRecovery } from './staff-auth-recovery';
+
 export class StaffMutationError extends Error {
     status: number;
     code?: string;
@@ -28,6 +32,7 @@ const stringFieldErrors = (payload: unknown): Record<string, string> => {
 };
 
 export async function staffMutation(url: string, body: unknown) {
+    const epoch = staffAuthRecovery.requestEpoch();
     const response = await fetch(url, {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
@@ -36,9 +41,7 @@ export async function staffMutation(url: string, body: unknown) {
     const payload = await response.json().catch(() => ({}));
     if (!response.ok) {
         if (response.status === 401 || response.status === 428) {
-            window.dispatchEvent(new CustomEvent('staff-auth-required', {
-                detail: { mfa: response.status === 428 },
-            }));
+            staffAuthRecovery.require(response.status, epoch, 'save');
         }
         const fieldErrors = response.status === 400
             ? stringFieldErrors(payload)

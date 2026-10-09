@@ -3,6 +3,8 @@
 import { useRef, useState, type ReactNode } from 'react';
 import Link from 'next/link';
 import { Pencil, Plus } from 'lucide-react';
+import { staffAuthRecovery } from '@/lib/staff-auth-recovery';
+import { StaffAuthRecoveryPrompt, useStaffAuthRecovery } from '../auth-recovery';
 
 import { Button } from '@/components/staff-ui/button';
 import {
@@ -127,6 +129,7 @@ export function CandidateProfileDialog({
     expectedVersion?: string;
     onSaved: (candidateId: string) => void;
 }) {
+    const recovery = useStaffAuthRecovery();
     const [draft, setDraft] = useState<FormDraft>(() => draftFrom(initial));
     const [error, setError] = useState('');
     const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
@@ -161,6 +164,7 @@ export function CandidateProfileDialog({
     };
 
     const submit = async () => {
+        const authEpoch = staffAuthRecovery.requestEpoch();
         if (busyRef.current) return;
         busyRef.current = true;
         setPending(true);
@@ -223,6 +227,7 @@ export function CandidateProfileDialog({
                 && (payload.result.status === 'created'
                     || payload.result.status === 'updated');
             if (!succeeded) {
+                staffAuthRecovery.require(response.status, authEpoch, 'save');
                 applyFailure(payload ?? {});
                 setError(
                     response.status === 401 || response.status === 428
@@ -271,6 +276,7 @@ export function CandidateProfileDialog({
                             : 'Update the candidate profile.'}
                     </DialogDescription>
                 </DialogHeader>
+                {recovery.required ? <StaffAuthRecoveryPrompt /> : null}
                 <fieldset
                     disabled={pending}
                     className="m-0 flex min-w-0 flex-col gap-4 border-0 p-0"

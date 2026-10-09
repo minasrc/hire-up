@@ -4,6 +4,8 @@ import { useEffect, useMemo, useRef, useState, type MouseEvent, type ReactNode }
 import Link from 'next/link';
 import dynamic from 'next/dynamic';
 import { useSession } from 'next-auth/react';
+import { staffAuthRecovery } from '@/lib/staff-auth-recovery';
+import { StaffAuthRecoveryPrompt, useStaffAuthRecovery } from './auth-recovery';
 import { createStaffPreviewCache } from '@/lib/staff-preview-cache';
 
 import { JobDocumentView } from '@/components/staff-preview/job-document';
@@ -205,6 +207,8 @@ const recordPath = /^\/staff\/(candidates|jobs)\/([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-
 export function RecordPreview({ children }: { children: ReactNode }) {
     const [selection, setSelection] = useState<Selection | null>(null);
     const { data: session, status } = useSession();
+    const recovery = useStaffAuthRecovery();
+    const blocked = recovery.required && recovery.phase !== 'retrying';
     const sessionIdentity = session?.user?.email;
     const sessionCache = useMemo(() => ({
         status, sessionIdentity, records: createStaffPreviewCache(),
@@ -218,7 +222,7 @@ export function RecordPreview({ children }: { children: ReactNode }) {
     if (loaded && loaded.cache !== cache) setLoaded(null);
     const [revision, setRevision] = useState(0);
     const selectionKey = selection ? `${selection.kind}:${selection.id}` : '';
-    const record = status === 'authenticated' && loaded?.cache === cache
+    const record = !recovery.required && status === 'authenticated' && loaded?.cache === cache
         && loaded.key === selectionKey ? loaded.value : null;
     const [error, setError] = useState('');
     const triggerRef = useRef<HTMLElement | null>(null);
@@ -232,10 +236,15 @@ export function RecordPreview({ children }: { children: ReactNode }) {
             clearTimeout(refreshTimer);
             refreshTimer = setTimeout(() => setRevision((value) => value + 1), 50);
         };
-        const authLost = () => {
-            invalidate();
-            setSelection(null);
+        const authLost = (event: Event) => {
+            cache.clear();
+            setLoaded(null);
+            setError('');
+            clearTimeout(refreshTimer);
+            // Authentication recovery keeps the selection, never its private data.
+            if (!(event as CustomEvent).detail?.recoverable) setSelection(null);
         };
+        const retryAuth = () => { cache.clear(); setRevision((value) => value + 1); };
         const onFocus = () => {
             if (document.visibilityState === 'visible') invalidate();
         };
@@ -245,6 +254,7 @@ export function RecordPreview({ children }: { children: ReactNode }) {
         };
         window.addEventListener('staff-workspace-updated', invalidate);
         window.addEventListener('staff-session-invalidated', authLost);
+        window.addEventListener('staff-auth-retry', retryAuth);
         window.addEventListener('focus', onFocus);
         document.addEventListener('visibilitychange', onVisibility);
         return () => {
@@ -252,15 +262,23 @@ export function RecordPreview({ children }: { children: ReactNode }) {
             cache.clear();
             window.removeEventListener('staff-workspace-updated', invalidate);
             window.removeEventListener('staff-session-invalidated', authLost);
+            window.removeEventListener('staff-auth-retry', retryAuth);
             window.removeEventListener('focus', onFocus);
             document.removeEventListener('visibilitychange', onVisibility);
         };
     }, [cache]);
 
     useEffect(() => {
-        if (!selection || status !== 'authenticated'
+        if (selection && status === 'unauthenticated' && !recovery.required) {
+            staffAuthRecovery.require(401);
+        }
+    }, [selection, status, recovery.required]);
+
+    useEffect(() => {
+        if (!selection || blocked || status !== 'authenticated'
             || document.visibilityState !== 'visible') return;
         let current = true;
+        const authEpoch = staffAuthRecovery.requestEpoch();
         cache.load(selectionKey, async (signal: AbortSignal) => {
             const response = await fetch(
                 `/api/staff/${selection.kind === 'candidate' ? 'candidates' : 'jobs'}/${selection.id}`,
@@ -268,6 +286,8 @@ export function RecordPreview({ children }: { children: ReactNode }) {
             );
             if (signal.aborted) throw new DOMException('Preview request superseded', 'AbortError');
             if (!response.ok) {
+                if ([403, 404].includes(response.status)) staffAuthRecovery.accepted(authEpoch);
+                else if (![401, 428].includes(response.status)) staffAuthRecovery.retryFailed(authEpoch);
                 const failure = Object.assign(new Error(
                     response.status === 403
                         ? 'You do not have permission to view this record.'
@@ -278,26 +298,36 @@ export function RecordPreview({ children }: { children: ReactNode }) {
                 throw failure;
             }
             const payload = await response.json();
-            if (!payload?.result) throw new Error('This record could not be loaded.');
+            if (signal.aborted) throw new DOMException('Preview request superseded', 'AbortError');
+            if (!payload?.result) {
+                staffAuthRecovery.retryFailed(authEpoch);
+                throw new Error('This record could not be loaded.');
+            }
+            staffAuthRecovery.accepted(authEpoch);
             return payload.result;
         }).then((value: CandidateRecord | JobRecord) => {
             if (current && cache.peek(selectionKey) === value) {
                 setLoaded({ cache, key: selectionKey, value });
             }
         }).catch((reason: Error & { status?: number }) => {
+            if (!current || reason.name === 'AbortError') return;
+            if (![401, 428].includes(reason.status)) staffAuthRecovery.retryFailed(authEpoch);
             if ([401, 428].includes(reason.status)) {
-                window.dispatchEvent(new Event('staff-session-invalidated'));
+                if (!staffAuthRecovery.require(reason.status, authEpoch)
+                    && !staffAuthRecovery.getSnapshot().required) {
+                    // Another read recovered access while this older denial was
+                    // in flight. Recheck this record instead of reporting expiry.
+                    setRevision((value) => value + 1);
+                }
                 return;
             }
-            if (current && reason.name !== 'AbortError') {
-                setLoaded(null);
-                setError(reason.message);
-            }
+            setLoaded(null);
+            setError(reason.message);
         });
         // Switching or closing a preview detaches its subscriber, allowing a
         // quick reopen to share the same request without stale state writes.
         return () => { current = false; };
-    }, [selection, selectionKey, cache, revision, status]);
+    }, [selection, selectionKey, cache, revision, status, blocked]);
 
     const handleClick = (event: MouseEvent<HTMLElement>) => {
         if (event.defaultPrevented || event.button !== 0 || event.metaKey || event.ctrlKey
@@ -370,7 +400,8 @@ export function RecordPreview({ children }: { children: ReactNode }) {
                     </Button> : null}
                 </div>
                 <div className="min-h-0 flex-1 overflow-y-auto px-5 py-5">
-                    {status === 'unauthenticated' ? <p role="alert" className="text-sm text-destructive">
+                    {recovery.required ? <StaffAuthRecoveryPrompt />
+                        : status === 'unauthenticated' ? <p role="alert" className="text-sm text-destructive">
                         Your session expired. Sign in again.</p>
                         : error ? <div className="space-y-3">
                             <p role="alert" className="text-sm text-destructive">{error}</p>

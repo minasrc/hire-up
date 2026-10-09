@@ -63,7 +63,8 @@ test('shared security keeps staff coverage; schema, dependencies and unknown fil
 });
 
 test('shared layouts cover every staff browser workflow without unrelated database-only jobs', () => {
-    for (const file of ['src/app/layout.jsx', 'src/app/staff/layout.tsx', 'src/app/staff/session-provider.tsx']) {
+    for (const file of ['src/app/layout.jsx', 'src/app/staff/layout.tsx', 'src/app/staff/session-provider.tsx',
+        'src/lib/staff-auth-recovery.js', 'src/lib/staff-mutation.ts']) {
         const jobs = selected([file]);
         assert.ok(jobs.includes('browser-tests'));
         assert.ok(jobs.includes('staff-workspace'));

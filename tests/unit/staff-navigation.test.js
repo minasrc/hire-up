@@ -7,6 +7,7 @@ import * as jsxRuntime from 'react/jsx-runtime';
 import { renderToStaticMarkup } from 'react-dom/server';
 import ts from 'typescript';
 import { createStaffRefresh } from '../../src/lib/staff-refresh.js';
+import { createStaffAuthRecovery } from '../../src/lib/staff-auth-recovery.js';
 
 const { jsx } = jsxRuntime;
 
@@ -32,6 +33,11 @@ function loadShell() {
     const imports = {
         react: React,
         '@/lib/staff-refresh': { createStaffRefresh },
+        '@/lib/staff-auth-recovery': { staffAuthRecovery: createStaffAuthRecovery() },
+        './auth-recovery': {
+            useStaffAuthRecovery: () => ({ required: false }),
+            StaffAuthRecoveryPrompt: () => null,
+        },
         'react/jsx-runtime': jsxRuntime,
         'next/link': {
             default: ({ href, children, ...rest }) =>
