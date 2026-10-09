@@ -6,6 +6,7 @@ import { Download, FileText } from 'lucide-react';
 import { Button } from '@/components/staff-ui/button';
 import { PdfDocumentPreview } from './pdf-document-preview';
 import { useDocumentPreview } from './document-preview-provider';
+import { StaffAuthRecoveryPrompt } from '@/app/staff/auth-recovery';
 
 export interface CandidateDocumentRecord {
     documentId: string;
@@ -36,7 +37,7 @@ export function RealCandidateDocuments({
     const isPdf = selected?.filename.toLowerCase().endsWith('.pdf');
     const isDocx = selected?.filename.toLowerCase().endsWith('.docx');
     const selectedDocxId = isDocx ? selected.documentId : null;
-    const { value, error, checking } = useDocumentPreview(selectedDocxId, 'text');
+    const { value, error, checking, authRequired } = useDocumentPreview(selectedDocxId, 'text');
     const text = value?.kind === 'text' ? value.text : null;
 
     if (documents.length === 0) {
@@ -83,7 +84,8 @@ export function RealCandidateDocuments({
             {isPdf ? <PdfDocumentPreview key={selected.documentId}
                 documentId={selected.documentId} filename={selected.filename} />
                 : isDocx ? <div className="max-h-[min(70vh,720px)] overflow-auto px-4 py-5">
-                    {error ? <p role="alert" className="text-sm text-destructive">{error}</p>
+                    {authRequired ? <StaffAuthRecoveryPrompt />
+                        : error ? <p role="alert" className="text-sm text-destructive">{error}</p>
                         : text === null ? <p role="status" className="text-sm text-muted-foreground">
                             {checking ? 'Checking document access…' : 'Loading document…'}</p>
                             : <pre className="whitespace-pre-wrap break-words font-sans text-sm leading-6">

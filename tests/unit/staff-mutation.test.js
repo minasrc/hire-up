@@ -3,6 +3,7 @@ import { readFileSync } from 'node:fs';
 import test from 'node:test';
 import { runInNewContext } from 'node:vm';
 import ts from 'typescript';
+import { createStaffAuthRecovery } from '../../src/lib/staff-auth-recovery.js';
 
 const load = (respond) => {
     const exports = {};
@@ -18,6 +19,7 @@ const load = (respond) => {
         },
     ).outputText, {
         exports,
+        require: () => ({ staffAuthRecovery: createStaffAuthRecovery((name, detail) => dispatched.push(new CustomEvent(name, { detail }))) }),
         fetch: respond,
         window: { dispatchEvent: (event) => dispatched.push(event) },
         Event,

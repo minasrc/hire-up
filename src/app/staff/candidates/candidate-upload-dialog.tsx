@@ -11,6 +11,8 @@ import { Label } from '@/components/staff-ui/label';
 import { CV_ACCEPT_ATTRIBUTE, validateCvFileMetadata } from '@/lib/application';
 import { isUuid } from '@/lib/candidate-profile-contracts';
 import type { CandidateProfileOptions } from './candidate-profile-dialog';
+import { staffAuthRecovery } from '@/lib/staff-auth-recovery';
+import { StaffAuthRecoveryPrompt, useStaffAuthRecovery } from '../auth-recovery';
 
 export function CandidateUploadDialog({ options, onCreated }: {
     options: CandidateProfileOptions;
@@ -28,6 +30,7 @@ function UploadForm({ options, onCreated, onClose }: {
     onCreated: (candidateId: string) => void;
     onClose: () => void;
 }) {
+    const recovery = useStaffAuthRecovery();
     const [draft, setDraft] = useState({ firstName: '', lastName: '', primaryEmail: '', location: '', headline: '', compensationPreference: '', professionalUrl: '', professionalSummary: '', ownerMembershipId: options.currentMembershipId });
     const [secondary, setSecondary] = useState<{ id: string; value: string }[]>([]);
     const [file, setFile] = useState<File | null>(null);
@@ -56,6 +59,7 @@ function UploadForm({ options, onCreated, onClose }: {
         if (!result.ok && input.current) input.current.value = '';
     };
     const submit = async (event: FormEvent<HTMLFormElement>) => {
+        const authEpoch = staffAuthRecovery.requestEpoch();
         event.preventDefault();
         if (busy.current) return;
         setError(''); setDuplicate(null);
@@ -82,6 +86,7 @@ function UploadForm({ options, onCreated, onClose }: {
                 return;
             }
             if (!response.ok || payload?.ok !== true || !isUuid(payload?.result?.candidateId)) {
+                staffAuthRecovery.require(response.status, authEpoch, 'save');
                 const details = payload?.fields && typeof payload.fields === 'object'
                     ? Object.values(payload.fields).filter(value => typeof value === 'string').join(' ') : '';
                 setError(response.status === 401 || response.status === 428 ? 'Your session expired. Sign in again; your draft is still here.'
@@ -97,6 +102,7 @@ function UploadForm({ options, onCreated, onClose }: {
     return <Dialog open onOpenChange={next => { if (!next) close(); }}>
         <DialogContent className="max-h-[90vh] overflow-y-auto sm:max-w-2xl">
             <DialogHeader><DialogTitle>Add candidate</DialogTitle><DialogDescription>Enter their name, primary email and CV. Other details are optional.</DialogDescription></DialogHeader>
+            {recovery.required ? <StaffAuthRecoveryPrompt /> : null}
             <form onSubmit={submit} className="flex flex-col gap-5">
                 <fieldset disabled={pending} className="m-0 flex min-w-0 flex-col gap-5 border-0 p-0">
                     <div className="grid gap-4 sm:grid-cols-2">

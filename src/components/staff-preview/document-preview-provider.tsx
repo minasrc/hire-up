@@ -4,6 +4,8 @@ import { createContext, useContext, useEffect, useMemo, useState, useSyncExterna
 import { useSession } from 'next-auth/react';
 import type { PDFDocumentProxy } from 'pdfjs-dist';
 import { createDocumentPreviewCache } from '@/lib/staff-document-preview-cache';
+import { staffAuthRecovery } from '@/lib/staff-auth-recovery';
+import { useStaffAuthRecovery } from '@/app/staff/auth-recovery';
 
 export type PdfPreviewValue = { kind: 'pdf'; pdf: PDFDocumentProxy;
     getView: () => { page: number; zoom: number };
@@ -26,12 +28,14 @@ export function DocumentPreviewProvider({ scope, children }: { scope: string; ch
         window.addEventListener('staff-workspace-updated', clear);
         window.addEventListener('staff-session-invalidated', clear);
         window.addEventListener('staff-auth-required', clear);
+        window.addEventListener('staff-auth-retry', revalidate);
         return () => {
             window.removeEventListener('focus', revalidate);
             document.removeEventListener('visibilitychange', revalidate);
             window.removeEventListener('staff-workspace-updated', clear);
             window.removeEventListener('staff-session-invalidated', clear);
             window.removeEventListener('staff-auth-required', clear);
+            window.removeEventListener('staff-auth-retry', revalidate);
             cache.clear();
         };
     }, [cache]);
@@ -39,16 +43,28 @@ export function DocumentPreviewProvider({ scope, children }: { scope: string; ch
 }
 
 async function loadDocument(documentId: string, view: 'bytes' | 'text', previous: PreviewResource | undefined, signal: AbortSignal): Promise<PreviewResource> {
+    const authEpoch = staffAuthRecovery.requestEpoch();
     const response = await fetch(`/api/staff/documents/${documentId}?view=${view}`, {
         signal, cache: 'no-store',
         headers: previous?.version ? { 'if-none-match': previous.version } : {},
     });
-    if (response.status === 304 && previous) return previous;
-    if (!response.ok) throw Object.assign(new Error(
-        [401, 428].includes(response.status) ? 'Your session expired. Sign in again.'
-            : response.status === 403 ? 'You do not have permission to view this document.'
+    if (signal.aborted) throw new DOMException('Preview invalidated', 'AbortError');
+    if ([401, 428].includes(response.status)) {
+        const reported = staffAuthRecovery.require(response.status, authEpoch);
+        throw Object.assign(new DOMException('Preview access must be checked again', 'AbortError'), {
+            retryAuth: !reported && !staffAuthRecovery.getSnapshot().required,
+        });
+    }
+    if (response.status === 304 && previous) { staffAuthRecovery.accepted(authEpoch); return previous; }
+    if (!response.ok) {
+        if ([403, 404].includes(response.status)) staffAuthRecovery.accepted(authEpoch);
+        else staffAuthRecovery.retryFailed(authEpoch);
+        throw Object.assign(new Error(
+            response.status === 403 ? 'You do not have permission to view this document.'
                 : 'This document could not be previewed.',
-    ), { status: response.status });
+        ), { status: response.status });
+    }
+    staffAuthRecovery.accepted(authEpoch);
     const version = response.headers.get('etag');
     if (view === 'text') {
         const payload = await response.json();
@@ -83,6 +99,8 @@ export function useDocumentPreview(documentId: string | null, view: 'bytes' | 't
     const cache = useContext(DocumentContext);
     if (!cache) throw new Error('Document previews require an authenticated workspace provider.');
     const { status } = useSession();
+    const recovery = useStaffAuthRecovery();
+    const blocked = recovery.required && recovery.phase !== 'retrying';
     const epoch = useSyncExternalStore(cache.subscribe, cache.getEpoch, cache.getEpoch);
     const key = `${documentId}:${view}`;
     // A -> another view -> A is a new activation, even when old state still
@@ -91,21 +109,27 @@ export function useDocumentPreview(documentId: string | null, view: 'bytes' | 't
     const [loaded, setLoaded] = useState<{ activation: typeof activation; value: DocumentValue } | null>(null);
     const [failure, setFailure] = useState<{ activation: typeof activation; error: string } | null>(null);
     useEffect(() => {
-        if (!documentId || status !== 'authenticated' || document.visibilityState !== 'visible') return;
+        if (!documentId || blocked || status !== 'authenticated' || document.visibilityState !== 'visible') return;
         let current = true;
+        const authEpoch = staffAuthRecovery.requestEpoch();
         let release: (() => void) | undefined;
         cache.acquire(key, (previous, signal) => loadDocument(documentId, view, previous, signal)).then((lease) => {
             if (!current) { lease.release(); return; }
             release = lease.release;
             setLoaded({ activation, value: lease.value });
         }).catch((reason) => {
-            if (current && reason.name !== 'AbortError') setFailure({ activation, error: reason.message });
+            if (current && reason.retryAuth) { cache.revalidate(); return; }
+            if (current && reason.name !== 'AbortError') {
+                staffAuthRecovery.retryFailed(authEpoch);
+                setFailure({ activation, error: reason.message });
+            }
         });
         return () => { current = false; release?.(); };
-    }, [activation, cache, key, documentId, view, status]);
+    }, [activation, cache, key, documentId, view, status, blocked]);
     return {
-        value: status === 'authenticated' && loaded?.activation === activation ? loaded.value : null,
+        value: !recovery.required && status === 'authenticated' && loaded?.activation === activation ? loaded.value : null,
         error: failure?.activation === activation ? failure.error : '',
         checking: cache.has(key),
+        authRequired: recovery.required,
     };
 }

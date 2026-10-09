@@ -1,6 +1,7 @@
 'use client';
 
 import { createStaffRefresh } from '@/lib/staff-refresh';
+import { staffAuthRecovery } from '@/lib/staff-auth-recovery';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { signOut } from 'next-auth/react';
@@ -306,6 +307,9 @@ export function StaffShell({
     }
 
     const refreshSummary = useCallback(async () => {
+        const recovery = staffAuthRecovery.getSnapshot();
+        if (recovery.required && recovery.phase !== 'retrying') return;
+        const authEpoch = staffAuthRecovery.requestEpoch();
         const request = ++requestRef.current;
         abortRef.current?.abort();
         const controller = new AbortController();
@@ -317,33 +321,41 @@ export function StaffShell({
                 signal: controller.signal,
             });
             if (stale()) return;
+            if ([401, 428].includes(response.status)) {
+                if (!staffAuthRecovery.require(response.status, authEpoch)
+                    && !staffAuthRecovery.getSnapshot().required) summaryRefreshRef.current?.schedule();
+                return;
+            }
             if (response.ok) {
                 const payload = await response.json().catch(() => null);
                 if (stale()) return;
                 const next = (payload?.result ?? null) as StaffWorkspaceSummary | null;
+                if (next) {
+                    staffAuthRecovery.accepted(authEpoch);
+                    invalidatedRef.current = false;
+                }
                 setSummary(next);
                 if (next) {
                     setNavCaps(next.capabilities);
                     setLoadError(null);
                 } else {
+                    staffAuthRecovery.retryFailed(authEpoch);
                     setLoadError('unavailable');
                 }
                 return;
             }
             setSummary(null);
-            if (
-                response.status === 401
-                || response.status === 403
-                || response.status === 428
-            ) {
+            if (response.status === 403) {
+                staffAuthRecovery.accepted(authEpoch);
                 invalidatedRef.current = true;
                 setLoadError('denied');
-                window.dispatchEvent(new Event('staff-session-invalidated'));
             } else {
+                staffAuthRecovery.retryFailed(authEpoch);
                 setLoadError('unavailable');
             }
         } catch {
             if (stale()) return;
+            staffAuthRecovery.retryFailed(authEpoch);
             setSummary(null);
             setLoadError('unavailable');
         } finally {
@@ -364,14 +376,25 @@ export function StaffShell({
         };
         const interval = window.setInterval(onFocus, 60_000);
         const onUpdated = () => refresh.schedule();
+        const authLost = () => {
+            requestRef.current++;
+            abortRef.current?.abort();
+            setSummary(null);
+            invalidatedRef.current = true;
+            setLoadError('denied');
+        };
         window.addEventListener('focus', onFocus);
         window.addEventListener('staff-workspace-updated', onUpdated);
+        window.addEventListener('staff-session-invalidated', authLost);
+        window.addEventListener('staff-auth-retry', onUpdated);
         return () => {
             refresh.dispose();
             summaryRefreshRef.current = null;
             window.clearInterval(interval);
             window.removeEventListener('focus', onFocus);
             window.removeEventListener('staff-workspace-updated', onUpdated);
+            window.removeEventListener('staff-session-invalidated', authLost);
+            window.removeEventListener('staff-auth-retry', onUpdated);
         };
     }, [refreshSummary]);
 

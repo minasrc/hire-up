@@ -26,6 +26,8 @@ import {
 import { Tabs, TabsList, TabsTrigger } from '@/components/staff-ui/tabs';
 import { staffMutation } from '@/lib/staff-mutation';
 import { taskCompletionView } from '@/lib/staff-refresh';
+import { staffAuthRecovery } from '@/lib/staff-auth-recovery';
+import { StaffAuthRecoveryPrompt, useStaffAuthRecovery } from './auth-recovery';
 import type {
     StaffTask,
     StaffTaskCategory,
@@ -42,6 +44,8 @@ const CATEGORIES: { value: 'all' | StaffTaskCategory; label: string }[] = [
 const PAGE_SIZE = 20;
 
 export function StaffTodoList({ writeEnabled }: { writeEnabled: boolean }) {
+    const recovery = useStaffAuthRecovery();
+    const [authRevision, setAuthRevision] = useState(0);
     const [category, setCategory] = useState<'all' | StaffTaskCategory>('all');
     const [showCompleted, setShowCompleted] = useState(false);
     const [data, setData] = useState<StaffTaskListResult | null>(null);
@@ -66,6 +70,9 @@ export function StaffTodoList({ writeEnabled }: { writeEnabled: boolean }) {
         offset = 0,
         { append = false, clear = true }: { append?: boolean; clear?: boolean } = {},
     ) => {
+        const access = staffAuthRecovery.getSnapshot();
+        if (access.required && access.phase !== 'retrying') return;
+        const authEpoch = staffAuthRecovery.requestEpoch();
         if (append && pagingRef.current) return;
         if (append) pagingRef.current = true;
         const request = ++requestRef.current;
@@ -89,18 +96,21 @@ export function StaffTodoList({ writeEnabled }: { writeEnabled: boolean }) {
             });
             if (stale()) return;
             if (response.status === 403) {
+                staffAuthRecovery.accepted(authEpoch);
                 setDenied(true);
                 setSessionLost(false);
                 setData(null);
                 return;
             }
             if (response.status === 401 || response.status === 428) {
-                setDenied(false);
-                setSessionLost(true);
-                setData(null);
+                if (!staffAuthRecovery.require(response.status, authEpoch)
+                    && !staffAuthRecovery.getSnapshot().required) {
+                    setAuthRevision(value => value + 1);
+                }
                 return;
             }
             if (!response.ok) {
+                staffAuthRecovery.retryFailed(authEpoch);
                 setLoadError('Could not load tasks.');
                 return;
             }
@@ -108,9 +118,11 @@ export function StaffTodoList({ writeEnabled }: { writeEnabled: boolean }) {
             if (stale()) return;
             const result = payload?.result as StaffTaskListResult | undefined;
             if (!result) {
+                staffAuthRecovery.retryFailed(authEpoch);
                 setLoadError('Could not load tasks.');
                 return;
             }
+            staffAuthRecovery.accepted(authEpoch);
             setDenied(false);
             setSessionLost(false);
             setData((previous) => {
@@ -126,6 +138,7 @@ export function StaffTodoList({ writeEnabled }: { writeEnabled: boolean }) {
             });
         } catch {
             if (stale()) return;
+            staffAuthRecovery.retryFailed(authEpoch);
             setLoadError('Could not load tasks.');
         } finally {
             if (!stale()) setLoading(false);
@@ -140,6 +153,24 @@ export function StaffTodoList({ writeEnabled }: { writeEnabled: boolean }) {
 
     useEffect(() => {
         void loadTasks(0);
+    }, [loadTasks, authRevision]);
+
+    useEffect(() => {
+        const lost = () => {
+            requestRef.current++;
+            abortRef.current?.abort();
+            pagingRef.current = false;
+            setData(null);
+            setLoading(false);
+            setSessionLost(true);
+        };
+        const retry = () => { void loadTasks(0); };
+        window.addEventListener('staff-session-invalidated', lost);
+        window.addEventListener('staff-auth-retry', retry);
+        return () => {
+            window.removeEventListener('staff-session-invalidated', lost);
+            window.removeEventListener('staff-auth-retry', retry);
+        };
     }, [loadTasks]);
 
     const toggleTask = async (task: StaffTask, completed: boolean) => {
@@ -258,7 +289,7 @@ export function StaffTodoList({ writeEnabled }: { writeEnabled: boolean }) {
                 </div>
             </CardHeader>
             <CardContent className="flex flex-col gap-4">
-                {denied ? (
+                {recovery.required ? <StaffAuthRecoveryPrompt /> : denied ? (
                     <p className="text-sm text-muted-foreground">
                         Task tracking requires the collaboration.read permission.
                     </p>
@@ -411,6 +442,7 @@ export function StaffTodoList({ writeEnabled }: { writeEnabled: boolean }) {
                             A personal to-do item — only visible to you.
                         </DialogDescription>
                     </DialogHeader>
+                    {recovery.required ? <StaffAuthRecoveryPrompt /> : null}
                     <form
                         className="flex flex-col gap-4"
                         onSubmit={(event) => {

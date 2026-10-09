@@ -211,10 +211,15 @@ test('staff previews records in place and opens CV content', async (t) => {
             await route.fulfill({ response, json: payload });
         });
         let textTransfers = 0, pdfTransfers = 0, validations = 0, denyPdf = false;
+        let documentAuthStatus = 0;
         let holdText = false, resumeText;
         const versions = new Map();
         const validate = async (route) => {
             validations++;
+            if (documentAuthStatus) {
+                await route.fulfill({ status: documentAuthStatus, json: { error: 'AUTH_REQUIRED' } });
+                return null;
+            }
             if (denyPdf && route.request().url().endsWith('?view=bytes')) {
                 await route.fulfill({ status: 403, json: { error: 'FORBIDDEN' } });
                 return null;
@@ -304,13 +309,31 @@ test('staff previews records in place and opens CV content', async (t) => {
         await expect(documentPreview.getByText('100%', { exact: true })).toBeVisible();
         await expect(documentPreview.getByText(syntheticCvText, { exact: true })).toBeAttached();
         assert.equal(pdfTransfers, 3); assert.equal(await page.evaluate(() => window.__pdfParses), 3);
+        for (const [status, filename, message] of [
+            [428, 'Second.pdf', 'Authenticator verification is required'],
+            [401, 'Synthetic.docx', 'Sign in again to continue'],
+        ]) {
+            documentAuthStatus = status;
+            await documentPreview.getByRole('button', { name: filename, exact: true }).click();
+            const expired = page.getByRole('dialog', { name: 'Candidate preview' });
+            await expect(expired.getByRole('alert')).toContainText(message);
+            await expect(expired.locator('canvas')).toHaveCount(0);
+            await expect(expired.getByText('Synthetic extracted resume text')).toHaveCount(0);
+            documentAuthStatus = 0;
+            await expired.getByRole('button', { name: 'Retry access' }).click();
+            await expect(documentPreview).toBeVisible();
+            await expect(documentPreview.getByText('Synthetic extracted resume text')).toBeVisible();
+            await documentPreview.getByRole('button', { name: 'Synthetic.pdf', exact: true }).click();
+            await expect(documentPreview.getByText(syntheticCvText, { exact: true })).toBeAttached();
+        }
+        const transfersBeforeDenial = pdfTransfers;
         denyPdf = true;
         await documentPreview.getByRole('button', { name: 'Synthetic.docx', exact: true }).click();
         await expect(documentPreview.getByText('Synthetic extracted resume text')).toBeVisible();
         await documentPreview.getByRole('button', { name: 'Synthetic.pdf', exact: true }).click();
         await expect(documentPreview.getByRole('alert')).toHaveText('You do not have permission to view this document.');
         await expect(documentPreview.locator('canvas')).toHaveCount(0);
-        assert.equal(pdfTransfers, 3, 'denial never falls back to previously authorized bytes');
+        assert.equal(pdfTransfers, transfersBeforeDenial, 'denial never falls back to previously authorized bytes');
         await documentPreview.getByRole('button', { name: 'Close' }).click();
         await page.unroute('**/api/staff/candidates/*');
         await page.unroute('**/api/staff/documents/*?view=text');
@@ -334,6 +357,112 @@ test('staff previews records in place and opens CV content', async (t) => {
         await page.evaluate(() => window.dispatchEvent(new Event('staff-session-invalidated')));
         await expect(page.getByRole('dialog')).toHaveCount(0);
 
+        const runRecoveryCase = async (name, body) => {
+            let failure;
+            await t.test(name, async () => {
+                try { await body(); } catch (error) { failure = error; throw error; }
+            });
+            if (failure) throw failure;
+        };
+        for (const [cookieName, label, message, recoveryHref] of [
+            [STAFF_MFA_COOKIE, 'expired MFA', 'Authenticator verification is required', '/staff/mfa/verify'],
+            ['next-auth.session-token', 'expired sign-in', 'Sign in again to continue', '/staff/sign-in'],
+        ]) {
+            await runRecoveryCase(`${label} keeps the preview open and recovers with fresh access`, async () => {
+                await context.addCookies([{ name: cookieName, value: '', url: baseURL, expires: 1 }]);
+                await page.evaluate(() => window.dispatchEvent(new Event('staff-workspace-updated')));
+                await jobLink.click();
+                const expired = page.getByRole('dialog', { name: 'Job preview' });
+                await expect(expired).toBeVisible();
+                await expect(expired.getByRole('alert')).toContainText(message);
+                await expect(expired.getByRole('link', { name: label === 'expired MFA' ? 'Verify authenticator' : 'Sign in again' }))
+                    .toHaveAttribute('href', recoveryHref);
+                await expect(expired.getByRole('status')).toHaveCount(0);
+                await context.addCookies([
+                    { name: 'next-auth.session-token', value: token, url: baseURL },
+                    { name: STAFF_MFA_COOKIE, value: proof, url: baseURL },
+                ]);
+                await expired.getByRole('button', { name: 'Retry access' }).click();
+                await expect(jobPreview).toBeVisible();
+                await expect(page.getByRole('complementary', { name: 'Access recovery' })).toHaveCount(0);
+                await jobPreview.getByRole('button', { name: 'Close' }).click();
+            });
+        }
+
+        await runRecoveryCase('record permission denial stays separate from authentication recovery', async () => {
+            await page.route('**/api/staff/jobs/*', route => route.fulfill({
+                status: 403, contentType: 'application/json', body: JSON.stringify({ error: 'forbidden' }),
+            }));
+            await page.evaluate(() => window.dispatchEvent(new Event('staff-workspace-updated')));
+            await jobLink.click();
+            const denied = page.getByRole('dialog', { name: 'Job preview' });
+            await expect(denied.getByRole('alert')).toHaveText('You do not have permission to view this record.');
+            await expect(denied.getByRole('button', { name: 'Retry access' })).toHaveCount(0);
+            await expect(page.getByRole('complementary', { name: 'Access recovery' })).toHaveCount(0);
+            await denied.getByRole('button', { name: 'Close' }).click();
+            await page.unroute('**/api/staff/jobs/*');
+        });
+
+        await runRecoveryCase('a delayed old denial cannot close a newer authorized preview', async () => {
+            let release;
+            const hold = new Promise(resolve => { release = resolve; });
+            let sawOld;
+            const started = new Promise(resolve => { sawOld = resolve; });
+            let oldDone;
+            const settled = new Promise(resolve => { oldDone = resolve; });
+            let requests = 0;
+            await page.route('**/api/staff/jobs/*', async route => {
+                if (++requests !== 1) { await route.continue(); return; }
+                sawOld();
+                await hold;
+                await route.fulfill({ status: 428, contentType: 'application/json', body: '{}' }).catch(() => {});
+                oldDone();
+            });
+            await page.evaluate(() => window.dispatchEvent(new Event('staff-workspace-updated')));
+            await jobLink.click();
+            await started;
+            await page.evaluate(() => window.dispatchEvent(new Event('focus')));
+            await expect(jobPreview).toBeVisible();
+            release();
+            await settled;
+            await expect(jobPreview).toBeVisible();
+            await expect(page.getByRole('complementary', { name: 'Access recovery' })).toHaveCount(0);
+            await jobPreview.getByRole('button', { name: 'Close' }).click();
+            await page.unroute('**/api/staff/jobs/*');
+        });
+
+        await runRecoveryCase('recovery preserves unsaved fields without replaying a failed save', async () => {
+            await page.goto(`${baseURL}/staff/clients/new`, { waitUntil: 'domcontentloaded' });
+            await page.waitForLoadState('networkidle');
+            // Confirm this form has hydrated before testing its submit handler.
+            await expect(async () => {
+                await page.getByRole('button', { name: 'Add social link', exact: true }).click();
+                await expect(page.getByRole('button', { name: 'Remove social link 1' })).toBeVisible();
+            }).toPass({ timeout: 30_000 });
+            await page.getByRole('button', { name: 'Remove social link 1' }).click();
+            const name = page.getByRole('textbox', { name: 'Client name' });
+            await name.fill('Unsaved recovery draft');
+            await page.getByRole('textbox', { name: 'Contact name' }).fill('Synthetic contact');
+            await page.getByRole('textbox', { name: 'Contact email' }).fill('contact@synthetic.test');
+            let writes = 0;
+            await page.route('**/api/staff/clients', route => {
+                if (route.request().method() !== 'POST') return route.continue();
+                writes++;
+                return route.fulfill({ status: 401, contentType: 'application/json', body: '{}' });
+            });
+            await page.getByRole('button', { name: 'Create client', exact: true }).click();
+            await expect(async () => assert.equal(writes, 1,
+                await page.getByRole('main').innerText())).toPass({ timeout: 5000 });
+            const notice = page.getByRole('complementary', { name: 'Access recovery' });
+            await expect(notice).toBeVisible();
+            await expect(notice.getByRole('alert')).toContainText('Your changes have not been saved.');
+            await expect(name).toHaveValue('Unsaved recovery draft');
+            await notice.getByRole('button', { name: 'Retry access' }).click();
+            await expect(notice).toHaveCount(0);
+            await expect(name).toHaveValue('Unsaved recovery draft');
+            assert.equal(writes, 1, 'verification retries reads, never the failed write');
+            await page.unroute('**/api/staff/clients');
+        });
 
         await page.setViewportSize({ width: 390, height: 844 });
         await page.goto(`${baseURL}/staff/candidates`, { waitUntil: 'domcontentloaded' });

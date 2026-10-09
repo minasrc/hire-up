@@ -6,6 +6,7 @@ import type { PDFDocumentProxy } from 'pdfjs-dist';
 
 import { Button } from '@/components/staff-ui/button';
 import { useDocumentPreview, type PdfPreviewValue } from './document-preview-provider';
+import { StaffAuthRecoveryPrompt } from '@/app/staff/auth-recovery';
 
 function PdfPage({
     pdf, number, width, zoom,
@@ -70,7 +71,8 @@ export function PdfDocumentPreview({
     documentId: string;
     filename: string;
 }) {
-    const { value, error, checking } = useDocumentPreview(documentId, 'bytes');
+    const { value, error, checking, authRequired } = useDocumentPreview(documentId, 'bytes');
+    if (authRequired) return <div className="p-4"><StaffAuthRecoveryPrompt /></div>;
     if (error) return <p role="alert" className="p-4 text-sm text-destructive">{error}</p>;
     if (value?.kind !== 'pdf') return <p role="status" className="p-4 text-sm text-muted-foreground">
         {checking ? 'Checking document access…' : 'Loading PDF…'}</p>;

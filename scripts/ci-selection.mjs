@@ -46,6 +46,9 @@ export function selectJobs(files, full = false, readFile = readRepoFile) {
                 if (createHash('sha256').update(readFile(file)).digest('hex') !== reviewed.sha256) return all();
             } catch { return all(); }
             jobs = reviewed.jobs;
+        } else if (file === 'src/lib/staff-auth-recovery.js' || file === 'src/lib/staff-mutation.ts') {
+            // Shared client recovery/mutation UI, with no server auth or SQL changes.
+            jobs = STAFF_BROWSER;
         } else if (/^tests\/support\//.test(file)
             || /^(package(?:-lock)?\.json|\.nvmrc|next\.config\.mjs|tsconfig\.json)$/.test(file)) return all();
         else if (/^src\/app\/api\/staff\/documents\//.test(file)
