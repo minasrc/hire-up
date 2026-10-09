@@ -35,9 +35,9 @@ function loadPage(path, options = {}) {
             requireStaffVerified: async () => ({ pool: {}, identity: {}, organizationId: randomUUID() }),
         },
         '@/lib/workspace.server': {
-            loadStaffWorkspace: async () => ({
-                summary: options.summary === null ? null : {
-                    capabilities: { ...capabilities, ...options.capabilities },
+            loadStaffCapabilities: async () => ({
+                capabilities: options.capabilities === null ? null : {
+                    ...capabilities, ...options.capabilities,
                 },
             }),
         },
@@ -121,7 +121,7 @@ test('client detail hides actions without their capabilities or an active client
         assert.ok(!html.includes('Add job'));
         assert.ok(html.includes('View applications'));
     }
-    const unavailable = await loadPage(detailPath, { summary: null }).render();
+    const unavailable = await loadPage(detailPath, { capabilities: null }).render();
     assert.ok(!unavailable.includes('Add job'));
     assert.ok(!unavailable.includes('View applications'));
     const noLinks = await loadPage(detailPath, { client: { ...activeClient, socialLinks: [] } }).render();
