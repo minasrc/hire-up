@@ -61,25 +61,35 @@ const outageBanner = (page) => page.getByRole('alert')
 
 test('a listing outage keeps the last cards and fails closed on open actions', async ({ page }) => {
     await mockSession(page);
-    let down = true;
+    let down = false;
     await page.route('**/api/public/jobs', (route) => (down
         ? route.fulfill(UNAVAILABLE_PAYLOAD)
         : route.fulfill({ json: { jobs: [LISTED_JOB] } })));
     await page.goto('/jobs');
-    const staticCard = cardFor(page, 'Founding Engineer');
-    await staticCard.waitFor();
+    const listedCard = cardFor(page, LISTED_JOB.title);
+    await expect(listedCard).toBeVisible();
+    await expect(outageBanner(page)).toHaveCount(0);
+
+    down = true;
+    const failedRefresh = page.waitForResponse((response) =>
+        new URL(response.url()).pathname === '/api/public/jobs' && response.status() === 503);
+    await page.evaluate(() => window.dispatchEvent(new Event('focus')));
+    await failedRefresh;
     await expect(outageBanner(page)).toBeVisible();
 
-    await applyButton(staticCard).click();
-    await expect(page.getByRole('dialog')).toHaveCount(0);
-    await staticCard.getByRole('button', { name: 'Learn more' }).click();
-    await expect(page.getByRole('dialog')).toHaveCount(0);
-    await expect(staticCard).toBeVisible();
+    for (const button of [applyButton(listedCard), listedCard.getByRole('button', { name: 'Learn more' })]) {
+        const rejected = page.waitForResponse((response) =>
+            new URL(response.url()).pathname === '/api/public/jobs' && response.status() === 503);
+        await button.click();
+        await rejected;
+        await expect(page.getByRole('dialog')).toHaveCount(0);
+        await expect(listedCard).toBeVisible();
+    }
 
     down = false;
     await outageBanner(page).getByRole('button', { name: 'Retry' }).click();
-    const listedCard = cardFor(page, 'Synthetic Listed Role');
-    await listedCard.waitFor();
+    await expect(outageBanner(page)).toHaveCount(0);
+    await expect(listedCard).toBeVisible();
     await applyButton(listedCard).click();
     await expect(page.getByRole('dialog')).toContainText('Signal Submission');
 });
