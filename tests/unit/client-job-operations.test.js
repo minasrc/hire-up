@@ -7,6 +7,7 @@ import {
     createJobDraft,
     saveClient,
     saveClientDraft,
+    saveClientWithDetails,
 } from '../../src/lib/client-job-operations.js';
 
 test('operation wrappers return structured field errors before opening a transaction', async () => {
@@ -156,4 +157,121 @@ test('createJobDraft sends the listing flag through create_job_draft_v2', async 
         !statements.some(({ text }) => text.includes('set_job_public_listing_v1')),
         'listing must be stored atomically, not through a second mutation',
     );
+});
+
+const clientFields = {
+    name: 'Synthetic Agency One',
+    contactName: 'Dana Example',
+    contactEmail: 'dana@agency-one.example',
+    telegramUsername: '@dana_ops',
+    website: 'https://agency-one.example',
+    socialLinks: [],
+    isStealth: false,
+    anonymousDescription: null,
+};
+const staffIdentity = {
+    provider: 'google',
+    issuer: 'https://accounts.google.com',
+    subject: '1002',
+};
+
+function clientSaveFixture({ allowed = true, snapshotError = null } = {}) {
+    const clientId = randomUUID();
+    const receipt = {
+        id: clientId,
+        version: '2',
+        status: 'active',
+        publicProfileVersion: '2',
+    };
+    const snapshot = {
+        ...receipt,
+        ...clientFields,
+        telegramUsername: 'dana_ops',
+    };
+    const statements = [];
+    let connects = 0;
+    let releases = 0;
+    const pool = {
+        connect: async () => {
+            connects += 1;
+            return {
+                release: () => { releases += 1; },
+                query: async (text, params) => {
+                    statements.push(text);
+                    if (text.includes('resolve_staff_principal_v1')) {
+                        return { rows: [{
+                            user_id: randomUUID(),
+                            membership_id: randomUUID(),
+                            role_id: randomUUID(),
+                        }] };
+                    }
+                    if (text.includes('has_permission_v1')) {
+                        return { rows: params[0].map(() => ({ allowed })) };
+                    }
+                    if (text.includes('save_client_v1')) {
+                        return { rows: [{ result: receipt }] };
+                    }
+                    if (text.includes('get_client_v1')) {
+                        if (snapshotError) throw snapshotError;
+                        return { rows: [{ result: snapshot }] };
+                    }
+                    return { rows: [] };
+                },
+            };
+        },
+    };
+    const input = {
+        clientId,
+        expectedVersion: '1',
+        fields: clientFields,
+        operationId: randomUUID(),
+    };
+    return {
+        clientId, connects: () => connects, input, pool, receipt,
+        releases: () => releases, snapshot, statements,
+    };
+}
+
+test('saveClientWithDetails reads a canonical snapshot before committing', async () => {
+    const fixture = clientSaveFixture();
+    const result = await saveClientWithDetails(
+        fixture.pool, staffIdentity, randomUUID(), fixture.input);
+    assert.deepEqual(result, { ...fixture.receipt, client: fixture.snapshot });
+    assert.equal(fixture.connects(), 1);
+    const save = fixture.statements.findIndex((text) => text.includes('save_client_v1'));
+    const read = fixture.statements.findIndex((text) => text.includes('get_client_v1'));
+    const commit = fixture.statements.indexOf('commit');
+    assert.ok(save < read && read < commit);
+    assert.ok(!fixture.statements.includes('rollback'));
+    assert.equal(fixture.releases(), 1);
+});
+
+test('saveClientWithDetails denies writes before save or snapshot queries', async () => {
+    const fixture = clientSaveFixture({ allowed: false });
+    await assert.rejects(
+        saveClientWithDetails(fixture.pool, staffIdentity, randomUUID(), fixture.input),
+        { code: 'FORBIDDEN' },
+    );
+    assert.ok(!fixture.statements.some((text) => text.includes('save_client_v1')));
+    assert.ok(!fixture.statements.some((text) => text.includes('get_client_v1')));
+});
+
+test('saveClientWithDetails rolls back when the canonical snapshot read fails', async () => {
+    const failure = Object.assign(new Error('snapshot failed'), { code: '08006' });
+    const fixture = clientSaveFixture({ snapshotError: failure });
+    await assert.rejects(
+        saveClientWithDetails(fixture.pool, staffIdentity, randomUUID(), fixture.input),
+        (error) => error === failure,
+    );
+    assert.ok(fixture.statements.includes('rollback'));
+    assert.ok(!fixture.statements.includes('commit'));
+    assert.equal(fixture.releases(), 1);
+});
+
+test('saveClient keeps its metadata-only result and skips the snapshot query', async () => {
+    const fixture = clientSaveFixture();
+    const result = await saveClient(fixture.pool, staffIdentity, randomUUID(), fixture.input);
+    assert.deepEqual(result, fixture.receipt);
+    assert.equal('client' in result, false);
+    assert.ok(!fixture.statements.some((text) => text.includes('get_client_v1')));
 });

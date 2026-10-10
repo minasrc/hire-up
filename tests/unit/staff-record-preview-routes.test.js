@@ -15,7 +15,7 @@ stubModule('@/lib/staff-api.server', {
     staffApiContext: 'fn', staffGateResponse: 'fn', staffErrorResponse: 'fn',
 });
 stubModule('@/lib/pipeline-operations', { getDocumentDownload: 'fn' });
-stubModule('@/lib/client-job-operations', { getJobWorkspace: 'fn', getClient: 'fn' });
+stubModule('@/lib/client-job-operations', { getJobPreview: 'fn' });
 stubModule('@supabase/supabase-js', { createClient: 'fn' });
 
 const documents = await import('../../src/app/api/staff/documents/[documentId]/route.ts');
@@ -163,18 +163,45 @@ test('an older database without a document version never approves cached reuse',
 test('job preview reads the authorized workspace and client', async () => {
     setup();
     const calls = [];
-    stubs.set('@/lib/client-job-operations:getJobWorkspace', async (_pool, _identity, _org, input) => {
-        calls.push(['job', input.jobId]);
-        return { job: { id: ID, clientId: ID, title: 'Engineer' }, draft: null, published: null };
-    });
-    stubs.set('@/lib/client-job-operations:getClient', async (_pool, _identity, _org, input) => {
-        calls.push(['client', input.clientId]);
-        return { client: { name: 'Acme' } };
+    stubs.set('@/lib/client-job-operations:getJobPreview', async (_pool, _identity, _org, input) => {
+        assert.deepEqual(input, { jobId: ID });
+        calls.push(['preview', input.jobId]);
+        return { job: { id: ID, clientId: ID, title: 'Engineer' }, draft: null, published: null,
+            client: { name: 'Acme' } };
     });
     const response = await jobs.GET(new Request(`http://localhost/api/staff/jobs/${ID}`),
         { params: Promise.resolve({ jobId: ID }) });
     assert.equal(response.status, 200);
     assert.equal(response.headers.get('cache-control'), 'private, no-store');
     assert.equal((await response.json()).result.client.name, 'Acme');
-    assert.deepEqual(calls, [['job', ID], ['client', ID]]);
+    assert.deepEqual(calls, [['preview', ID]]);
+});
+
+for (const status of [401, 428]) test(`job preview respects the ${status} staff gate before reading`, async () => {
+    setup();
+    const calls = [];
+    stubs.set('@/lib/staff-api.server:staffGateResponse', () =>
+        Response.json({ error: 'staff gate required' }, { status }));
+    stubs.set('@/lib/client-job-operations:getJobPreview', async () => { calls.push('preview'); });
+    const response = await jobs.GET(new Request(`http://localhost/api/staff/jobs/${ID}`),
+        { params: Promise.resolve({ jobId: ID }) });
+    assert.equal(response.status, status);
+    assert.deepEqual(await response.json(), { error: 'staff gate required' });
+    assert.deepEqual(calls, []);
+});
+
+for (const [code, status] of [['FORBIDDEN', 403], ['P0002', 404]]) test(`job preview maps ${code} without exposing client details`, async () => {
+    setup();
+    const error = Object.assign(new Error('Preview unavailable'), {
+        code, client: { name: 'Acme', contactEmail: 'private@example.test' },
+    });
+    stubs.set('@/lib/client-job-operations:getJobPreview', async () => { throw error; });
+    stubs.set('@/lib/staff-api.server:staffErrorResponse', (caught) => {
+        assert.equal(caught, error);
+        return Response.json({ error: caught.message }, { status });
+    });
+    const response = await jobs.GET(new Request(`http://localhost/api/staff/jobs/${ID}`),
+        { params: Promise.resolve({ jobId: ID }) });
+    assert.equal(response.status, status);
+    assert.deepEqual(await response.json(), { error: 'Preview unavailable' });
 });
