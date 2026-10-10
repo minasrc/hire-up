@@ -16,6 +16,7 @@ import {
     Sheet, SheetContent, SheetDescription, SheetTitle,
 } from '@/components/staff-ui/sheet';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/staff-ui/tabs';
+import { StaffDate } from './staff-date';
 
 // Document preview controls are only needed when a candidate preview opens.
 const RealCandidateDocuments = dynamic(
@@ -82,9 +83,7 @@ interface JobRecord {
     } | null;
 }
 
-const date = (value: string) => new Date(value).toLocaleDateString('en-GB', {
-    day: 'numeric', month: 'short', year: 'numeric', timeZone: 'UTC',
-});
+const date = (value: string) => <StaffDate value={value} />;
 const jobFieldLabels: Record<string, string> = {
     full_time: 'Full-time', part_time: 'Part-time', contract: 'Contract',
     internship: 'Internship', onsite: 'On-site', hybrid: 'Hybrid', remote: 'Remote',
@@ -156,7 +155,7 @@ function CandidatePreview({ record }: { record: CandidateRecord }) {
                     className="border-b border-border pb-3 text-sm">
                     <p className="whitespace-pre-wrap">{note.body}</p>
                     <p className="mt-1 text-xs text-muted-foreground">
-                        {note.authorName ?? 'Staff'} · {date(note.createdAt)}</p>
+                        {note.authorName ?? 'Staff'} · <StaffDate value={note.createdAt} kind="timestamp" /></p>
                 </div>) : <p className="text-sm text-muted-foreground">No notes yet.</p>}
         </TabsContent>
     </Tabs>;

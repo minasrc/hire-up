@@ -16,7 +16,7 @@ stubModule('@/lib/staff-preferences', { saveStaffTimeZone: 'fn' });
 stubModule('@/lib/staff-request-origin', { staffRequestOriginAllowed: 'fn' });
 
 const route = await import('../../src/app/api/staff/preferences/time-zone/route.ts');
-const verified = { status: 'ok', pool: {}, identity: {}, organizationId: 'org' };
+const verified = { status: 'ok', pool: {}, identity: {}, organizationId: 'org', principal: { user_id: 'account-a' } };
 
 function setup({ context = verified, allowed = true, failure = null } = {}) {
     const calls = [];
@@ -57,6 +57,22 @@ test('time zone route exposes only POST and returns the preference DTO privately
     });
     assert.deepEqual(calls[0], [verified.pool, verified.identity, verified.organizationId,
         { timeZone: 'Europe/Madrid', expectedVersion: '1' }]);
+});
+
+test('account mismatch is a private conflict and never selects another actor', async () => {
+    const calls = setup();
+    const mismatched = request();
+    mismatched.headers.set('x-staff-account-id', 'account-b');
+    let response = await route.POST(mismatched);
+    assert.equal(response.status, 409);
+    privateHeader(response);
+    assert.deepEqual(await response.json(), { error: 'account changed', code: 'ACCOUNT_CHANGED' });
+    assert.deepEqual(calls, []);
+    const matching = request();
+    matching.headers.set('x-staff-account-id', 'account-a');
+    response = await route.POST(matching);
+    assert.equal(response.status, 200);
+    assert.equal(calls.length, 1);
 });
 
 test('cross-origin and gated requests never save and remain private', async () => {

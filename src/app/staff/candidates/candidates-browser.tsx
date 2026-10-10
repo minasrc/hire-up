@@ -21,6 +21,7 @@ import {
 import { candidateDirectoryQuery } from '@/lib/staff-directory-query';
 import { useDirectoryNavigation } from '../use-directory-navigation';
 import { CandidateUploadDialog } from './candidate-upload-dialog';
+import { StaffDate } from '../staff-date';
 
 export interface CandidateRow {
     candidateId: string;
@@ -34,10 +35,7 @@ export interface CandidateRow {
     location?: string | null;
 }
 
-const formatDate = (iso: string) =>
-    new Date(iso).toLocaleDateString('en-GB', {
-        day: 'numeric', month: 'short', year: 'numeric',
-    });
+const formatDate = (iso: string) => <StaffDate value={iso} />;
 
 const parseFilters = (params: { get(name: string): string | null }) =>
     candidateDirectoryQuery({ q: params.get('q'), page: params.get('page') });

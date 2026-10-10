@@ -32,6 +32,7 @@ import type { StaffWorkspaceNotifications } from '@/lib/workspace-types';
 import { cn } from '@/lib/utils';
 import { RecordPreview } from './record-preview';
 import { StaffShellSummaryContext } from './staff-shell-summary';
+import { StaffTimeZoneBanner } from './time-zone-settings';
 
 const NAV_ITEMS = [
     { href: '/staff', label: 'Overview', icon: LayoutDashboard, exact: true },
@@ -58,6 +59,7 @@ const SECTION_LABELS: Record<string, string> = {
     jobs: 'Jobs',
     clients: 'Clients',
     members: 'Members',
+    settings: 'Account settings',
     'telegram-intake': 'Telegram intake',
 };
 
@@ -442,6 +444,10 @@ export function StaffShell({
                         </span>
                     </div>
                 </div>
+                <Link href="/staff/settings" onClick={onNavigate}
+                    className="px-1 text-left text-[11px] font-medium text-muted-foreground hover:text-foreground hover:underline">
+                    Account settings
+                </Link>
                 <Link href="/staff/mfa/backup-codes" onClick={onNavigate}
                     className="px-1 text-left text-[11px] font-medium text-muted-foreground hover:text-foreground hover:underline">
                     Backup codes
@@ -569,6 +575,7 @@ export function StaffShell({
                         />
                     </div>
                 </header>
+                <StaffTimeZoneBanner />
 
                 <RecordPreview key={pathname}>{children}</RecordPreview>
             </div>

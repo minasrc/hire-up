@@ -10,10 +10,11 @@ import { Card } from '@/components/staff-ui/card';
 import { ExtractionError, extractionAction, extractionEndpoint, extractionRequest } from './extraction-api';
 import { BatchSource, type SourceRetention } from './batch-source';
 import { extractionGuidance, extractionStatus } from './extraction-model';
+import { StaffDate } from '../../staff-date';
 
 type Job = { id: string; chatId: string; chatTitle: string; status: string; messageCount: number; attempts: number; errorCode: string | null; availableAt: string; createdAt: string; completedAt: string | null; reviewedAt: string | null; draftIds: string[]; extractionEnabled: boolean; sourceRetention: SourceRetention };
 type Snapshot = { counts: { queued: number; leased: number; waiting: number; failed: number; completed: number; needsReview: number; contextKept: number; releasePending: number; purged: number }; jobs: Job[]; nextAfter: string | null };
-const dateLabel = (date: string) => new Date(date).toLocaleString();
+const dateLabel = (date: string) => <StaffDate value={date} kind="timestamp" />;
 
 export function ExtractionQueueBrowser() {
     const [snapshot, setSnapshot] = useState<Snapshot | null>(null);

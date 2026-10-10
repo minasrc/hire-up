@@ -7,6 +7,7 @@ import { Button } from '@/components/staff-ui/button';
 import { PdfDocumentPreview } from './pdf-document-preview';
 import { useDocumentPreview } from './document-preview-provider';
 import { StaffAuthRecoveryPrompt } from '@/app/staff/auth-recovery';
+import { StaffDate } from '@/app/staff/staff-date';
 
 export interface CandidateDocumentRecord {
     documentId: string;
@@ -62,9 +63,7 @@ export function RealCandidateDocuments({
                         {document.filename}
                     </span>}
                     <p className="text-xs text-muted-foreground">
-                        {new Date(document.receivedAt).toLocaleDateString('en-GB', {
-                            day: 'numeric', month: 'short', year: 'numeric', timeZone: 'UTC',
-                        })} · {Math.max(1, Math.round(document.sizeBytes / 1024))} KB
+                        <StaffDate value={document.receivedAt} /> · {Math.max(1, Math.round(document.sizeBytes / 1024))} KB
                         {document.scanState !== 'clean' ? ` · Scan: ${document.scanState}` : ''}
                     </p>
                 </div>

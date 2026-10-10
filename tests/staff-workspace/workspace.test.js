@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
 import { createServer } from 'node:http';
 import { saveCandidateProfile } from '../../src/lib/candidate-profile-operations.js';
+import { formatStaffDate } from '../../src/lib/staff-dates.js';
 import { mkdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -77,6 +78,7 @@ const MIGRATIONS = [
     '20261006090000_staff_totp_stable_enrollment.sql',
     '20261007090000_staff_mfa_admin_recovery.sql',
     '20261010090000_staff_notifications.sql',
+    '20261011090000_staff_time_zone.sql',
 ];
 
 const NEXTAUTH_SECRET = 'synthetic-workspace-secret';
@@ -2640,6 +2642,109 @@ test('staff workspace end-to-end in a real browser', async (t) => {
         );
         await expect(page.getByRole('dialog')
             .locator('#edit-candidate-headline')).toHaveValue('Second');
+    });
+
+    await runCase('staff time zone settings persist only after explicit acceptance', async () => {
+        const context = await browser.newContext({ viewport: { width: 390, height: 844 }, timezoneId: 'America/New_York' });
+        const other = await browser.newContext({ timezoneId: 'America/New_York' });
+        let savedVersion = null;
+        let settings;
+        // Chromium accepts Secure cookies on trustworthy loopback URLs, while
+        // Playwright's HTTP cookie jar does not. Exercise these requests through
+        // the browser so production session renewal is tested without cookie changes.
+        const requestAsBrowser = (path, { method = 'GET', headers = {}, data } = {}) =>
+            settings.evaluate(async ({ path, method, headers, data }) => {
+                const response = await fetch(path, {
+                    method,
+                    headers: { ...(data === undefined ? {} : { 'content-type': 'application/json' }), ...headers },
+                    ...(data === undefined ? {} : { body: JSON.stringify(data) }),
+                });
+                return { status: response.status, body: await response.json() };
+            }, { path, method, headers, data });
+        try {
+            await context.addCookies(staffCookies);
+            await other.addCookies(recruiterCookies);
+            settings = await context.newPage();
+            settings.setDefaultTimeout(90_000);
+            const saves = [];
+            const refreshes = [];
+            settings.on('request', request => {
+                const path = new URL(request.url()).pathname;
+                if (path === '/api/staff/preferences/time-zone' && request.method() === 'POST') saves.push(request);
+                if (path === '/staff/settings' && request.headers().rsc === '1'
+                    && request.headers()['next-router-prefetch'] !== '1') refreshes.push(request);
+            });
+            await gotoStaff(settings, `${baseURL}/staff/settings`);
+            await expect(settings.getByText('No time zone has been chosen; UTC is the default.', { exact: true })).toBeVisible();
+            await expect(settings.getByRole('complementary', { name: 'Time zone preference' })).toContainText('America/New_York');
+            assert.equal(saves.length, 0, 'device detection never saves a preference');
+            assert.equal(await settings.evaluate(() => document.documentElement.scrollWidth > innerWidth), false);
+            await settings.screenshot({ path: join(resultsDir, 'staff-time-zone-mobile-banner.png'), fullPage: true });
+            await settings.getByLabel('Time zone', { exact: true }).fill('Europe/Madrid');
+            const saved = settings.waitForResponse(response => new URL(response.url()).pathname === '/api/staff/preferences/time-zone'
+                && response.request().method() === 'POST');
+            await settings.getByRole('button', { name: 'Save time zone', exact: true }).click();
+            const response = await saved;
+            assert.equal(response.status(), 200);
+            assert.equal(response.headers()['cache-control'], 'private, no-store');
+            const payload = await response.json();
+            assert.deepEqual(payload.result, { timeZone: 'Europe/Madrid', version: '1' });
+            savedVersion = payload.result.version;
+            assert.equal(saves.length, 1);
+            assert.equal(saves[0].headers()['x-staff-account-id'], AUTHZ_ID.USER_ADMIN2);
+            await expect(settings.getByText('Dates are shown in Europe/Madrid.', { exact: true })).toBeVisible();
+            await expect.poll(() => refreshes.length).toBe(1);
+            await settings.reload({ waitUntil: 'domcontentloaded' });
+            await expect(settings.getByLabel('Time zone', { exact: true })).toHaveValue('Europe/Madrid');
+            await expect(settings.getByText('Dates are shown in Europe/Madrid.', { exact: true })).toBeVisible();
+            assert.equal(saves.length, 1, 'hydration and reload never repeat the write');
+            assert.equal(await settings.evaluate(() => document.documentElement.scrollWidth > innerWidth), false);
+            await settings.screenshot({ path: join(resultsDir, 'staff-time-zone-mobile-settings.png'), fullPage: true });
+
+            const mismatched = await requestAsBrowser('/api/staff/preferences/time-zone', {
+                method: 'POST',
+                headers: { 'x-staff-account-id': CJ_ID.USER_B_REC },
+                data: { timeZone: 'Asia/Tokyo', expectedVersion: savedVersion },
+            });
+            assert.equal(mismatched.status, 409);
+            assert.equal(mismatched.body.code, 'ACCOUNT_CHANGED');
+            const teammate = await other.newPage();
+            await gotoStaff(teammate, `${baseURL}/staff/settings`);
+            await expect(teammate.getByText('No time zone has been chosen; UTC is the default.', { exact: true })).toBeVisible();
+            await expect(teammate.getByLabel('Time zone', { exact: true })).toHaveValue('UTC');
+
+            const candidate = await requestAsBrowser(`/api/staff/candidates/${CJ_ID.CANDIDATE_B}`);
+            assert.equal(candidate.status, 200);
+            const workspace = candidate.body.result;
+            assert.ok(workspace.applications.length > 0);
+            const receivedAt = workspace.applications[0].receivedAt;
+            const expectedDate = formatStaffDate(receivedAt, 'Europe/Madrid');
+            const dateSelector = `time[datetime="${new Date(receivedAt).toISOString()}"]`;
+            await gotoStaff(settings, `${baseURL}/staff/candidates?q=${encodeURIComponent(workspace.candidate.fullName)}`);
+            await settings.locator(`a[href="/staff/candidates/${CJ_ID.CANDIDATE_B}"]`).first().click();
+            const preview = settings.getByRole('dialog', { name: workspace.candidate.fullName, exact: true });
+            await expect(preview).toBeVisible();
+            await preview.getByRole('tab', { name: /^Applications/ }).click();
+            await expect(preview.locator(dateSelector).first()).toHaveText(expectedDate);
+            await expect(preview.locator(dateSelector).first()).toHaveAttribute('title', 'Europe/Madrid');
+            await gotoStaff(settings, `${baseURL}/staff/candidates/${CJ_ID.CANDIDATE_B}?tab=applications`);
+            await expect(settings.locator(dateSelector).first()).toHaveText(expectedDate);
+            await expect(settings.locator(dateSelector).first()).toHaveAttribute('title', 'Europe/Madrid');
+        } finally {
+            try {
+                if (savedVersion !== null) {
+                    const restored = await requestAsBrowser('/api/staff/preferences/time-zone', {
+                        method: 'POST',
+                        headers: { 'x-staff-account-id': AUTHZ_ID.USER_ADMIN2 },
+                        data: { timeZone: null, expectedVersion: savedVersion },
+                    });
+                    assert.equal(restored.status, 200);
+                }
+            } finally {
+                await context.close();
+                await other.close();
+            }
+        }
     });
 
     await runCase('administrator MFA recovery requires re-enrollment and invalidates old proofs and backup codes', async () => {
