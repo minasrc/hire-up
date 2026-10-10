@@ -44,6 +44,7 @@ import {
     getClient,
     getJobPublication,
     getJobWorkspace,
+    getJobPreview,
     listClients,
     listJobs,
     previewJobPublic,
@@ -1148,6 +1149,7 @@ test('client job workflows on PostgreSQL 17', async (t) => {
             values ('${ORG_B}', '${CJ_ID.ROLE_B_RECRUITER}', 'clients.read')`);
         await rejectCode(recruiter(getJobWorkspace, { jobId: job.jobId }), 'FORBIDDEN',
             'clients.read alone cannot read jobs');
+        await rejectCode(recruiter(getJobPreview, { jobId: job.jobId }), 'FORBIDDEN');
         psql(pg17, `
             delete from app.role_permissions
             where organization_id = '${ORG_B}'
@@ -1158,9 +1160,16 @@ test('client job workflows on PostgreSQL 17', async (t) => {
             values ('${ORG_B}', '${CJ_ID.ROLE_B_RECRUITER}', 'jobs.read')`);
         await rejectCode(recruiter(getJobWorkspace, { jobId: job.jobId }), 'FORBIDDEN',
             'jobs.read without clients.read cannot read jobs');
+        await rejectCode(recruiter(getJobPreview, { jobId: job.jobId }), 'FORBIDDEN');
         psql(pg17, `
             insert into app.role_permissions (organization_id, role_id, permission_key)
             values ('${ORG_B}', '${CJ_ID.ROLE_B_RECRUITER}', 'clients.read')`);
+        const preview = await recruiter(getJobPreview, { jobId: job.jobId });
+        const currentJob = await recruiter(getJobWorkspace, { jobId: job.jobId });
+        const currentClient = await recruiter(getClient, { clientId });
+        assert.deepEqual(preview, { job: currentJob.job, draft: currentJob.draft, published: currentJob.published, client: { name: currentClient.name } });
+        await rejectCode(recruiter(getJobPreview, { jobId: randomUUID() }), 'P0002');
+        await rejectCode(getJobPreview(pool, identity(CJ_SUBJECTS.RECRUITER), ORG_A, { jobId: job.jobId }), 'UNAUTHORIZED');
 
         await rejectCode(
             saveClient(pool, identity(CJ_SUBJECTS.RECRUITER), ORG_A, {

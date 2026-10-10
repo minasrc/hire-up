@@ -340,6 +340,28 @@ export async function getJobWorkspace(pool, verifiedIdentity, organizationId, in
     );
 }
 
+export async function getJobPreview(pool, verifiedIdentity, organizationId, input) {
+    const record = requireRecord(input, 'input', ['jobId']);
+    const jobId = requireUuid(record.jobId, 'jobId');
+    return withStaffTransaction(
+        pool, verifiedIdentity, organizationId, JOB_READ_PERMISSIONS,
+        async ({ client }) => {
+            const jobResult = await client.query('select app.get_job_workspace_v1($1::uuid) as result', [jobId]);
+            const workspace = jobResult.rows[0]?.result;
+            if (!workspace?.job) throw new Error('Job workspace unavailable');
+            const clientResult = await client.query('select app.get_client_v1($1::uuid) as result', [workspace.job.clientId]);
+            const value = clientResult.rows[0]?.result;
+            const details = value?.client ?? value;
+            return {
+                job: workspace.job,
+                draft: workspace.draft,
+                published: workspace.published,
+                client: details ? { name: details.name } : null,
+            };
+        },
+    );
+}
+
 export async function getJobPublication(pool, verifiedIdentity, organizationId, input) {
     const record = requireRecord(input, 'input', ['jobId']);
     const jobId = requireUuid(record.jobId, 'jobId');
