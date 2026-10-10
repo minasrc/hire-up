@@ -734,7 +734,6 @@ export function JobForm({
         });
         const targetId = jobId ?? payload?.result?.jobId;
         router.push(targetId ? `/staff/jobs/${targetId}` : '/staff/jobs');
-        router.refresh();
     };
 
     const updateBonus = (index: number, patch: Partial<JobBonus>) => {
@@ -1054,7 +1053,6 @@ export function NewRevisionButton({ jobId, expectedJobVersion }: { jobId: string
                             expectedJobVersion,
                         });
                         router.push(`/staff/jobs/${jobId}/edit`);
-                        router.refresh();
                     } catch (caught) {
                         setError(
                             caught instanceof Error
