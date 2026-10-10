@@ -870,24 +870,64 @@ test('staff workspace end-to-end in a real browser', async (t) => {
     });
 
     await runCase('client update keeps social links and confirms the save', async () => {
-        await gotoStaff(page, `${baseURL}/staff/clients/${createdClientId}`);
-        await fillWhenReady(
-            page.locator('#client-name'), 'Synthetic Browser Client Renamed');
-        const updated = page.waitForResponse(
-            (response) => response.url().includes('/api/staff/clients')
-                && response.request().method() === 'POST' && response.ok());
-        await page.getByRole('button', { name: 'Save changes' }).click();
-        await updated;
-        await page.getByRole('status').filter({ hasText: 'Changes saved.' })
-            .waitFor();
+        const rscRequests = [];
+        const trackRsc = (request) => {
+            const url = new URL(request.url());
+            const headers = request.headers();
+            if (url.pathname === `/staff/clients/${createdClientId}`
+                && headers.rsc === '1'
+                && headers['next-router-prefetch'] !== '1') {
+                rscRequests.push(request.url());
+            }
+        };
+        page.on('request', trackRsc);
+        try {
+            await gotoStaff(page, `${baseURL}/staff/clients/${createdClientId}`);
+            await fillWhenReady(
+                page.locator('#client-name'), 'Synthetic Browser Client Renamed');
+            const updated = page.waitForResponse(
+                (response) => response.url().includes('/api/staff/clients')
+                    && response.request().method() === 'POST' && response.ok());
+            await page.getByRole('button', { name: 'Save changes' }).click();
+            const firstResponse = await updated;
+            const firstPayload = await firstResponse.json();
+            assert.equal(firstPayload.result.client.id, createdClientId);
+            assert.equal(firstPayload.result.client.version, '2');
+            assert.equal(firstPayload.result.client.name, 'Synthetic Browser Client Renamed');
+            assert.equal(firstResponse.headers()['cache-control'], 'private, no-store');
+            await page.getByRole('status').filter({ hasText: 'Changes saved.' })
+                .waitFor();
+            await expect(page.getByRole('heading', {
+                name: 'Synthetic Browser Client Renamed', exact: true,
+            })).toBeVisible();
 
-        await page.reload({ waitUntil: 'domcontentloaded' });
-        await expect(page.locator('#client-name'))
-            .toHaveValue('Synthetic Browser Client Renamed');
-        await expect(page.getByRole('combobox', { name: 'Social link 1 platform' }))
-            .toContainText('LinkedIn');
-        await expect(page.locator('#social-url-0'))
-            .toHaveValue('https://linkedin.com/company/synthetic');
+            await fillWhenReady(page.locator('#client-contact-name'), 'Casey Updated');
+            const secondUpdated = page.waitForResponse(
+                (response) => response.url().includes('/api/staff/clients')
+                    && response.request().method() === 'POST' && response.ok());
+            await page.getByRole('button', { name: 'Save changes' }).click();
+            const secondResponse = await secondUpdated;
+            assert.equal(secondResponse.request().postDataJSON().expectedVersion, '2');
+            const secondPayload = await secondResponse.json();
+            assert.equal(secondPayload.result.client.version, '3');
+            await expect(page.getByText('Casey Updated', { exact: true })).toBeVisible();
+            await page.getByRole('status').filter({ hasText: 'Changes saved.' })
+                .waitFor();
+            await page.waitForLoadState('networkidle');
+            assert.equal(rscRequests.length, 0);
+
+            await page.reload({ waitUntil: 'domcontentloaded' });
+            await expect(page.locator('#client-name'))
+                .toHaveValue('Synthetic Browser Client Renamed');
+            await expect(page.locator('#client-contact-name'))
+                .toHaveValue('Casey Updated');
+            await expect(page.getByRole('combobox', { name: 'Social link 1 platform' }))
+                .toContainText('LinkedIn');
+            await expect(page.locator('#social-url-0'))
+                .toHaveValue('https://linkedin.com/company/synthetic');
+        } finally {
+            page.off('request', trackRsc);
+        }
     });
 
     let createdJobId;

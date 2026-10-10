@@ -101,7 +101,7 @@ export async function saveClientDraft(pool, verifiedIdentity, organizationId, in
     );
 }
 
-export async function saveClient(pool, verifiedIdentity, organizationId, input) {
+async function saveClientRecord(pool, verifiedIdentity, organizationId, input, includeDetails) {
     const record = requireRecord(
         input, 'input',
         ['clientId', 'expectedVersion', 'fields', 'operationId'],
@@ -111,11 +111,31 @@ export async function saveClient(pool, verifiedIdentity, organizationId, input) 
         record.expectedVersion, 'expectedVersion', { nullable: true });
     const operationId = requireOperationId(record.operationId);
     const fields = validateClientInput(record.fields);
-    return run(
+    return withStaffTransaction(
         pool, verifiedIdentity, organizationId, CLIENT_WRITE_PERMISSIONS,
-        'select app.save_client_v1($1::uuid, $2::bigint, $3::jsonb, $4::uuid, $5::uuid) as result',
-        [clientId, expectedVersion, JSON.stringify(fields), operationId, randomUUID()],
+        async ({ client }) => {
+            const saved = await client.query(
+                'select app.save_client_v1($1::uuid, $2::bigint, $3::jsonb, $4::uuid, $5::uuid) as result',
+                [clientId, expectedVersion, JSON.stringify(fields), operationId, randomUUID()],
+            );
+            const result = saved.rows[0]?.result ?? null;
+            if (!includeDetails) return result;
+            const details = await client.query('select app.get_client_v1($1::uuid) as result', [clientId]);
+            const snapshot = details.rows[0]?.result;
+            if (!result || result.id !== clientId || !snapshot || snapshot.id !== clientId) {
+                throw new Error('Client snapshot unavailable');
+            }
+            return { ...result, client: snapshot };
+        },
     );
+}
+
+export async function saveClient(pool, verifiedIdentity, organizationId, input) {
+    return saveClientRecord(pool, verifiedIdentity, organizationId, input, false);
+}
+
+export async function saveClientWithDetails(pool, verifiedIdentity, organizationId, input) {
+    return saveClientRecord(pool, verifiedIdentity, organizationId, input, true);
 }
 
 export async function createJobDraft(pool, verifiedIdentity, organizationId, input) {

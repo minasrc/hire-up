@@ -106,6 +106,24 @@ interface SocialRow {
     url: string;
 }
 
+export interface ClientFormValues {
+    name: string;
+    contactName: string | null;
+    contactEmail: string | null;
+    telegramUsername: string | null;
+    website: string | null;
+    socialLinks: SocialLink[] | null;
+    isStealth: boolean | null;
+    anonymousDescription: string | null;
+    version: string;
+}
+
+export interface SavedClient extends ClientFormValues {
+    id: string;
+    status: string;
+    publicProfileVersion: string;
+}
+
 const CLIENT_FIELD_IDS: Record<string, string> = {
     name: 'client-name',
     contactName: 'client-contact-name',
@@ -124,23 +142,16 @@ const invalidClass = 'border-destructive focus-visible:ring-destructive';
 export function ClientForm({
     clientId,
     initial,
+    onSaved,
 }: {
     clientId?: string;
-    initial?: {
-        name: string;
-        contactName: string | null;
-        contactEmail: string | null;
-        telegramUsername: string | null;
-        website: string | null;
-        socialLinks: SocialLink[] | null;
-        isStealth: boolean | null;
-        anonymousDescription: string | null;
-        version: string;
-    };
+    initial?: ClientFormValues;
+    onSaved?: (client: SavedClient) => void;
 }) {
     const router = useRouter();
     const formRef = useRef<HTMLFormElement>(null);
     const busyRef = useRef(false);
+    const versionRef = useRef(initial?.version);
     const focusRequestRef = useRef<string | null>(null);
     const [error, setError] = useState<string | null>(null);
     const [saved, setSaved] = useState(false);
@@ -332,7 +343,7 @@ export function ClientForm({
         try {
             payload = await staffMutation(url, {
                 fields,
-                ...(clientId ? { expectedVersion: initial?.version } : {}),
+                ...(clientId ? { expectedVersion: versionRef.current } : {}),
             });
         } catch (caught) {
             if (caught instanceof StaffMutationError
@@ -345,8 +356,30 @@ export function ClientForm({
             throw caught;
         }
         if (clientId) {
+            const snapshot = payload?.result?.client as SavedClient | undefined;
             setSaved(true);
-            router.refresh();
+            if (onSaved && snapshot?.id === clientId
+                && typeof snapshot.name === 'string'
+                && typeof snapshot.version === 'string'
+                && /^[1-9]\d{0,18}$/.test(snapshot.version)
+                && (snapshot.socialLinks == null || Array.isArray(snapshot.socialLinks))) {
+                versionRef.current = snapshot.version;
+                setValues({
+                    name: snapshot.name,
+                    contactName: snapshot.contactName ?? '',
+                    contactEmail: snapshot.contactEmail ?? '',
+                    telegramUsername: snapshot.telegramUsername ?? '',
+                    website: snapshot.website ?? '',
+                    anonymousDescription: snapshot.anonymousDescription ?? '',
+                    isStealth: snapshot.isStealth ?? false,
+                });
+                setLinks((snapshot.socialLinks ?? []).map(link => ({ ...link, key: crypto.randomUUID() })));
+                onSaved(snapshot);
+            } else {
+                const version = payload?.result?.version;
+                if (typeof version === 'string' && /^[1-9]\d{0,18}$/.test(version)) versionRef.current = version;
+                router.refresh();
+            }
             return;
         }
         const targetId = payload?.result?.id ?? payload?.result?.clientId;
