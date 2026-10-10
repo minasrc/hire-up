@@ -28,7 +28,7 @@ function staffLayout(loadStaffCapabilities) {
                 assert.fail('layout must not block on workspace metrics');
             },
         },
-        './session-provider': { StaffSessionProvider: ({ children, scope }) => jsx('div', { 'data-session': 'true', 'data-scope': scope, children }) },
+        './session-provider': { StaffSessionProvider: ({ children, scope, userId, timeZone, timeZoneVersion, ...rest }) => jsx('div', { 'data-session': 'true', 'data-scope': scope, 'data-user-id': userId, 'data-time-zone': String(timeZone), 'data-time-zone-version': timeZoneVersion, 'data-extra': Object.keys(rest).join(','), children }) },
         './auth-recovery-notice': { AuthRecoveryNotice: () => null },
         './staff-shell': {
             StaffShell: (props) => jsx('div', {
@@ -75,7 +75,9 @@ test('verified members get the shell with the lightweight capabilities', async (
     const Layout = staffLayout(async () => ({
         gate: {
             stage: 'verified',
-            organizationId: 'organization-a', principal: { user_id: 'user-a' },
+            organizationId: 'organization-a', principal: {
+                user_id: 'user-a', time_zone: 'Europe/Madrid', time_zone_version: '4',
+            },
             session: { user: { email: 'staff@example.test' } },
         },
         capabilities: { candidates: true },
@@ -87,6 +89,11 @@ test('verified members get the shell with the lightweight capabilities', async (
     assert.match(html, /data-capabilities="present"/);
     assert.match(html, /data-session="true"/);
     assert.match(html, /data-scope="organization-a:user-a"/);
+    assert.match(html, /data-user-id="user-a"/);
+    assert.match(html, /data-time-zone="Europe\/Madrid"/);
+    assert.match(html, /data-time-zone-version="4"/);
+    assert.match(html, /data-extra=""/);
+    assert.doesNotMatch(html, /credential|secret/);
     assert.match(html, /data-stream="true"/);
     assert.match(html, /data-user="staff@example\.test"/);
     assert.match(html, /page-body/);

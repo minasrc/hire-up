@@ -11,7 +11,7 @@ import { STAFF_MFA_COOKIE, readStaffMfaProof } from './staff-mfa-cookie';
 
 /**
  * @typedef {{ provider: string, issuer: string, subject: string }} StaffGateIdentity
- * @typedef {{ user_id: string, membership_id: string, role_id: string }} StaffGatePrincipal
+ * @typedef {{ user_id: string, membership_id: string, role_id: string, time_zone?: string | null, time_zone_version?: string }} StaffGatePrincipal
  * @typedef {import('next-auth').Session} StaffGateSession
  * @typedef {import('pg').Pool} StaffGatePool
  * @typedef {{ status: string, credentialId?: string, secret?: string } | null} StaffGateTotp
