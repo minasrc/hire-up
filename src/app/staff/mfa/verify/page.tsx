@@ -19,6 +19,9 @@ export default async function StaffMfaVerifyPage() {
     if (gate.stage === 'unresolved') {
         redirect('/staff/no-access');
     }
+    if (gate.stage === 'verified') {
+        redirect('/staff');
+    }
     if (gate.totp?.status !== 'active') {
         redirect('/staff/mfa/enroll');
     }
