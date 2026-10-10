@@ -1,11 +1,19 @@
 import 'server-only';
 import { cache } from 'react';
-import type { StaffWorkspaceCapabilities, StaffWorkspaceSummary } from './workspace-types';
-import { getStaffCapabilities, getStaffWorkspace } from './workspace-operations';
+import type {
+    StaffWorkspaceCapabilities,
+    StaffWorkspaceNotifications,
+    StaffWorkspaceSummary,
+} from './workspace-types';
+import {
+    getStaffCapabilities,
+    getStaffNotifications,
+    getStaffWorkspace,
+} from './workspace-operations';
 import { staffGate } from './staff-gate.server';
 
 // Opt-in timings contain fixed operation labels and elapsed milliseconds only.
-async function timedRead<T>(operation: 'summary' | 'capabilities', read: () => Promise<T>): Promise<T> {
+async function timedRead<T>(operation: 'summary' | 'capabilities' | 'notifications', read: () => Promise<T>): Promise<T> {
     const started = performance.now();
     try {
         return await read();
@@ -50,5 +58,20 @@ export const loadStaffCapabilities = cache(async () => {
     } catch (error) {
         console.error('staff capabilities failed', (error as { code?: string })?.code ?? 'UNKNOWN');
         return { gate, capabilities: null };
+    }
+});
+
+export const loadStaffNotifications = cache(async () => {
+    const gate = await staffGate();
+    if (gate.stage !== 'verified') {
+        return { gate, summary: null as StaffWorkspaceNotifications | null };
+    }
+    try {
+        const summary = await timedRead('notifications', () => getStaffNotifications(
+            gate.pool, gate.identity, gate.organizationId));
+        return { gate, summary: summary as StaffWorkspaceNotifications | null };
+    } catch (error) {
+        console.error('staff notifications failed', (error as { code?: string })?.code ?? 'UNKNOWN');
+        return { gate, summary: null };
     }
 });

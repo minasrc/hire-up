@@ -76,6 +76,7 @@ const MIGRATIONS = [
     '20261003090000_staff_mfa_backup_codes.sql',
     '20261006090000_staff_totp_stable_enrollment.sql',
     '20261007090000_staff_mfa_admin_recovery.sql',
+    '20261010090000_staff_notifications.sql',
 ];
 
 const NEXTAUTH_SECRET = 'synthetic-workspace-secret';
@@ -1861,6 +1862,11 @@ test('staff workspace end-to-end in a real browser', async (t) => {
             await page.goto(`${baseURL}/staff`, { waitUntil: 'domcontentloaded' });
             await page.getByText('Workspace summary is temporarily unavailable.')
                 .waitFor();
+            await expect(page.getByRole('button', { name: /Workspace updates, \d+ items/ })).toBeVisible();
+            const notifications = await page.request.get(`${baseURL}/api/staff/workspace`);
+            assert.equal(notifications.status(), 200);
+            assert.equal(notifications.headers()['cache-control'], 'private, no-store');
+            assert.deepEqual(Object.keys((await notifications.json()).result).sort(), ['attention', 'capabilities']);
             const nav = page.getByRole('navigation', { name: 'Main navigation' });
             for (const name of [
                 'Overview', 'Applications', 'Candidates', 'Jobs', 'Clients', 'Members',

@@ -19,9 +19,15 @@ function staffLayout(loadStaffCapabilities) {
         'react/jsx-runtime': jsxRuntime,
         react: { Suspense: ({ children }) => children },
         './staff-shell-summary': { StaffShellSummarySeed: () => null },
-        '@/lib/workspace.server': { loadStaffCapabilities, loadStaffWorkspace: () => {
-            assert.fail('layout must not block on workspace metrics');
-        } },
+        '@/lib/workspace.server': {
+            loadStaffCapabilities,
+            loadStaffNotifications: async () => ({
+                summary: { capabilities: { jobs: true }, attention: { openTasks: 2 } },
+            }),
+            loadStaffWorkspace: () => {
+                assert.fail('layout must not block on workspace metrics');
+            },
+        },
         './session-provider': { StaffSessionProvider: ({ children, scope }) => jsx('div', { 'data-session': 'true', 'data-scope': scope, children }) },
         './auth-recovery-notice': { AuthRecoveryNotice: () => null },
         './staff-shell': {
@@ -41,6 +47,13 @@ function staffLayout(loadStaffCapabilities) {
             return imports[name];
         },
     });
+    exports.default.seed = async () => {
+        const tree = await exports.default({ children: null });
+        const shell = tree.props.children.props.children.find(
+            (child) => child?.props?.summaryContent,
+        );
+        return shell.props.summaryContent.props.children.type();
+    };
     return exports.default;
 }
 
@@ -77,6 +90,19 @@ test('verified members get the shell with the lightweight capabilities', async (
     assert.match(html, /data-stream="true"/);
     assert.match(html, /data-user="staff@example\.test"/);
     assert.match(html, /page-body/);
+});
+
+test('the streamed shell seed uses lightweight notifications', async () => {
+    const Layout = staffLayout(async () => ({
+        gate: {
+            stage: 'verified',
+            organizationId: 'organization-a', principal: { user_id: 'user-a' },
+            session: { user: { email: 'staff@example.test' } },
+        },
+        capabilities: { candidates: true },
+    }));
+    const seed = await Layout.seed();
+    assert.equal(seed.props.summary.attention.openTasks, 2);
 });
 
 test('a capability outage still renders the shell so pages stay usable', async () => {

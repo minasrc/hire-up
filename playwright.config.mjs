@@ -4,6 +4,10 @@ import { assertNonproductionTestEnvironment } from './tests/support/nonproductio
 
 loadEnv({ path: '.env.local', quiet: true });
 assertNonproductionTestEnvironment();
+const serverMode = process.env.E2E_SERVER_MODE ?? 'development';
+if (!['development', 'production'].includes(serverMode)) {
+    throw new Error('E2E_SERVER_MODE must be development or production.');
+}
 
 export default defineConfig({
     testDir: './tests/e2e',
@@ -17,7 +21,9 @@ export default defineConfig({
         trace: 'retain-on-failure',
     },
     webServer: {
-        command: 'npm run dev -- --hostname 127.0.0.1',
+        command: serverMode === 'production'
+            ? 'npm run start -- --hostname 127.0.0.1'
+            : 'npm run dev -- --hostname 127.0.0.1',
         url: 'http://127.0.0.1:3000/jobs',
         reuseExistingServer: false,
         timeout: 120_000,
