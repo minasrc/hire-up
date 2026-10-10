@@ -1741,6 +1741,8 @@ test('staff workspace end-to-end in a real browser', async (t) => {
             await recruiter.getByText(
                 'Task tracking requires the collaboration.read permission.',
             ).waitFor();
+            await expect(recruiter.locator('#tasks').getByRole('button', { name: 'Add task', exact: true })).toHaveCount(0);
+            await expect(recruiter.locator('#tasks').getByRole('tablist')).toHaveCount(0);
             assert.equal(
                 await recruiter.getByRole('link', { name: 'Members', exact: true })
                     .count(),
@@ -1906,9 +1908,14 @@ test('staff workspace end-to-end in a real browser', async (t) => {
                 rename to get_staff_workspace_outage_test;
         `);
         try {
+            const tasksLoaded = page.waitForResponse(response =>
+                new URL(response.url()).pathname === '/api/staff/tasks' && response.status() === 200);
             await page.goto(`${baseURL}/staff`, { waitUntil: 'domcontentloaded' });
             await page.getByText('Workspace summary is temporarily unavailable.')
                 .waitFor();
+            await tasksLoaded;
+            await expect(page.locator('#tasks').getByRole('tablist', { name: 'To-do categories' })).toBeVisible();
+            await expect(page.locator('#tasks').getByRole('button', { name: 'Add task', exact: true })).toBeVisible();
             await expect(page.getByRole('button', { name: /Workspace updates, \d+ items/ })).toBeVisible();
             const notifications = await page.request.get(`${baseURL}/api/staff/workspace`);
             assert.equal(notifications.status(), 200);
@@ -1946,6 +1953,7 @@ test('staff workspace end-to-end in a real browser', async (t) => {
                 await mobile.goto(`${baseURL}/staff`, { waitUntil: 'domcontentloaded' });
                 await mobile.getByText('Workspace summary is temporarily unavailable.')
                     .waitFor();
+                await expect(mobile.locator('#tasks').getByRole('tablist', { name: 'To-do categories' })).toBeVisible();
                 const sheet = mobile.getByRole('dialog');
                 await clickUntil(
                     () => mobile.getByRole('button', { name: 'Open navigation' }).click(),
