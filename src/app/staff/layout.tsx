@@ -28,7 +28,12 @@ export default async function StaffLayout({ children }: { children: React.ReactN
     }
 
     return (
-        <StaffSessionProvider scope={`${gate.organizationId}:${gate.principal.user_id}`}>
+        <StaffSessionProvider
+            scope={`${gate.organizationId}:${gate.principal.user_id}`}
+            userId={gate.principal.user_id}
+            timeZone={gate.principal.time_zone ?? null}
+            timeZoneVersion={gate.principal.time_zone_version ?? '0'}
+        >
             <div className="staff-scope min-h-screen bg-background font-sans text-sm text-foreground antialiased">
                 <AuthRecoveryNotice />
                 <StaffShell

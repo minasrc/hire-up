@@ -10,9 +10,9 @@ import {
     POSTGRES_17_IMAGE,
     assertLocalTestEnvironment,
     assertSqlstate,
-    holdExclusiveLock,
     psql,
     psqlExpectError,
+    publishedPort,
     startPostgresContainer,
     stopAndRemoveContainer,
 } from '../support/foundation-docker.js';
@@ -44,12 +44,14 @@ import {
     getClient,
     getJobPublication,
     getJobWorkspace,
+    getJobPreview,
     listClients,
     listJobs,
     previewJobPublic,
     publishJobRevision,
     saveClient,
     saveClientDraft,
+    saveClientWithDetails,
     saveJobDraft,
 } from '../../src/lib/client-job-operations.js';
 import { EMPTY_JOB_DOCUMENT } from '../../src/lib/client-job-contracts.js';
@@ -82,7 +84,6 @@ const INTAKE_FUNCTIONS = [
     'set_job_public_listing_v1',
 ];
 const readMigration = (name) => readFileSync(join(migrationsDir, name), 'utf8');
-const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 const identity = (subject) => ({ provider: 'google', issuer: GOOGLE_ISSUER, subject });
 const { ORG_A, ORG_B } = AUTHZ_ID;
 const scalar = (container, sql) => psql(container, sql).trim();
@@ -467,6 +468,44 @@ test('client job workflows on PostgreSQL 17', async (t) => {
             fields: CLIENT_FIELDS,
             operationId: randomUUID(),
         }), 'FORBIDDEN');
+    });
+
+    await t.test('client save snapshots are authorized, canonical and replay-safe', async () => {
+        const clientId = await createClient();
+        const operationId = randomUUID();
+        const input = { clientId, expectedVersion: '1', fields: { ...CLIENT_FIELDS, name: '  Saved snapshot  ' }, operationId };
+        const saved = await recruiter(saveClientWithDetails, input);
+        assert.equal(saved.version, '2');
+        assert.equal(saved.client.name, 'Saved snapshot');
+        assert.equal(saved.client.telegramUsername, 'dana_ops');
+        assert.deepEqual(saved.client, await recruiter(getClient, { clientId }));
+        assert.deepEqual(await recruiter(saveClientWithDetails, input), { ...saved, replayed: true });
+        assert.equal(auditCount(pg17, operationId), 1);
+        assert.equal(receiptCount(pg17, operationId), 1);
+        await recruiter(saveClient, { clientId, expectedVersion: '2', fields: { ...CLIENT_FIELDS, name: 'Later editor' }, operationId: randomUUID() });
+        const replay = await recruiter(saveClientWithDetails, input);
+        assert.equal(replay.replayed, true);
+        assert.equal(replay.version, '2');
+        assert.equal(replay.client.version, '3');
+        assert.equal(replay.client.name, 'Later editor');
+        assert.equal(auditCount(pg17, operationId), 1);
+        await rejectCode(recruiter(saveClientWithDetails, { ...input, operationId: randomUUID() }), '40001');
+        await rejectCode(viewer(saveClientWithDetails, { ...input, expectedVersion: '3', operationId: randomUUID() }), 'FORBIDDEN');
+        await rejectCode(saveClientWithDetails(pool, identity(CJ_SUBJECTS.RECRUITER), ORG_A, { ...input, expectedVersion: '3', operationId: randomUUID() }), 'UNAUTHORIZED');
+    });
+    await t.test('a failed snapshot read rolls back the write and its receipt', async () => {
+        const clientId = await createClient();
+        const before = await recruiter(getClient, { clientId });
+        const operationId = randomUUID();
+        psql(pg17, 'alter function app.get_client_v1(uuid) rename to get_client_snapshot_failure_test');
+        try {
+            await rejectCode(recruiter(saveClientWithDetails, { clientId, expectedVersion: '1', fields: { ...CLIENT_FIELDS, name: 'Must roll back' }, operationId }), '42883');
+        } finally {
+            psql(pg17, 'alter function app.get_client_snapshot_failure_test(uuid) rename to get_client_v1');
+        }
+        assert.deepEqual(await recruiter(getClient, { clientId }), before);
+        assert.equal(auditCount(pg17, operationId), 0);
+        assert.equal(receiptCount(pg17, operationId), 0);
     });
 
     await t.test('client drafts sanitize optional fields and activate separately', async () => {
@@ -1110,6 +1149,7 @@ test('client job workflows on PostgreSQL 17', async (t) => {
             values ('${ORG_B}', '${CJ_ID.ROLE_B_RECRUITER}', 'clients.read')`);
         await rejectCode(recruiter(getJobWorkspace, { jobId: job.jobId }), 'FORBIDDEN',
             'clients.read alone cannot read jobs');
+        await rejectCode(recruiter(getJobPreview, { jobId: job.jobId }), 'FORBIDDEN');
         psql(pg17, `
             delete from app.role_permissions
             where organization_id = '${ORG_B}'
@@ -1120,9 +1160,16 @@ test('client job workflows on PostgreSQL 17', async (t) => {
             values ('${ORG_B}', '${CJ_ID.ROLE_B_RECRUITER}', 'jobs.read')`);
         await rejectCode(recruiter(getJobWorkspace, { jobId: job.jobId }), 'FORBIDDEN',
             'jobs.read without clients.read cannot read jobs');
+        await rejectCode(recruiter(getJobPreview, { jobId: job.jobId }), 'FORBIDDEN');
         psql(pg17, `
             insert into app.role_permissions (organization_id, role_id, permission_key)
             values ('${ORG_B}', '${CJ_ID.ROLE_B_RECRUITER}', 'clients.read')`);
+        const preview = await recruiter(getJobPreview, { jobId: job.jobId });
+        const currentJob = await recruiter(getJobWorkspace, { jobId: job.jobId });
+        const currentClient = await recruiter(getClient, { clientId });
+        assert.deepEqual(preview, { job: currentJob.job, draft: currentJob.draft, published: currentJob.published, client: { name: currentClient.name } });
+        await rejectCode(recruiter(getJobPreview, { jobId: randomUUID() }), 'P0002');
+        await rejectCode(getJobPreview(pool, identity(CJ_SUBJECTS.RECRUITER), ORG_A, { jobId: job.jobId }), 'UNAUTHORIZED');
 
         await rejectCode(
             saveClient(pool, identity(CJ_SUBJECTS.RECRUITER), ORG_A, {
@@ -1659,10 +1706,19 @@ test('client job workflows on PostgreSQL 17', async (t) => {
         }
     });
 
-    const { child: lockChild } = holdExclusiveLock(pg17, 'app.organizations', 8);
+    const lockClient = new pg.Client({
+        host: '127.0.0.1',
+        port: publishedPort(pg17, 5432),
+        user: 'postgres',
+        password: adminPassword,
+        database: 'postgres',
+        connectionTimeoutMillis: 5000,
+    });
+    await lockClient.connect();
     try {
+        await lockClient.query('begin');
+        await lockClient.query('lock table app.organizations in access exclusive mode');
         await t.test('organization lock waits are bounded', async () => {
-            await sleep(300);
             await rejectCode(recruiter(saveClient, {
                 clientId: randomUUID(),
                 expectedVersion: null,
@@ -1671,9 +1727,9 @@ test('client job workflows on PostgreSQL 17', async (t) => {
             }), '55P03', 'a contended organization lock fails within lock_timeout');
         });
     } finally {
-        lockChild.kill('SIGKILL');
+        await lockClient.query('rollback').catch(() => {});
+        await lockClient.end();
     }
-    await sleep(300);
 
     await t.test('PostgreSQL 16 rejects the migration', () => {
         const stderr = psqlExpectError(pg16, readMigration(WORKFLOW_MIGRATION));

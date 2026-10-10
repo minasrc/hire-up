@@ -34,7 +34,9 @@ const TRANSACTION_SETUP = `begin isolation level read committed;
         pg_catalog.set_config('app.organization_id', '', true),
         pg_catalog.set_config('app.identity_provider', '', true),
         pg_catalog.set_config('app.identity_issuer', '', true),
-        pg_catalog.set_config('app.identity_subject', '', true);`;
+        pg_catalog.set_config('app.identity_subject', '', true),
+        pg_catalog.set_config('app.staff_time_zone', '', true),
+        pg_catalog.set_config('app.staff_time_zone_version', '', true);`;
 
 // Materialization finishes the resolver (which clears context) before the
 // trusted actor is installed. The following statement checks permissions with
