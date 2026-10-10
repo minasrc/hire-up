@@ -865,7 +865,7 @@ test('staff workspace end-to-end in a real browser', async (t) => {
         await expect(body).toContainText('LinkedIn · https://linkedin.com/company/synthetic');
         await expect(page.getByRole('combobox', { name: 'Social link 1 platform' }))
             .toContainText('LinkedIn');
-        await expect(page.locator('#social-url-0'))
+        await expect(page.locator('#social-url-0').filter({ visible: true }))
             .toHaveValue('https://linkedin.com/company/synthetic');
     });
 
