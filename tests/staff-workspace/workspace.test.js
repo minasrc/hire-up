@@ -2666,7 +2666,7 @@ test('staff workspace end-to-end in a real browser', async (t) => {
         await page.reload({ waitUntil: 'domcontentloaded' });
         await page.getByRole('heading', {
             name: 'Dialog Guard', level: 1 }).waitFor();
-        await page.getByText('Second').waitFor();
+        await expect(page.getByText('Second', { exact: true }).filter({ visible: true })).toBeVisible();
         const reopened = page.getByRole('button', { name: 'Edit profile' });
         await clickUntil(
             () => reopened.click(),
