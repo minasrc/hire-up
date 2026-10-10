@@ -7,6 +7,7 @@ import {
     createStaffTask,
     getStaffWorkspace,
     getStaffCapabilities,
+    getStaffNotifications,
     listStaffTasks,
     setStaffTaskCompleted,
 } from '../../src/lib/workspace-operations.js';
@@ -149,4 +150,10 @@ test('getStaffWorkspace rejects invalid context before touching the pool', async
 
 test('capabilities require a verified identity before acquiring a connection', async () => {
     await assert.rejects(getStaffCapabilities(lockedPool, null, UUID), { code: 'INVALID_CONTEXT' });
+});
+
+test('notifications require a verified identity before acquiring a connection', async () => {
+    await assert.rejects(getStaffNotifications(lockedPool, null, UUID), {
+        code: 'INVALID_CONTEXT',
+    });
 });

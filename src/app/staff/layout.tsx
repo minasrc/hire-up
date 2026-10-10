@@ -1,12 +1,12 @@
 import { Suspense } from 'react';
-import { loadStaffCapabilities, loadStaffWorkspace } from '@/lib/workspace.server';
+import { loadStaffCapabilities, loadStaffNotifications } from '@/lib/workspace.server';
 import { AuthRecoveryNotice } from './auth-recovery-notice';
 import { StaffSessionProvider } from './session-provider';
 import { StaffShell } from './staff-shell';
 import { StaffShellSummarySeed } from './staff-shell-summary';
 
 async function StaffShellSummary() {
-    const { summary } = await loadStaffWorkspace();
+    const { summary } = await loadStaffNotifications();
     return <StaffShellSummarySeed summary={summary} />;
 }
 

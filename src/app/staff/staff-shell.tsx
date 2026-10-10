@@ -28,7 +28,7 @@ import {
 } from '@/components/staff-ui/popover';
 import { Separator } from '@/components/staff-ui/separator';
 import { Sheet, SheetContent, SheetTitle, SheetTrigger } from '@/components/staff-ui/sheet';
-import type { StaffWorkspaceSummary } from '@/lib/workspace-types';
+import type { StaffWorkspaceNotifications } from '@/lib/workspace-types';
 import { cn } from '@/lib/utils';
 import { RecordPreview } from './record-preview';
 import { StaffShellSummaryContext } from './staff-shell-summary';
@@ -78,7 +78,7 @@ export function NavLinks({
     onNavigate,
 }: {
     pathname: string;
-    capabilities: StaffWorkspaceSummary['capabilities'] | 'denied' | null;
+    capabilities: StaffWorkspaceNotifications['capabilities'] | 'denied' | null;
     onNavigate?: () => void;
 }) {
     return (
@@ -119,7 +119,7 @@ function AttentionBell({
     loadError,
     onRetry,
 }: {
-    summary: StaffWorkspaceSummary | null;
+    summary: StaffWorkspaceNotifications | null;
     loadError: 'denied' | 'unavailable' | null;
     onRetry: () => void;
 }) {
@@ -266,15 +266,15 @@ export function StaffShell({
 }: {
     userName: string;
     userEmail: string;
-    initialSummary?: StaffWorkspaceSummary | null;
-    initialCapabilities?: StaffWorkspaceSummary['capabilities'] | null;
+    initialSummary?: StaffWorkspaceNotifications | null;
+    initialCapabilities?: StaffWorkspaceNotifications['capabilities'] | null;
     summaryContent?: ReactNode;
     children: ReactNode;
 }) {
     const pathname = usePathname();
     const [sheetOpen, setSheetOpen] = useState(false);
-    const [summary, setSummary] = useState<StaffWorkspaceSummary | null>(initialSummary);
-    const [navCaps, setNavCaps] = useState<StaffWorkspaceSummary['capabilities'] | null>(
+    const [summary, setSummary] = useState<StaffWorkspaceNotifications | null>(initialSummary);
+    const [navCaps, setNavCaps] = useState<StaffWorkspaceNotifications['capabilities'] | null>(
         initialCapabilities,
     );
     const [loadError, setLoadError] = useState<'denied' | 'unavailable' | null>(null);
@@ -326,7 +326,7 @@ export function StaffShell({
             if (response.ok) {
                 const payload = await response.json().catch(() => null);
                 if (stale()) return;
-                const next = (payload?.result ?? null) as StaffWorkspaceSummary | null;
+                const next = (payload?.result ?? null) as StaffWorkspaceNotifications | null;
                 if (next) {
                     staffAuthRecovery.accepted(authEpoch);
                     invalidatedRef.current = false;
@@ -395,7 +395,7 @@ export function StaffShell({
         };
     }, [refreshSummary]);
 
-    const seedSummary = useCallback((next: StaffWorkspaceSummary | null) => {
+    const seedSummary = useCallback((next: StaffWorkspaceNotifications | null) => {
         // Do not let the initial slow stream overwrite a client revalidation.
         // Later router.refresh() seeds can update idle, still-valid sessions.
         const initialSeed = !receivedSeedRef.current;

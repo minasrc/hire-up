@@ -129,3 +129,31 @@ test('the app server cannot reuse another process or fill missing database setti
         stdio: 'pipe',
     }));
 });
+
+function serverConfig(mode) {
+    return JSON.parse(execFileSync(process.execPath, ['--input-type=module', '-e', `const { default: config } = await import('./playwright.config.mjs'); console.log(JSON.stringify({ command: config.webServer.command, reuse: config.webServer.reuseExistingServer, url: config.webServer.url, workers: config.workers, projects: config.projects.map(project => project.name) }));`], {
+        cwd: new URL('../../', import.meta.url), encoding: 'utf8', stdio: 'pipe',
+        env: { ...process.env, E2E_SERVER_MODE: mode, E2E_REAL_BACKEND: '0', NEXT_PUBLIC_SUPABASE_URL: '', SUPABASE_SERVICE_ROLE_KEY: '' },
+    }));
+}
+
+test('production browser mode serves an existing build without changing test coverage', () => {
+    const config = serverConfig('production');
+    assert.equal(config.command, 'npm run start -- --hostname 127.0.0.1');
+    assert.equal(config.reuse, false);
+    assert.equal(config.url, 'http://127.0.0.1:3000/jobs');
+    assert.equal(config.workers, 2);
+    assert.deepEqual(config.projects, ['desktop-chromium', 'mobile-chromium']);
+});
+
+test('local development mode is unchanged and invalid modes cannot fall back', () => {
+    for (const mode of [undefined, 'development']) assert.equal(serverConfig(mode).command, 'npm run dev -- --hostname 127.0.0.1');
+    for (const mode of ['', 'prod', 'arbitrary-command']) assert.throws(() => serverConfig(mode), error => error.status !== 0 && error.stderr.includes('E2E_SERVER_MODE must be development or production.'));
+});
+
+test('production browser mode still rejects a hosted backend before starting a server', () => {
+    assert.throws(() => execFileSync(process.execPath, ['--input-type=module', '-e', 'await import("./playwright.config.mjs")'], {
+        cwd: new URL('../../', import.meta.url), encoding: 'utf8', stdio: 'pipe',
+        env: { ...process.env, E2E_SERVER_MODE: 'production', E2E_REAL_BACKEND: '1', NEXT_PUBLIC_SUPABASE_URL: 'https://production.supabase.co', SUPABASE_SERVICE_ROLE_KEY: localKey },
+    }), error => error.status !== 0 && error.stderr.includes('explicitly allowed local Supabase'));
+});

@@ -17,6 +17,11 @@ test('docs and CI policy changes avoid unrelated application suites', () => {
     assert.equal(selectJobs(['scripts/ci-selection.mjs']).appChecks, false);
 });
 
+test('browser configuration selects quality and browser coverage', () => {
+    assert.deepEqual(selected(['playwright.config.mjs']), ['quality', 'browser-tests']);
+    assert.equal(selectJobs(['playwright.config.mjs']).appChecks, true);
+});
+
 test('directory and search UI changes run dependent workflows, without unrelated workers', () => {
     assert.deepEqual(selected(['src/app/staff/applications/applications-browser.tsx']), ['quality', 'staff-workspace']);
     assert.deepEqual(selected(['src/app/staff/candidates/candidates-browser.tsx']),
@@ -136,8 +141,33 @@ test('all workflow suites are controlled by the selector and the aggregate gate 
     const jobs = [...workflow.split(/^jobs:\n/m)[1].matchAll(/^  ([a-z][a-z-]+):$/gm)].map((match) => match[1]);
     assert.deepEqual(jobs.filter((job) => !['plan', 'validation'].includes(job)), JOBS);
     for (const job of JOBS) {
-        assert.ok(workflow.includes(`  ${job}:\n    needs: plan\n    if: \${{ fromJSON(needs.plan.outputs.selection)['${job}'] }}`));
+        const needs = job === 'browser-tests' ? '[plan, quality]' : 'plan';
+        assert.ok(workflow.includes(`  ${job}:\n    needs: ${needs}\n    if: \${{ fromJSON(needs.plan.outputs.selection)['${job}'] }}`));
     }
     assert.ok(workflow.includes(`needs: [plan, ${JOBS.join(', ')}]`));
     assert.ok(workflow.includes("if (enabled && results[job]?.result !== 'success')"));
+});
+
+test('browser job consumes the quality build without rebuilding or falling back to dev', () => {
+    const workflow = readFileSync(new URL('../../.github/workflows/ci.yml', import.meta.url), 'utf8');
+    const quality = workflow.split('  quality:\n')[1].split('  browser-tests:\n')[0];
+    const browser = workflow.split('  browser-tests:\n')[1].split('  database-foundation:\n')[0];
+    assert.equal((workflow.match(/^\s+(?:run: )?npm run build$/gm) ?? []).length, 1);
+    assert.ok(quality.includes("node --input-type=module -e 'await import(\"./playwright.config.mjs\")'"));
+    assert.ok(quality.includes('browser_build_id: ${{ steps.upload-browser-build.outputs.artifact-id }}'));
+    assert.ok(quality.includes("tar --exclude='.next/cache' -czf \"$RUNNER_TEMP/browser-build.tgz\" .next"));
+    assert.ok(quality.includes('name: browser-build-${{ github.run_id }}-${{ github.run_attempt }}'));
+    assert.ok(quality.includes('retention-days: 1'));
+    assert.ok(browser.includes('artifact-ids: ${{ needs.quality.outputs.browser_build_id }}'));
+    assert.ok(browser.includes('BUILD_ARTIFACT_ID: ${{ needs.quality.outputs.browser_build_id }}'));
+    assert.ok(browser.indexOf('Require the build from this workflow') < browser.indexOf('Download browser build'));
+    assert.ok(browser.includes('test -s .next/BUILD_ID'));
+    assert.ok(browser.includes('E2E_SERVER_MODE: production'));
+    assert.ok(browser.includes('run: npm run test:e2e -- --output=test-results/browser-ci'));
+    assert.ok(browser.includes('if: failure()'));
+    assert.ok(browser.includes('path: test-results/browser-ci/'));
+    assert.doesNotMatch(browser, /npm run (build|dev)/);
+    for (const section of [quality, browser]) {
+        for (const line of ["E2E_REAL_BACKEND: '0'", "NEXT_PUBLIC_SUPABASE_URL: ''", "NEXT_PUBLIC_SUPABASE_ANON_KEY: ''", "SUPABASE_SERVICE_ROLE_KEY: ''", 'NEXTAUTH_URL: http://127.0.0.1:3000', 'NEXTAUTH_SECRET: local-playwright-secret']) assert.ok(section.includes(line), line);
+    }
 });

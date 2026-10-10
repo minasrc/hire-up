@@ -43,6 +43,8 @@ jobs:
     name: Quality and build
     runs-on: ubuntu-latest
     timeout-minutes: 20
+    outputs:
+      browser_build_id: ${{ steps.upload-browser-build.outputs.artifact-id }}
     steps:
       - name: Check out repository
         uses: actions/checkout@v4
@@ -62,10 +64,32 @@ jobs:
         run: npm test
       - name: Build production application
         if: needs.plan.outputs.app_checks == 'true'
-        run: npm run build
+        env:
+          E2E_REAL_BACKEND: '0'
+          NEXT_PUBLIC_SUPABASE_URL: ''
+          NEXT_PUBLIC_SUPABASE_ANON_KEY: ''
+          SUPABASE_SERVICE_ROLE_KEY: ''
+          NEXTAUTH_URL: http://127.0.0.1:3000
+          NEXTAUTH_SECRET: local-playwright-secret
+        run: |
+          node --input-type=module -e 'await import("./playwright.config.mjs")'
+          npm run build
+      - name: Package browser build
+        if: ${{ fromJSON(needs.plan.outputs.selection)['browser-tests'] }}
+        run: tar --exclude='.next/cache' -czf "$RUNNER_TEMP/browser-build.tgz" .next
+      - name: Share browser build
+        if: ${{ fromJSON(needs.plan.outputs.selection)['browser-tests'] }}
+        id: upload-browser-build
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: browser-build-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/browser-build.tgz
+          if-no-files-found: error
+          retention-days: 1
+          compression-level: 0
 
   browser-tests:
-    needs: plan
+    needs: [plan, quality]
     if: ${{ fromJSON(needs.plan.outputs.selection)['browser-tests'] }}
     name: Browser tests
     runs-on: ubuntu-latest
@@ -80,10 +104,40 @@ jobs:
           cache: npm
       - name: Install dependencies
         run: npm ci
+      - name: Require the build from this workflow
+        env:
+          BUILD_ARTIFACT_ID: ${{ needs.quality.outputs.browser_build_id }}
+        run: '[[ "$BUILD_ARTIFACT_ID" =~ ^[0-9]+$ ]]'
+      - name: Download browser build
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+        with:
+          artifact-ids: ${{ needs.quality.outputs.browser_build_id }}
+          path: ${{ runner.temp }}/browser-build
+          merge-multiple: true
+      - name: Restore browser build
+        run: |
+          tar -xzf "$RUNNER_TEMP/browser-build/browser-build.tgz"
+          test -s .next/BUILD_ID
       - name: Install Chromium
         run: npx playwright install --with-deps chromium
       - name: Run browser tests
-        run: npm run test:e2e
+        env:
+          E2E_SERVER_MODE: production
+          E2E_REAL_BACKEND: '0'
+          NEXT_PUBLIC_SUPABASE_URL: ''
+          NEXT_PUBLIC_SUPABASE_ANON_KEY: ''
+          SUPABASE_SERVICE_ROLE_KEY: ''
+          NEXTAUTH_URL: http://127.0.0.1:3000
+          NEXTAUTH_SECRET: local-playwright-secret
+        run: npm run test:e2e -- --output=test-results/browser-ci
+      - name: Preserve browser failures
+        if: failure()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: browser-failures-${{ github.run_id }}-${{ github.run_attempt }}
+          path: test-results/browser-ci/
+          if-no-files-found: ignore
+          retention-days: 3
 
   database-foundation:
     needs: plan

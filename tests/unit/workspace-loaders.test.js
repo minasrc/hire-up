@@ -23,6 +23,11 @@ function loaders({ stage = 'verified', fail = false, timing = false } = {}) {
                 if (fail) throw new Error('private data');
                 return { jobs: true };
             },
+            getStaffNotifications: async (...args) => {
+                calls.push(['notifications', args]);
+                if (fail) throw new Error('private data');
+                return { capabilities: { jobs: true }, attention: { openTasks: 2 } };
+            },
             getStaffWorkspace: async (...args) => {
                 calls.push(['summary', args]);
                 if (fail) throw new Error('private data');
@@ -52,13 +57,32 @@ test('navigation capabilities load without querying dashboard metrics', async ()
     assert.equal(subject.logs.length, 0);
 });
 
+test('staff notifications load without querying dashboard metrics', async () => {
+    const subject = loaders();
+    const result = await subject.loadStaffNotifications();
+    assert.equal(result.gate, subject.gate);
+    assert.equal(result.summary.attention.openTasks, 2);
+    assert.deepEqual(subject.calls, [['notifications', [
+        subject.gate.pool, subject.gate.identity, 'private-org',
+    ]]]);
+    assert.equal(subject.logs.length, 0);
+});
+
 test('unverified stages never query capabilities or workspace records', async () => {
     for (const stage of ['signed-out', 'unresolved', 'resolved', 'mfa-pending']) {
         const subject = loaders({ stage });
         assert.equal((await subject.loadStaffCapabilities()).capabilities, null);
         assert.equal((await subject.loadStaffWorkspace()).summary, null);
+        assert.equal((await subject.loadStaffNotifications()).summary, null);
         assert.equal(subject.calls.length, 0);
     }
+});
+
+test('loader failures return null without leaking partial data', async () => {
+    const subject = loaders({ fail: true });
+    assert.equal((await subject.loadStaffCapabilities()).capabilities, null);
+    assert.equal((await subject.loadStaffWorkspace()).summary, null);
+    assert.equal((await subject.loadStaffNotifications()).summary, null);
 });
 
 test('timings stay opt-in and contain no identity or error details', async () => {
@@ -66,9 +90,11 @@ test('timings stay opt-in and contain no identity or error details', async () =>
         const subject = loaders({ timing: true, fail });
         await subject.loadStaffCapabilities();
         await subject.loadStaffWorkspace();
+        await subject.loadStaffNotifications();
         assert.deepEqual(subject.logs.map(JSON.parse), [
             { event: 'staff-read', operation: 'capabilities', durationMs: 0 },
             { event: 'staff-read', operation: 'summary', durationMs: 0 },
+            { event: 'staff-read', operation: 'notifications', durationMs: 0 },
         ]);
         assert.ok(subject.logs.every((line) => !line.includes('private')));
     }
