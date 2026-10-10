@@ -1,7 +1,7 @@
 import Link from 'next/link';
 import { ArrowLeft } from 'lucide-react';
 import { requireStaffVerified } from '@/lib/staff-gate.server';
-import { loadStaffWorkspace } from '@/lib/workspace.server';
+import { loadStaffCapabilities } from '@/lib/workspace.server';
 import { PageHeader } from '@/components/staff-preview/shared';
 import { Card, CardContent } from '@/components/staff-ui/card';
 import { ClientForm } from '../../workspace-forms';
@@ -12,8 +12,8 @@ export const metadata = { title: 'New client · Agora staff' };
 
 export default async function StaffClientNewPage() {
     await requireStaffVerified();
-    const { summary } = await loadStaffWorkspace();
-    const canWrite = summary?.capabilities.writeClients === true;
+    const { capabilities } = await loadStaffCapabilities();
+    const canWrite = capabilities?.writeClients === true;
     return (
         <section className="mx-auto flex w-full max-w-5xl flex-col gap-6">
             <Link
@@ -33,7 +33,7 @@ export default async function StaffClientNewPage() {
                         <ClientForm />
                     ) : (
                         <p className="py-4 text-center text-sm text-muted-foreground">
-                            {summary === null
+                            {capabilities === null
                                 ? 'Client creation is temporarily unavailable.'
                                 : 'Creating clients requires the clients.write permission.'}
                         </p>

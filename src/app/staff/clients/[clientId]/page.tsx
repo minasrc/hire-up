@@ -5,7 +5,7 @@ import { getClient } from '@/lib/client-job-operations';
 import { SOCIAL_PLATFORM_NAMES } from '@/lib/client-job-contracts';
 import { StaffAuthorizationError } from '@/lib/staff-authorization';
 import { requireStaffVerified } from '@/lib/staff-gate.server';
-import { loadStaffWorkspace } from '@/lib/workspace.server';
+import { loadStaffCapabilities } from '@/lib/workspace.server';
 import { FieldLabel, PageHeader, StatusBadge } from '@/components/staff-preview/shared';
 import { Button } from '@/components/staff-ui/button';
 import {
@@ -63,11 +63,11 @@ export default async function StaffClientPage(
         notFound();
     }
 
-    const { summary } = await loadStaffWorkspace();
-    const canWrite = summary?.capabilities.writeClients === true;
-    const canReadJobs = summary?.capabilities.jobs === true;
-    const canWriteJobs = summary?.capabilities.writeJobs === true;
-    const canReadApplications = summary?.capabilities.applications === true;
+    const { capabilities } = await loadStaffCapabilities();
+    const canWrite = capabilities?.writeClients === true;
+    const canReadJobs = capabilities?.jobs === true;
+    const canWriteJobs = capabilities?.writeJobs === true;
+    const canReadApplications = capabilities?.applications === true;
 
     return (
         <section className="mx-auto flex w-full max-w-5xl flex-col gap-6">
@@ -189,7 +189,7 @@ export default async function StaffClientPage(
                         <ClientForm clientId={client.id} initial={client} />
                     ) : (
                         <p className="py-4 text-center text-sm text-muted-foreground">
-                            {summary === null
+                            {capabilities === null
                                 ? 'Editing is temporarily unavailable.'
                                 : 'Editing this client requires the clients.write permission.'}
                         </p>

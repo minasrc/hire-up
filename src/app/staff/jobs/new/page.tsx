@@ -2,7 +2,7 @@ import Link from 'next/link';
 import { ArrowLeft } from 'lucide-react';
 import { getClient, listClients } from '@/lib/client-job-operations';
 import { requireStaffVerified } from '@/lib/staff-gate.server';
-import { loadStaffWorkspace } from '@/lib/workspace.server';
+import { loadStaffCapabilities } from '@/lib/workspace.server';
 import { EmptyState, PageHeader } from '@/components/staff-preview/shared';
 import { Button } from '@/components/staff-ui/button';
 import { Card, CardContent } from '@/components/staff-ui/card';
@@ -19,8 +19,8 @@ export default async function StaffJobNewPage({
     searchParams: Promise<Record<string, string | string[] | undefined>>;
 }) {
     const gate = await requireStaffVerified();
-    const { summary } = await loadStaffWorkspace();
-    const canWrite = summary?.capabilities.writeJobs === true;
+    const { capabilities } = await loadStaffCapabilities();
+    const canWrite = capabilities?.writeJobs === true;
     const params = await searchParams;
     const requestedClient = typeof params.client === 'string' ? params.client : undefined;
 
@@ -71,7 +71,7 @@ export default async function StaffJobNewPage({
                 <Card>
                     <CardContent className="py-8 text-center">
                         <p className="text-sm text-muted-foreground">
-                            {summary === null
+                            {capabilities === null
                                 ? 'Job creation is temporarily unavailable.'
                                 : 'Creating jobs requires the jobs.write permission.'}
                         </p>
@@ -83,7 +83,7 @@ export default async function StaffJobNewPage({
                     title="Create a client first"
                     description="Jobs require an active client. Create or activate a client first."
                     action={
-                        summary?.capabilities.writeClients === true ? (
+                        capabilities?.writeClients === true ? (
                             <Button asChild>
                                 <Link href="/staff/clients/new">New client</Link>
                             </Button>

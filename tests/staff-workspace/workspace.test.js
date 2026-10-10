@@ -1872,6 +1872,17 @@ test('staff workspace end-to-end in a real browser', async (t) => {
             await page.getByRole('link', { name: 'Legacy Synthetic Job' })
                 .first().waitFor();
 
+            await gotoStaff(page, `${baseURL}/staff/clients/new`);
+            await expect(page.locator('#client-name')).toBeVisible();
+            await gotoStaff(page, `${baseURL}/staff/jobs/new`);
+            await expect(page.locator('#job-client')).toBeVisible();
+            await gotoStaff(page, `${baseURL}/staff/clients/${CJ_ID.CLIENT_LEGACY_B}`);
+            await expect(page.locator('#client-name')).toBeVisible();
+            await expect(page.getByRole('link', { name: 'Add job', exact: true })).toBeVisible();
+            await gotoStaff(page, `${baseURL}/staff/jobs/${CJ_ID.JOB_LEGACY_B}`);
+            await expect(page.getByRole('heading', { name: 'Legacy Synthetic Job', exact: true })).toBeVisible();
+            await expect(page.getByText('Job creation is temporarily unavailable.', { exact: true })).toHaveCount(0);
+
             const context = await browser.newContext({
                 viewport: { width: 390, height: 844 },
             });
