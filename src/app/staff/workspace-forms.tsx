@@ -139,6 +139,19 @@ const TELEGRAM_HINT =
 
 const invalidClass = 'border-destructive focus-visible:ring-destructive';
 
+const clientFields = (client?: ClientFormValues) => ({
+    name: client?.name ?? '',
+    contactName: client?.contactName ?? '',
+    contactEmail: client?.contactEmail ?? '',
+    telegramUsername: client?.telegramUsername ?? '',
+    website: client?.website ?? '',
+    anonymousDescription: client?.anonymousDescription ?? '',
+    isStealth: client?.isStealth ?? false,
+});
+
+const clientLinks = (client?: ClientFormValues): SocialRow[] =>
+    (client?.socialLinks ?? []).map(link => ({ ...link, key: crypto.randomUUID() }));
+
 export function ClientForm({
     clientId,
     initial,
@@ -151,7 +164,9 @@ export function ClientForm({
     const router = useRouter();
     const formRef = useRef<HTMLFormElement>(null);
     const busyRef = useRef(false);
-    const versionRef = useRef(initial?.version);
+    const [baseVersion, setBaseVersion] = useState(initial?.version);
+    const [dirty, setDirty] = useState(false);
+    const [seenInitial, setSeenInitial] = useState(initial);
     const focusRequestRef = useRef<string | null>(null);
     const [error, setError] = useState<string | null>(null);
     const [saved, setSaved] = useState(false);
@@ -161,22 +176,30 @@ export function ClientForm({
         Record<string, { platform?: string; url?: string }>
     >({});
     const [socialError, setSocialError] = useState<string | null>(null);
-    const [values, setValues] = useState({
-        name: initial?.name ?? '',
-        contactName: initial?.contactName ?? '',
-        contactEmail: initial?.contactEmail ?? '',
-        telegramUsername: initial?.telegramUsername ?? '',
-        website: initial?.website ?? '',
-        anonymousDescription: initial?.anonymousDescription ?? '',
-        isStealth: initial?.isStealth ?? false,
-    });
-    const [links, setLinks] = useState<SocialRow[]>(
-        (initial?.socialLinks ?? []).map((link) => ({
-            key: crypto.randomUUID(),
-            platform: link.platform,
-            url: link.url,
-        })),
-    );
+    const [values, setValues] = useState(() => clientFields(initial));
+    const [links, setLinks] = useState(() => clientLinks(initial));
+    const newerSnapshot = initial && baseVersion
+        && BigInt(initial.version) > BigInt(baseVersion);
+
+    const adoptLatest = () => {
+        if (!initial) return;
+        setBaseVersion(initial.version);
+        setValues(clientFields(initial));
+        setLinks(clientLinks(initial));
+        setDirty(false);
+        setSaved(false);
+        setError(null);
+        setFieldErrors({});
+        setRowErrors({});
+        setSocialError(null);
+    };
+
+    // React rerenders before committing: fields and their concurrency version
+    // must move together. A dirty draft keeps the version it was edited against.
+    if (seenInitial !== initial && !busy) {
+        setSeenInitial(initial);
+        if (!dirty && newerSnapshot) adoptLatest();
+    }
 
     useEffect(() => {
         const target = focusRequestRef.current;
@@ -189,6 +212,7 @@ export function ClientForm({
     });
 
     const patch = (partial: Partial<typeof values>) => {
+        setDirty(true);
         setSaved(false);
         setValues((current) => ({ ...current, ...partial }));
     };
@@ -222,6 +246,7 @@ export function ClientForm({
     };
 
     const updateLink = (key: string, partial: Partial<SocialRow>) => {
+        setDirty(true);
         setSaved(false);
         clearRowError(key);
         setSocialError(null);
@@ -233,12 +258,14 @@ export function ClientForm({
     };
 
     const removeLink = (key: string) => {
+        setDirty(true);
         setSaved(false);
         clearSocialErrors();
         setLinks((current) => current.filter((link) => link.key !== key));
     };
 
     const addLink = () => {
+        setDirty(true);
         setSaved(false);
         clearSocialErrors();
         setLinks((current) => [
@@ -343,7 +370,7 @@ export function ClientForm({
         try {
             payload = await staffMutation(url, {
                 fields,
-                ...(clientId ? { expectedVersion: versionRef.current } : {}),
+                ...(clientId ? { expectedVersion: baseVersion } : {}),
             });
         } catch (caught) {
             if (caught instanceof StaffMutationError
@@ -363,21 +390,17 @@ export function ClientForm({
                 && typeof snapshot.version === 'string'
                 && /^[1-9]\d{0,18}$/.test(snapshot.version)
                 && (snapshot.socialLinks == null || Array.isArray(snapshot.socialLinks))) {
-                versionRef.current = snapshot.version;
-                setValues({
-                    name: snapshot.name,
-                    contactName: snapshot.contactName ?? '',
-                    contactEmail: snapshot.contactEmail ?? '',
-                    telegramUsername: snapshot.telegramUsername ?? '',
-                    website: snapshot.website ?? '',
-                    anonymousDescription: snapshot.anonymousDescription ?? '',
-                    isStealth: snapshot.isStealth ?? false,
-                });
-                setLinks((snapshot.socialLinks ?? []).map(link => ({ ...link, key: crypto.randomUUID() })));
+                setBaseVersion(snapshot.version);
+                setDirty(false);
+                setValues(clientFields(snapshot));
+                setLinks(clientLinks(snapshot));
                 onSaved(snapshot);
             } else {
                 const version = payload?.result?.version;
-                if (typeof version === 'string' && /^[1-9]\d{0,18}$/.test(version)) versionRef.current = version;
+                if (typeof version === 'string' && /^[1-9]\d{0,18}$/.test(version)) {
+                    setBaseVersion(version);
+                    setDirty(false);
+                }
                 router.refresh();
             }
             return;
@@ -679,6 +702,15 @@ export function ClientForm({
                     {error}
                 </p>
             )}
+            {dirty && newerSnapshot ? (
+                <div role="status" className="flex flex-col gap-2 text-sm text-muted-foreground">
+                    <p>This client has newer saved changes. Your unsaved edits are still here.</p>
+                    <Button type="button" variant="outline" disabled={busy}
+                        className="self-start" onClick={adoptLatest}>
+                        Discard edits and load latest
+                    </Button>
+                </div>
+            ) : null}
             {saved ? (
                 <p role="status" className="text-sm text-muted-foreground">
                     Changes saved.

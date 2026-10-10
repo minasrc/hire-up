@@ -172,6 +172,54 @@ const success = snapshot => json(200, {
     },
 });
 
+test('a fresh server snapshot updates a pristine edit form and its expected version', async () => {
+    const page = formSubject(() => success(savedClient('3', 'Saved after refresh')));
+    page.render();
+    page.render({ clientId: id, initial: savedClient('2', 'Updated by another staff member'), onSaved: () => {} });
+    assert.equal(page.input().props.value, 'Updated by another staff member');
+    await page.submit();
+    assert.equal(page.requests[0].body.expectedVersion, '2');
+});
+
+test('a refreshed pristine form submits the new concurrency version', async () => {
+    const page = formSubject(() => json(409, { error: 'Version conflict' }));
+    page.render();
+    page.render({ clientId: id, initial: savedClient('2', 'Refreshed'), onSaved: () => {} });
+    await page.submit();
+    assert.equal(page.requests[0].body.expectedVersion, '2');
+});
+
+test('a newer server snapshot preserves a dirty draft and its base until discard', async () => {
+    const page = formSubject(index => index === 1
+        ? json(409, { error: 'Version conflict' })
+        : success(savedClient('3', 'Accepted latest edit')));
+    page.changeName('Unsaved local draft');
+    page.render({ clientId: id, initial: savedClient('2', 'Other staff edit'), onSaved: () => {} });
+    assert.equal(page.input().props.value, 'Unsaved local draft');
+    await page.submit();
+    assert.equal(page.requests[0].body.expectedVersion, '1');
+    assert.equal(page.requests[0].body.fields.name, 'Unsaved local draft');
+    const discard = nodes(page.render()).find(node =>
+        node.type === 'Button' && node.props.children === 'Discard edits and load latest');
+    assert.ok(discard);
+    discard.props.onClick();
+    assert.equal(page.input().props.value, 'Other staff edit');
+    assert.ok(!nodes(page.render()).some(node => node.props.role === 'alert'));
+    page.changeName('Edit based on latest');
+    await page.submit();
+    assert.equal(page.requests[1].body.expectedVersion, '2');
+});
+
+test('stale refresh props cannot regress acknowledged fields or the save version', async () => {
+    const page = formSubject(() => success(savedClient('3', 'New saved version')));
+    page.changeName('Save version three');
+    await page.submit();
+    page.render({ clientId: id, initial: savedClient('2', 'Stale refresh'), onSaved: () => {} });
+    assert.equal(page.input().props.value, 'New saved version');
+    await page.submit();
+    assert.equal(page.requests[1].body.expectedVersion, '3');
+});
+
 test('successful edits adopt canonical fields and advance the next expected version', async () => {
     const snapshots = [
         savedClient('2', 'Canonical saved name'),

@@ -917,6 +917,10 @@ test('staff workspace end-to-end in a real browser', async (t) => {
             assert.equal(rscRequests.length, 0);
 
             await page.reload({ waitUntil: 'domcontentloaded' });
+            // Streaming can briefly leave both the placeholder and its replacement
+            // in the DOM; wait for one field before making a strict value assertion.
+            await expect(page.locator('#client-name')).toHaveCount(1);
+            await expect(page.locator('#client-contact-name')).toHaveCount(1);
             await expect(page.locator('#client-name'))
                 .toHaveValue('Synthetic Browser Client Renamed');
             await expect(page.locator('#client-contact-name'))
