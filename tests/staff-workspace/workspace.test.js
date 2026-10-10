@@ -157,6 +157,8 @@ const sampleContrast = (locator) => locator.first().evaluate((node) => {
 
 test('staff workspace end-to-end in a real browser', async (t) => {
     assertLocalTestEnvironment();
+    const serverMode = process.env.STAFF_WORKSPACE_SERVER_MODE ?? 'development';
+    assert.ok(['development', 'production'].includes(serverMode), 'Invalid staff workspace server mode');
     // Run a related sequence against one fixture when diagnosing browser ordering failures.
     const casePattern = process.env.STAFF_WORKSPACE_CASE_PATTERN
         ? new RegExp(process.env.STAFF_WORKSPACE_CASE_PATTERN) : null;
@@ -243,7 +245,7 @@ test('staff workspace end-to-end in a real browser', async (t) => {
         PATH: process.env.PATH,
         HOME: process.env.HOME,
         SHELL: process.env.SHELL,
-        NODE_ENV: 'development',
+        NODE_ENV: serverMode,
         NEXT_TELEMETRY_DISABLED: '1',
         NODE_OPTIONS: `--require ${preloadPath}`,
         STAFF_DATABASE_URL: databaseUrl,
@@ -267,7 +269,7 @@ test('staff workspace end-to-end in a real browser', async (t) => {
 
     const serverOutput = [];
     const next = spawn(process.execPath,
-        [nextBin, 'dev', '--webpack', '-p', String(port), '-H', '127.0.0.1'], {
+        [nextBin, ...(serverMode === 'production' ? ['start'] : ['dev', '--webpack']), '-p', String(port), '-H', '127.0.0.1'], {
             cwd: repoRoot,
             env: childEnv,
             stdio: ['ignore', 'pipe', 'pipe'],
@@ -887,7 +889,10 @@ test('staff workspace end-to-end in a real browser', async (t) => {
     });
 
     await runCase('job edit preserves rich text and adds a bonus through the UI', async () => {
-        await gotoStaff(page, `${baseURL}/staff/jobs/${createdJobId}/edit`);
+        await gotoStaff(page, `${baseURL}/staff/jobs/${createdJobId}`);
+        await page.getByRole('link', { name: 'Edit draft', exact: true }).click();
+        await page.waitForURL(`${baseURL}/staff/jobs/${createdJobId}/edit`);
+        await expect(page.locator('#job-title')).toBeVisible();
         await fillWhenReady(
             page.locator('#job-title'), 'Synthetic Browser Job Edited');
         await clickUntil(
@@ -908,6 +913,7 @@ test('staff workspace end-to-end in a real browser', async (t) => {
         await saved;
         await page.waitForURL(new RegExp(`/staff/jobs/${createdJobId}$`));
         await page.getByText('Synthetic Browser Job Edited').first().waitFor();
+        await expect(page.getByText('Revision #1 · version 2', { exact: true })).toBeVisible();
 
         await gotoStaff(page, `${baseURL}/staff/jobs/${createdJobId}/edit`);
         await expect(page.locator('#job-title'))
@@ -995,6 +1001,7 @@ test('staff workspace end-to-end in a real browser', async (t) => {
         await page.getByRole('button', { name: 'Start new revision' }).click();
         await nextRevision;
         await page.waitForURL(/\/staff\/jobs\/[0-9a-f-]{36}\/edit/);
+        await expect(page.getByRole('heading', { name: 'Edit draft revision #2', exact: true })).toBeVisible();
         await fillWhenReady(
             page.locator('#job-title'), 'Synthetic Browser Job v2');
         const draftSaved = page.waitForResponse(
@@ -1005,6 +1012,7 @@ test('staff workspace end-to-end in a real browser', async (t) => {
         await draftSaved;
         await page.waitForURL(new RegExp(`/staff/jobs/${createdJobId}$`));
         await page.getByText('Unpublished draft', { exact: true }).first().waitFor();
+        await expect(page.getByText('Synthetic Browser Job v2', { exact: true }).first()).toBeVisible();
         await page.getByText('Listed', { exact: true }).first().waitFor();
         const titles = await publicJobTitles();
         assert.ok(
