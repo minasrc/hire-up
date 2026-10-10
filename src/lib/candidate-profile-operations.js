@@ -41,6 +41,16 @@ export function isMissingProfileFunctionError(error) {
 export async function saveCandidateProfile(
     pool, identity, organizationId, input,
 ) {
+    return saveProfile(pool, identity, organizationId, input, false);
+}
+
+export async function saveCandidateProfileWithSnapshot(
+    pool, identity, organizationId, input,
+) {
+    return saveProfile(pool, identity, organizationId, input, true);
+}
+
+async function saveProfile(pool, identity, organizationId, input, includeSnapshot) {
     const keys = requireKeys(
         input, ['candidateId', 'expectedVersion', 'fields', 'operationId']);
     const args = [
@@ -56,7 +66,13 @@ export async function saveCandidateProfile(
                 `select app.save_candidate_profile_v1(
                     $1::uuid, $2::bigint, $3::jsonb, $4::uuid, $5::uuid) as result`,
                 args);
-            return rows[0].result;
+            const result = rows[0].result;
+            if (!includeSnapshot) return result;
+            const snapshot = await client.query(
+                'select app.get_candidate_profile_v1($1::uuid) as result',
+                [args[0]]);
+            const { candidate, identifiers } = snapshot.rows[0].result;
+            return { ...result, profile: { candidate, identifiers } };
         });
 }
 

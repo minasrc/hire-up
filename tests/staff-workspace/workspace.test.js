@@ -2346,15 +2346,15 @@ test('staff workspace end-to-end in a real browser', async (t) => {
         const heading = page.getByRole('heading', {
             name: 'Profile Persona', level: 1 });
         await heading.waitFor();
-        await page.getByText('QA Engineer').waitFor();
-        await page.getByText('persona@example.test').waitFor();
-        await page.getByText(/Lisbon/).waitFor();
-        await page.getByText(/Owner: Admin Two/).waitFor();
+        await expect(page.getByText('QA Engineer', { exact: true }).filter({ visible: true })).toBeVisible();
+        await expect(page.getByText('persona@example.test', { exact: true }).filter({ visible: true })).toBeVisible();
+        await expect(page.getByText(/Lisbon/).filter({ visible: true })).toBeVisible();
+        await expect(page.getByText(/Owner: Admin Two/).filter({ visible: true })).toBeVisible();
 
         await page.reload({ waitUntil: 'domcontentloaded' });
         await heading.waitFor();
-        await page.getByText('QA Engineer').waitFor();
-        await page.getByText('persona@example.test').waitFor();
+        await expect(page.getByText('QA Engineer', { exact: true }).filter({ visible: true })).toBeVisible();
+        await expect(page.getByText('persona@example.test', { exact: true }).filter({ visible: true })).toBeVisible();
         await page.screenshot({
             path: join(resultsDir, 'staff-workspace-candidate-profile.png'),
             fullPage: true,
@@ -2392,22 +2392,20 @@ test('staff workspace end-to-end in a real browser', async (t) => {
 
         await page.getByRole('heading', {
             name: 'Profile Persona Edited', level: 1 }).waitFor();
-        await page.getByText('Senior QA').waitFor();
+        await expect(page.getByText('Senior QA', { exact: true }).filter({ visible: true })).toBeVisible();
         await expect(page.getByText('Updated summary.', { exact: true }).filter({ visible: true })).toBeVisible();
-        await page.getByText(/Owner: Synthetic Recruiter B/).waitFor();
-        assert.equal(
-            await page.getByTestId('candidate-primary-email').count(), 0,
-            'the cleared email disappears from the header');
-        assert.equal(
-            await page.getByRole('link', { name: 'Profile' }).count(), 0,
-            'the cleared profile link disappears from the header');
+        await expect(page.getByText(/Owner: Synthetic Recruiter B/).filter({ visible: true })).toBeVisible();
+        await expect(page.getByTestId('candidate-primary-email'),
+            'the cleared email disappears from the header').toHaveCount(0);
+        await expect(page.getByRole('link', { name: 'Profile' }),
+            'the cleared profile link disappears from the header').toHaveCount(0);
 
         await page.reload({ waitUntil: 'domcontentloaded' });
         await page.getByRole('heading', {
             name: 'Profile Persona Edited', level: 1 }).waitFor();
         await expect(page.getByText('Updated summary.', { exact: true }).filter({ visible: true })).toBeVisible();
-        assert.equal(await page.getByTestId('candidate-primary-email').count(), 0);
-        assert.equal(await page.getByRole('link', { name: 'Profile' }).count(), 0);
+        await expect(page.getByTestId('candidate-primary-email')).toHaveCount(0);
+        await expect(page.getByRole('link', { name: 'Profile' })).toHaveCount(0);
 
         await gotoStaff(page, `${baseURL}/staff/candidates`);
         const row = page.getByRole('row', { name: /Profile Persona Edited/ });
@@ -2553,6 +2551,13 @@ test('staff workspace end-to-end in a real browser', async (t) => {
             });
             const editButton = mobile.getByRole('button', {
                 name: 'Edit profile' });
+            const refreshRequests = [];
+            const detailPath = new URL(mobile.url()).pathname;
+            mobile.on('request', request => {
+                if (new URL(request.url()).pathname === detailPath && request.headers().rsc === '1') {
+                    refreshRequests.push(request.url());
+                }
+            });
             await clickUntil(
                 () => editButton.click(),
                 mobile.getByRole('dialog'),
@@ -2569,9 +2574,29 @@ test('staff workspace end-to-end in a real browser', async (t) => {
             );
             await editDialog.getByRole('button', { name: 'Save changes' })
                 .click();
-            assert.equal((await patched).status(), 200);
+            const savedResponse = await patched;
+            assert.equal(savedResponse.status(), 200);
+            const saved = await savedResponse.json();
+            assert.equal(saved.result.profile.candidate.headline, 'Lead Tester');
+            assert.equal(saved.result.profile.candidate.version, '2');
             await expect(editDialog).toBeHidden();
             await mobile.getByText('Lead Tester').waitFor();
+            await expect(mobile.getByText('Profile updated.', { exact: true })).toBeVisible();
+            await editButton.click();
+            await expect(editDialog.locator('#edit-candidate-headline')).toHaveValue('Lead Tester');
+            await editDialog.locator('#edit-candidate-headline').fill('Principal Tester');
+            const secondSave = mobile.waitForResponse(response => response.url().includes('/api/staff/candidates/')
+                && response.request().method() === 'PATCH');
+            await editDialog.getByRole('button', { name: 'Save changes' }).click();
+            const secondResponse = await secondSave;
+            assert.equal(secondResponse.status(), 200);
+            assert.equal(secondResponse.request().postDataJSON().expectedVersion, '2');
+            assert.equal((await secondResponse.json()).result.profile.candidate.version, '3');
+            await expect(editDialog).toBeHidden();
+            await expect(mobile.getByText('Principal Tester', { exact: true })).toBeVisible();
+            assert.deepEqual(refreshRequests, [], 'acknowledged profile saves must not refresh the candidate page');
+            await mobile.reload({ waitUntil: 'domcontentloaded' });
+            await expect(mobile.getByText('Principal Tester', { exact: true }).filter({ visible: true })).toBeVisible();
         } finally {
             await context.close();
         }
