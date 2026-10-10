@@ -27,6 +27,8 @@ Preview data lives only in the mounted preview component's memory: at most five 
 
 ## Staff time-zone preference rollout
 
+Merge the time-zone foundation before its workspace UI follow-up. Both pull requests target main so the repository's normal CI runs; the UI diff includes the foundation until that prerequisite is merged.
+
 Apply `20261011090000_staff_time_zone.sql` before releasing the account settings and time-zone prompt. The foundation read falls back to UTC before migration, but preference saves require the new database function. The production migration workflow and Vercel deployment can complete in either order; confirm the migration history before enabling the UI.
 
 The saved preference belongs to the staff account. Browser detection runs after hydration and when a visible page returns, at most once per minute. It never saves automatically. Switching or choosing a manual zone sends one authenticated preference write, then refreshes server content once after acknowledgement. “Keep current zone” stores only an account/saved-zone/device-zone dismissal in that browser. Calendar-only values retain their original date.
