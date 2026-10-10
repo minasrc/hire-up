@@ -15,7 +15,9 @@ const compile = (path) => ts.transpileModule(
 
 const div = (props) => jsx('div', { ...props, children: props?.children });
 
-function overviewPage({ requireStaffVerified, loadStaffWorkspace }) {
+function overviewPage({ requireStaffVerified, loadStaffWorkspace,
+    loadStaffCapabilities = async () => ({ capabilities: { tasks: true, writeTasks: true } }),
+}) {
     const exports = {};
     const imports = {
         'react/jsx-runtime': jsxRuntime,
@@ -30,7 +32,7 @@ function overviewPage({ requireStaffVerified, loadStaffWorkspace }) {
             }),
         },
         '@/lib/staff-gate.server': { requireStaffVerified },
-        '@/lib/workspace.server': { loadStaffWorkspace },
+        '@/lib/workspace.server': { loadStaffWorkspace, loadStaffCapabilities },
         './overview-sections': {
             OverviewMetrics: ({ summary }) =>
                 jsx('div', { children: `metrics:${JSON.stringify(summary.metrics)}` }),
@@ -127,11 +129,13 @@ test('staff overview shows the unavailable state when the summary fails', async 
     assert.match(html, /Workspace summary is temporarily unavailable/);
     assert.match(html, /retry-stub/);
     assert.doesNotMatch(html, /metrics:/);
+    assert.match(html, /todo:true/);
 });
 
 test('staff overview explains missing task permission instead of a blank panel', async () => {
     const Page = overviewPage({
         requireStaffVerified: verified,
+        loadStaffCapabilities: async () => ({ capabilities: { tasks: false, writeTasks: false } }),
         loadStaffWorkspace: async () => ({
             gate: { stage: 'verified' },
             summary: fullSummary({

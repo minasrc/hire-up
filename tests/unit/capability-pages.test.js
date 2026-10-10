@@ -12,11 +12,15 @@ const compiled = new Map(paths.map(path => [path, ts.transpileModule(readFileSyn
 class StaffAuthorizationError extends Error {}
 function subject(path, capabilities, { emptyClients = false } = {}) {
     const calls = [];
-    const client = { id, name: 'Synthetic client', status: 'active' };
+    const client = {
+        id, name: 'Synthetic client', status: 'active',
+        version: '1', publicProfileVersion: '1',
+    };
     const workspace = { job: { id, clientId: id, title: 'Synthetic job', version: '1', publicationState: 'draft' }, draft: { id, title: 'Synthetic draft', version: '1', revisionNumber: 1 } };
     const forms = Object.fromEntries(['ClientForm', 'JobForm', 'JobListingToggle', 'NewRevisionButton', 'PublishButton'].map(name => [name, name]));
     const imports = {
         'react/jsx-runtime': jsxRuntime,
+        react: { useState: initial => [initial, () => {}] },
         'next/link': { default: 'Link' },
         'next/navigation': { notFound: () => { throw new Error('notFound'); }, redirect: () => { throw new Error('redirect'); } },
         'lucide-react': { ArrowLeft: 'ArrowLeft', Briefcase: 'Briefcase' },
@@ -32,9 +36,23 @@ function subject(path, capabilities, { emptyClients = false } = {}) {
         '@/components/staff-ui/card': Object.fromEntries(['Card', 'CardContent', 'CardDescription', 'CardHeader', 'CardTitle'].map(name => [name, name])),
         '../../workspace-forms': forms, '../../../workspace-forms': forms,
     };
+    const detailExports = {};
+    const detailCode = ts.transpileModule(readFileSync(new URL(
+        '../../src/app/staff/clients/[clientId]/client-detail.tsx', import.meta.url,
+    ), 'utf8'), {
+        compilerOptions: { module: ts.ModuleKind.CommonJS, jsx: ts.JsxEmit.ReactJSX },
+    }).outputText;
+    runInNewContext(detailCode, { exports: detailExports, require: name => { assert.ok(Object.hasOwn(imports, name), name); return imports[name]; } });
+    imports['./client-detail'] = { ClientDetail: detailExports.ClientDetail };
     const exports = {};
     runInNewContext(compiled.get(path), { exports, require: name => { assert.ok(Object.hasOwn(imports, name), name); return imports[name]; } });
-    return { calls, render: () => exports.default({ params: Promise.resolve({ jobId: id, clientId: id }), searchParams: Promise.resolve({}) }) };
+    return { calls, render: async () => {
+        const tree = await exports.default({
+            params: Promise.resolve({ jobId: id, clientId: id }),
+            searchParams: Promise.resolve({}),
+        });
+        return tree.type === detailExports.ClientDetail ? tree.type(tree.props) : tree;
+    } };
 }
 function elements(node) {
     if (!node || typeof node !== 'object') return [];
