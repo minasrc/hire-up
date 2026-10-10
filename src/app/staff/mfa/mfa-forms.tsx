@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from 'react';
+import { useRef, useState } from 'react';
 
 type MfaError = { message: string; returnToStaff?: boolean };
 type MfaResult = { error?: MfaError; backupCodes?: string[] };
@@ -44,18 +44,31 @@ function CodeForm({ onSubmit, label, backup = false, onComplete }: {
     const [code, setCode] = useState('');
     const [error, setError] = useState<MfaError | null>(null);
     const [busy, setBusy] = useState(false);
+    const submitting = useRef(false);
     const submit = async () => {
-        if (busy) return;
+        if (submitting.current) return;
+        submitting.current = true;
         setBusy(true);
         setError(null);
+        let completed = false;
         try {
             const result = await onSubmit(code);
             if (result.error) setError(result.error);
-            else if (onComplete) onComplete(result);
-            else window.location.assign('/staff');
+            else {
+                completed = true;
+                if (onComplete) onComplete(result);
+                else window.location.assign('/staff');
+            }
         } catch {
             setError({ message: 'Could not connect. Check your connection and try again.' });
-        } finally { setBusy(false); }
+        } finally {
+            // A successful code is already consumed. Keep submission locked
+            // while leaving this form, even if navigation has not committed.
+            if (!completed) {
+                submitting.current = false;
+                setBusy(false);
+            }
+        }
     };
     const valid = backup ? /^[a-f0-9]{32}$/i.test(code.replace(/[\s-]/g, '')) : code.length === 6;
     return (
@@ -143,9 +156,18 @@ export function MfaEnrollForm({ qrDataUrl, secret }: { qrDataUrl: string; secret
 
 export function MfaVerifyForm() {
     const [backup, setBackup] = useState(false);
+    const [verified, setVerified] = useState(false);
+    if (verified) return <div className="mt-6 flex flex-col items-center gap-4">
+        <p role="status" className="text-sm">Two-factor verification complete. Opening your workspace…</p>
+        <a href="/staff" className="text-sm underline">Continue to workspace</a>
+    </div>;
     return <>
         <CodeForm key={backup ? 'backup' : 'totp'} label={backup ? 'Use backup code' : 'Verify'} backup={backup}
-            onSubmit={(code) => postCode('/api/staff/mfa/verify', code, backup)} />
+            onSubmit={(code) => postCode('/api/staff/mfa/verify', code, backup)}
+            onComplete={() => {
+                setVerified(true);
+                window.location.assign('/staff');
+            }} />
         <button type="button" className="mt-6 text-sm underline" onClick={() => setBackup(!backup)}>
             {backup ? 'Use authenticator instead' : 'Use a backup code'}
         </button>

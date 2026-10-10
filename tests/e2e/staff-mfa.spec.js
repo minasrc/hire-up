@@ -17,9 +17,10 @@ const backupCodes = Array.from({ length: 10 }, (_, i) => `${String(i).padStart(8
 
 // Exercise the real client component with simulated API responses. This
 // fixture never authenticates, creates a credential, or contacts a database.
-async function mountForm(page, { mode = 'enroll', status = 200, error, networkError = false, missingCodes = false } = {}) {
+async function mountForm(page, { mode = 'enroll', status = 200, error, networkError = false, missingCodes = false, stalledNavigation = false } = {}) {
     const origin = 'http://127.0.0.1:3000';
     const submissions = [];
+    let workspaceRequests = 0;
     await page.route('**/*', async (route) => {
         const request = route.request();
         const path = new URL(request.url()).pathname;
@@ -31,6 +32,11 @@ async function mountForm(page, { mode = 'enroll', status = 200, error, networkEr
                 contentType: 'application/json',
                 body: JSON.stringify(error ? { error } : { ok: true, ...(mode !== 'verify' && !missingCodes ? { backupCodes } : {}) }),
             });
+        }
+        // A 204 navigation leaves the current document in place. Exercise
+        // recovery without replacing the page or changing location.assign.
+        if (path === '/staff' && stalledNavigation && workspaceRequests++ === 0) {
+            return route.fulfill({ status: 204 });
         }
         return route.fulfill({
             contentType: 'text/html',
@@ -50,6 +56,26 @@ async function mountForm(page, { mode = 'enroll', status = 200, error, networkEr
             );`,
     });
     return { origin, submissions };
+}
+
+for (const backup of [false, true]) {
+    test(`successful ${backup ? 'backup' : 'authenticator'} verification cannot resubmit when navigation stalls`, async ({ page }) => {
+        const { origin, submissions } = await mountForm(page, { mode: 'verify', stalledNavigation: true });
+        if (backup) {
+            await page.getByRole('button', { name: 'Use a backup code', exact: true }).click();
+            await page.getByLabel('Backup code', { exact: true }).fill(backupCodes[0]);
+            await page.getByRole('button', { name: 'Use backup code', exact: true }).click();
+        } else await submitCode(page);
+        await expect(page.getByRole('status')).toContainText('verification complete');
+        await expect(page.getByRole('button')).toHaveCount(0);
+        await expect(page.getByRole('textbox')).toHaveCount(0);
+        await expect(page).toHaveURL(`${origin}/__staff-mfa-test`);
+        expect(submissions).toHaveLength(1);
+        await page.getByRole('link', { name: 'Continue to workspace' }).click();
+        await expect(page).toHaveURL(`${origin}/staff`);
+        await expect(page.getByRole('heading', { name: 'Staff destination' })).toBeVisible();
+        expect(submissions).toHaveLength(1);
+    });
 }
 
 async function submitCode(page) {

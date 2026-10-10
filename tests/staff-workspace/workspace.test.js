@@ -404,6 +404,45 @@ test('staff workspace end-to-end in a real browser', async (t) => {
     const page = await desktop.newPage();
     page.setDefaultTimeout(90_000);
 
+    await runCase('MFA verification navigates on the first submit and verified revisits skip the form', async () => {
+        const context = await browser.newContext({ viewport: { width: 1440, height: 1000 } });
+        try {
+            await context.addCookies(sessionOnlyCookies);
+            const verifying = await context.newPage();
+            await verifying.goto(`${baseURL}/staff/mfa/verify`, { waitUntil: 'domcontentloaded' });
+            const code = totpCode('JBSWY3DPEHPK3PXP', totpCounter());
+            await expect(async () => {
+                const input = verifying.getByLabel('Authenticator code');
+                await input.fill('');
+                await input.fill(code);
+                await expect(verifying.getByRole('button', { name: 'Verify', exact: true }))
+                    .toBeEnabled({ timeout: 1500 });
+            }).toPass({ timeout: 30_000 });
+            const submissions = [];
+            verifying.on('request', request => {
+                if (new URL(request.url()).pathname === '/api/staff/mfa/verify'
+                    && request.method() === 'POST') submissions.push(request);
+            });
+            const response = verifying.waitForResponse(r => new URL(r.url()).pathname === '/api/staff/mfa/verify'
+                && r.request().method() === 'POST');
+            await verifying.getByRole('button', { name: 'Verify', exact: true }).click({ noWaitAfter: true });
+            assert.equal((await response).status(), 200);
+            await verifying.waitForURL(`${baseURL}/staff`, { waitUntil: 'domcontentloaded', timeout: 30_000 });
+            await expect(verifying.getByRole('heading', { name: 'Overview', exact: true })).toBeVisible();
+            assert.equal(submissions.length, 1);
+            await verifying.reload({ waitUntil: 'domcontentloaded' });
+            await expect(verifying.getByRole('heading', { name: 'Overview', exact: true })).toBeVisible();
+            await verifying.goto(`${baseURL}/staff/mfa/verify`, { waitUntil: 'domcontentloaded' });
+            await verifying.waitForURL(`${baseURL}/staff`, { waitUntil: 'domcontentloaded', timeout: 30_000 });
+            await expect(verifying.getByLabel('Authenticator code')).toHaveCount(0);
+            assert.equal(submissions.length, 1);
+        } finally {
+            await context.close();
+            // Other auth cases need a fresh counter in this shared synthetic fixture.
+            psql(container, `update app.totp_credentials set last_used_counter = -1 where id = '${TOTP_CREDENTIAL_ID}'`);
+        }
+    });
+
     await runCase('overview renders live metrics, tasks, review queue and clients hiring', async () => {
         const summaryRequests = [];
         const trackSummary = (request) => {
