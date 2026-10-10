@@ -32,6 +32,7 @@ import {
 } from '../support/client-job-workflows.js';
 import { ClientJobContractError } from '../../src/lib/client-job-contracts.js';
 import {
+    getCandidateDetail,
     getCandidateProfile,
     getCandidateProfileOptions,
     listCandidateProfiles,
@@ -174,6 +175,9 @@ test('candidate profiles on PostgreSQL 17', async (t) => {
         assert.equal(created.version, '1');
         const profile = await admin(getCandidateProfile, {
             candidateId: created.candidateId });
+        assert.deepEqual(await admin(getCandidateDetail, { candidateId: created.candidateId }),
+            { workspace: profile, uploadDetails: null },
+            'profiles remain readable before the upload migration');
         assert.equal(profile.candidate.fullName, 'Name Only');
         assert.equal(profile.candidate.email, null);
         assert.equal(profile.candidate.professionalUrl, null);

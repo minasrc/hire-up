@@ -72,6 +72,7 @@ import { saveCandidateUpload, candidateUploadReferenced, getCandidateUploadDetai
 import { submitPublicApplication } from '../../src/lib/intake-operations.js';
 import { listCandidateDuplicateReviews, getCandidateDuplicateComparison, mergeCandidateDuplicates } from '../../src/lib/duplicate-review-operations.js';
 import { getCandidateProfile, resolveCandidateRedirect } from '../../src/lib/candidate-profile-read.js';
+import { getCandidateDetail } from '../../src/lib/candidate-profile-operations.js';
 import { getDocumentDownload } from '../../src/lib/pipeline-operations.js';
 
 test('candidate upload PostgreSQL atomicity, email safety and retry receipts', async (t) => {
@@ -100,6 +101,21 @@ test('candidate upload PostgreSQL atomicity, email safety and retry receipts', a
     assert.equal(result.candidateId, input.candidateId);
     assert.equal(await candidateUploadReferenced(context, input.document.objectKey), true);
     assert.deepEqual(await getCandidateUploadDetails(pool, actor, ORG_B, { candidateId: result.candidateId }), { firstName: 'Ada', lastName: 'Lovelace', compensationPreference: 'EUR 100k', secondaryEmails: ['secondary@example.test'] });
+    await t.test('combined candidate detail matches authorized reads and survives an absent upload function', async () => {
+        const input = { candidateId: result.candidateId };
+        const workspace = await getCandidateProfile(pool, actor, ORG_B, input);
+        const uploadDetails = await getCandidateUploadDetails(pool, actor, ORG_B, input);
+        assert.deepEqual(await getCandidateDetail(pool, actor, ORG_B, input), { workspace, uploadDetails });
+        await assert.rejects(getCandidateDetail(pool, identity(CJ_SUBJECTS.VIEWER), ORG_B, input), { code: 'FORBIDDEN' });
+        await assert.rejects(getCandidateDetail(pool, identity('1001'), ORG_B, input), { code: 'UNAUTHORIZED' });
+        await assert.rejects(getCandidateDetail(pool, actor, ORG_B, { candidateId: randomUUID() }), { code: 'P0002' });
+        psql(container, 'alter function app.get_candidate_upload_details_v1(uuid) rename to get_candidate_upload_details_test;');
+        try {
+            assert.deepEqual(await getCandidateDetail(pool, actor, ORG_B, input), { workspace, uploadDetails: null });
+        } finally {
+            psql(container, 'alter function app.get_candidate_upload_details_test(uuid) rename to get_candidate_upload_details_v1;');
+        }
+    });
     psql(container, `update app.candidates set contact_email = null where id = '${result.candidateId}'`);
     assert.deepEqual((await getCandidateUploadDetails(pool, actor, ORG_B, { candidateId: result.candidateId })).secondaryEmails, ['secondary@example.test']);
     psql(container, `update app.candidates set contact_email = 'SECONDARY@example.test' where id = '${result.candidateId}'`);
