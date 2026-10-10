@@ -3,6 +3,7 @@ import { randomUUID } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import test from 'node:test';
 import { runInNewContext } from 'node:vm';
+import * as React from 'react';
 import * as jsxRuntime from 'react/jsx-runtime';
 import { renderToStaticMarkup } from 'react-dom/server';
 import ts from 'typescript';
@@ -13,6 +14,7 @@ const { jsx, jsxs, Fragment } = jsxRuntime;
 const activeClient = {
     id: randomUUID(), name: 'Synthetic Client', status: 'active',
     socialLinks: [{ platform: 'linkedin', url: 'https://linkedin.com/company/synthetic' }],
+    version: '1', publicProfileVersion: '1',
 };
 const draftClient = { id: randomUUID(), name: 'Draft Client', status: 'draft' };
 const capabilities = { jobs: true, writeJobs: true, applications: true, writeClients: true };
@@ -26,6 +28,7 @@ function loadPage(path, options = {}) {
     const exports = {};
     const imports = {
         'react/jsx-runtime': jsxRuntime,
+        react: React,
         'next/link': { default: ({ children, ...props }) => jsx('a', { ...props, children }) },
         'next/navigation': { notFound: () => assert.fail('unexpected notFound') },
         'lucide-react': { ArrowLeft: () => null, Briefcase: () => null },
@@ -78,6 +81,21 @@ function loadPage(path, options = {}) {
             },
         },
     };
+    const detailExports = {};
+    runInNewContext(ts.transpileModule(
+        readFileSync(new URL(
+            '../../src/app/staff/clients/[clientId]/client-detail.tsx',
+            import.meta.url,
+        ), 'utf8'),
+        { compilerOptions: { module: ts.ModuleKind.CommonJS, jsx: ts.JsxEmit.ReactJSX } },
+    ).outputText, {
+        exports: detailExports,
+        require: (name) => {
+            assert.ok(Object.hasOwn(imports, name), `Unexpected dependency: ${name}`);
+            return imports[name];
+        },
+    });
+    imports['./client-detail'] = { ClientDetail: detailExports.ClientDetail };
     runInNewContext(ts.transpileModule(
         readFileSync(new URL(`../../${path}`, import.meta.url), 'utf8'),
         { compilerOptions: { module: ts.ModuleKind.CommonJS, jsx: ts.JsxEmit.ReactJSX } },

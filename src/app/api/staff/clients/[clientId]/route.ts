@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto';
-import { saveClient } from '@/lib/client-job-operations';
+import { saveClientWithDetails } from '@/lib/client-job-operations';
 import {
     staffApiContext,
     staffErrorResponse,
@@ -8,6 +8,11 @@ import {
 
 export const runtime = 'nodejs';
 
+const privateResponse = (response: Response) => {
+    response.headers.set('cache-control', 'private, no-store');
+    return response;
+};
+
 export async function POST(
     request: Request,
     { params }: { params: Promise<{ clientId: string }> },
@@ -15,12 +20,12 @@ export async function POST(
     const context = await staffApiContext();
     const denied = staffGateResponse(context);
     if (denied) {
-        return denied;
+        return privateResponse(denied);
     }
     const { clientId } = await params;
     const body = await request.json().catch(() => ({}));
     try {
-        const result = await saveClient(
+        const result = await saveClientWithDetails(
             context.pool, context.identity, context.organizationId,
             {
                 clientId,
@@ -29,8 +34,8 @@ export async function POST(
                 operationId: randomUUID(),
             },
         );
-        return Response.json({ ok: true, result });
+        return privateResponse(Response.json({ ok: true, result }));
     } catch (error) {
-        return staffErrorResponse(error);
+        return privateResponse(staffErrorResponse(error));
     }
 }
