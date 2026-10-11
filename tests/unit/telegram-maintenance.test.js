@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { handleTelegramMaintenance, runTelegramMaintenance } from '../../src/lib/telegram-maintenance.js';
-import { drainMaintenance, requestMaintenance } from '../../scripts/run-telegram-maintenance.mjs';
+import { drainMaintenance, requestMaintenance, runMaintenanceCommand } from '../../scripts/run-telegram-maintenance.mjs';
 
 const secret = 'a'.repeat(43);
 const counts = { ownersProcessed: 1, batchesPurged: 2, messagesPurged: 40, bytesFreed: 5120, queriesExpired: 3, queryResultRowsDeleted: 100, analysesPurged: 0, remainingWork: false };
@@ -90,4 +90,33 @@ test('analysis cleanup counts are bounded aggregates and keep scheduled cleanup 
     const draining = await drainMaintenance({}, async () => ({ ...counts, batchesPurged: 0, queriesExpired: 0,
         queryResultRowsDeleted: 0, analysesPurged: 2, remainingWork: true }));
     assert.equal(draining.runs, 8); assert.equal(draining.analysesPurged, 16);
+});
+
+test('scheduled cleanup fails visibly when either required secret is absent without sending a request', async () => {
+    for (const environment of [{}, { TELEGRAM_MAINTENANCE_URL: 'https://synthetic.invalid/api/telegram-maintenance' }, { TELEGRAM_MAINTENANCE_SECRET: secret }]) {
+        const errors = []; const summaries = [];
+        const code = await runMaintenanceCommand({ environment, drain: async () => assert.fail('Incomplete configuration must not send a request'),
+            log: () => assert.fail('Unconfigured cleanup must not log success'), error: message => errors.push(message), summary: message => summaries.push(message) });
+        assert.equal(code, 1);
+        assert.match(errors.join(''), /not configured; no request sent/);
+        assert.match(summaries.join(''), /failed.*configuration is incomplete/);
+        assert.doesNotMatch(errors.join(''), /aaa/);
+    }
+});
+
+test('scheduled cleanup reports actual completion and an actionable remaining-work state', async () => {
+    const logs = []; const summaries = [];
+    const environment = { TELEGRAM_MAINTENANCE_URL: 'https://synthetic.invalid/api/telegram-maintenance', TELEGRAM_MAINTENANCE_SECRET: secret };
+    const result = { ...counts, runs: 8, remainingWork: true };
+    assert.equal(await runMaintenanceCommand({ environment, drain: async options => { assert.equal(options.secret, secret); return result; },
+        log: message => logs.push(message), error: () => assert.fail('Completed requests should not fail'), summary: message => summaries.push(message) }), 0);
+    assert.deepEqual(JSON.parse(logs[0]), result);
+    assert.match(logs[1], /pending work/);
+    assert.match(summaries.join(''), /8 bounded request/);
+    assert.doesNotMatch([...logs, ...summaries].join(''), /aaa|synthetic.invalid/);
+    const errors = [];
+    assert.equal(await runMaintenanceCommand({ environment, drain: async () => { throw new Error(`private conversation ${secret}`); },
+        log: () => assert.fail('Failed requests must not log success'), error: message => errors.push(message), summary: () => {} }), 1);
+    assert.match(errors.join(''), /maintenance failed/);
+    assert.doesNotMatch(errors.join(''), /private conversation|aaa/);
 });

@@ -50,9 +50,11 @@ It rejects browser-origin requests, invalid credentials and owner/limit query
 parameters, and returns aggregate counts only. Redirects are never followed.
 
 Before enabling intake, manually dispatch the workflow and confirm an
-authenticated successful response. An unconfigured workflow prints that no
-request was sent; that is not evidence that cleanup is active. Monitor failed
-runs and repeated `remainingWork: true` results. A database or network failure
+authenticated successful response. An unconfigured workflow now fails and
+reports that no request was sent; a green run requires actual cleanup requests.
+The run summary records bounded request counts and aggregate cleanup totals,
+and identifies pending work without exposing conversation text or credentials.
+Monitor failed runs and repeated `remainingWork: true` results. A database or network failure
 leaves a retryable transaction, not partially decremented quotas. GitHub's
 scheduled jobs can be delayed; this is eventual cleanup, not a deletion-time SLA.
 The hourly schedule reduces scheduled runner starts from 96 to 24 per day.
