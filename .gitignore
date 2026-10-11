@@ -11,7 +11,14 @@ node_modules
 dist
 dist-ssr
 *.local
-.env.local
+# Local secrets, including environment variants in nested services.
+.env
+.env.*
+!.env.example
+.runtime/
+credential.json
+*.session
+*.session-journal
 *.tsbuildinfo
 /test-results/
 /playwright-report/

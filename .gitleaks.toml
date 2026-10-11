@@ -1,0 +1,27 @@
+title = "Hire-up public repository checks"
+
+[extend]
+useDefault = true
+
+# These are public test vectors, not accounts or live credentials. Each
+# exception requires both the exact fixture value and its specific file.
+[[rules]]
+id = "generic-api-key"
+
+[[rules.allowlists]]
+description = "Telegram SDK serialization test"
+condition = "AND"
+paths = ['''(^|/)services/telegram-connector/check-runtime\.mjs$''']
+regexes = ['''^-?123456789012345678n?$''']
+
+[[rules.allowlists]]
+description = "Synthetic Telegram QR test"
+condition = "AND"
+paths = ['''(^|/)tests/unit/telegram-connection-ui\.test\.js$''']
+regexes = ['''^synthetic_123$''']
+
+[[rules.allowlists]]
+description = "RFC TOTP test vector"
+condition = "AND"
+paths = ['''(^|/)tests/unit/totp\.test\.js$''']
+regexes = ['''^GEZDGNBVGY3TQOJQGEZDGNBVGY3TQOJQ$''']
