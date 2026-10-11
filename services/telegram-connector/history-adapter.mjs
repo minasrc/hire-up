@@ -113,6 +113,23 @@ export function createHistoryAdapter({ client, Api }) {
       if (!boundary || JSON.stringify(boundary) === JSON.stringify(cursor)) throw new HistoryReadError('PEER_UNAVAILABLE');
       return { records, nextCursor: boundary, done: false };
     },
+    async reconcile({ peer, messageIds, readPeer, cachePeer, accountUserId, signal }) {
+      if (!Array.isArray(messageIds) || !messageIds.length || messageIds.length > 20 || new Set(messageIds).size !== messageIds.length) throw new HistoryReadError('PEER_UNAVAILABLE');
+      const target = inputPeer(peer, readPeer);
+      const id = messageIds.map(value => new Api.InputMessageID({ id: Number(messageId(value)) }));
+      const request = peer.kind === 'channel' ? new Api.channels.GetMessages({ channel: new Api.InputChannel({ channelId: target.channelId, accessHash: target.accessHash }), id }) : new Api.messages.GetMessages({ id });
+      const response = await invoke(request, signal);
+      if (!Array.isArray(response.messages) || response.messages.length !== messageIds.length) throw new HistoryReadError('PEER_UNAVAILABLE');
+      const entities = entitiesOf(response, cachePeer, new Set([peerKey(peer)]));
+      const records = response.messages.map(message => {
+        if (message.className !== 'MessageEmpty' && peerKey(peerLocator(message.peerId) ?? {}) !== peerKey(peer)) throw new HistoryReadError('PEER_UNAVAILABLE');
+        const record = messageRecord(message, entities, accountUserId);
+        if (!messageIds.includes(record.messageId)) throw new HistoryReadError('PEER_UNAVAILABLE');
+        return record;
+      });
+      if (new Set(records.map(record => record.messageId)).size !== messageIds.length) throw new HistoryReadError('PEER_UNAVAILABLE');
+      return records;
+    },
     async history({ peer, cursor, limit, readPeer, cachePeer, accountUserId, signal }) {
       // Exclusive ID bounds: https://core.telegram.org/method/messages.getHistory
       // The first page freezes the upper ID; arrivals during paging wait for the next pass.

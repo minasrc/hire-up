@@ -1,10 +1,6 @@
-// One provider operation per connected tick. Alternation prevents a large CV
-// queue from starving history and keeps heartbeat/lease renewal between reads.
-export function createConnectedWork({ history, cv }) {
-  let cvTurn = true;
-  return async context => {
-    const worker = cvTurn ? cv : history;
-    cvTurn = !cvTurn;
-    return worker.tick(context);
-  };
+// One provider operation per tick; control heartbeats renew between requests.
+export function createConnectedWork({ history, cv, updates }) {
+  const workers = updates ? [cv, history, updates] : [cv, history];
+  let turn = 0;
+  return context => workers[turn++ % workers.length].tick(context);
 }
