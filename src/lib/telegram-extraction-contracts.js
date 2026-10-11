@@ -1,3 +1,4 @@
+import { literalValueBoundary } from './telegram-literal-boundaries.js';
 import { ClientJobContractError } from './client-job-contracts.js';
 import { assertUuid } from './candidate-profile-contracts.js';
 import { normalizeTelegramDraftFields } from './telegram-intake-contracts.js';
@@ -30,14 +31,14 @@ function list(value, min, max) { if (!Array.isArray(value) || value.length < min
 const text = (v, max) => typeof v === 'string' && v.isWellFormed() && v.length > 0 && v.length <= max;
 
 // ASCII case folding is identical to SQL translate(); non-ASCII text remains
-// exact. Unicode letter/number boundaries prevent short substring promotion.
+// exact. Pinned conservative Unicode separators prevent substring promotion.
 export function literalPrimaryValue(quote, value) {
     const fold = v => v.replace(/[A-Z]/g, c => c.toLowerCase());
     const q = fold(quote); const v = fold(value); if (!v) return false;
     for (let at = q.indexOf(v); at !== -1; at = q.indexOf(v, at + v.length)) {
         const before = Array.from(q.slice(0, at)).at(-1) ?? '';
         const after = Array.from(q.slice(at + v.length))[0] ?? '';
-        if (!/[\p{L}\p{N}]/u.test(before) && !/[\p{L}\p{N}]/u.test(after)) return true;
+        if (literalValueBoundary(before) && literalValueBoundary(after)) return true;
     }
     return false;
 }

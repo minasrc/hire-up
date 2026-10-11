@@ -8,6 +8,7 @@ import pg from 'pg';
 import { POSTGRES_17_IMAGE, assertLocalTestEnvironment, psql, startPostgresContainer, stopAndRemoveContainer } from '../support/foundation-docker.js';
 import { AUTHZ_ID as I, SUBJECTS, installStaffFixture, staffPoolOptions } from '../support/staff-authorization.js';
 import { getTelegramDraft, updateTelegramDraft } from '../../src/lib/telegram-intake-operations.js';
+import { LITERAL_BOUNDARY_RANGES, literalValueBoundary } from '../../src/lib/telegram-literal-boundaries.js';
 import { telegramExtractionWorkerOperation, telegramExtractionStatus } from '../../src/lib/telegram-extraction-operations.js';
 const dir=fileURLToPath(new URL('../../supabase/migrations/',import.meta.url));
 const sqlJson=value=>JSON.stringify(value).replaceAll("'","''");
@@ -15,7 +16,7 @@ const message=(id,text,reply=null)=>({messageId:String(id),kind:'message',sentAt
 test('opt-in bounded reply snapshots preserve source roles, receipts and disposal', {timeout:180000},async t=>{
  assertLocalTestEnvironment();const db=await startPostgresContainer('pgextractioncontext',POSTGRES_17_IMAGE,{publish:true});let pool;let staffPool;
  const priorFlag=process.env.TELEGRAM_EXTRACTION_CONTEXT_ENABLED;t.after(async()=>{await Promise.all([pool?.end(),staffPool?.end()]);stopAndRemoveContainer(db);if(priorFlag===undefined) delete process.env.TELEGRAM_EXTRACTION_CONTEXT_ENABLED;else process.env.TELEGRAM_EXTRACTION_CONTEXT_ENABLED=priorFlag;});
- for(const f of readdirSync(dir).filter(f=>f>='20260922090000_foundation_roles.sql'&&f<='20261011190000_telegram_extraction_context.sql'&&f.endsWith('.sql')).sort())psql(db,readFileSync(join(dir,f),'utf8'));
+ for(const f of readdirSync(dir).filter(f=>f>='20260922090000_foundation_roles.sql'&&f<='20261011200000_telegram_literal_boundaries.sql'&&f.endsWith('.sql')).sort())psql(db,readFileSync(join(dir,f),'utf8'));
  const staffPassword=installStaffFixture(db);staffPool=new pg.Pool(staffPoolOptions(db,staffPassword,3));const password=randomUUID();psql(db,`create role context_worker_test login noinherit password '${password}';grant app_telegram_worker to context_worker_test;`);pool=new pg.Pool({...staffPoolOptions(db,password,3),user:'context_worker_test'});
  const token=randomBytes(48).toString('base64url'),worker=randomUUID(),connection=randomUUID(),account=randomUUID();
  const scoped=sql=>psql(db,`begin;select set_config('app.organization_id','${I.ORG_A}',true),set_config('app.actor_id','${I.USER_ADMIN2}',true);${sql}commit;`);
@@ -106,6 +107,14 @@ test('opt-in bounded reply snapshots preserve source roles, receipts and disposa
  const other={...owner,subject:SUBJECTS.ADMIN1};const foreign=await telegramExtractionStatus(staffPool,other,I.ORG_A);assert.ok(foreign.jobs.every(j=>j.id!==job.id));assert.equal(foreign.contextEnabled,false);
  process.env.TELEGRAM_EXTRACTION_CONTEXT_ENABLED='true';assert.equal((await call('claim',caps)).job.id,f.job);
  scoped(`update app.telegram_history_chats set extraction_enabled=false,extraction_pending=false where id='${f.chat}';`);
+ });
+ await t.test('deterministic SQL boundaries match pinned JS ranges regardless of C collation',async()=>{
+ const points=[...new Set(LITERAL_BOUNDARY_RANGES.flatMap(([from,to])=>[from-1,from,to-1,to]).filter(cp=>cp>0&&cp<0x110000&&!(cp>=0xd800&&cp<=0xdfff)))];
+ const parity=scoped(`set local role app_executor;select cp,app.telegram_context_literal_boundary_v2(chr(cp) collate "C") from unnest(array[${points.join(',')}])cp order by cp;`).split('\n').filter(v=>/^[0-9]+\|[tf]$/.test(v));assert.equal(parity.length,points.length);
+ for(const row of parity){const [cp,allowed]=row.split('|');assert.equal(allowed==='t',literalValueBoundary(String.fromCodePoint(Number(cp))),`SQL/JS parity U+${Number(cp).toString(16)}`);}
+ const rejected=[['東京語','東京'],['٣Alice','Alice'],['Alice٣','Alice'],['Alice²','Alice'],['ⅣAlice','Alice'],['Alice𐒠','Alice'],['e\u0301','e'],['Alice\u200d','Alice'],['Alice\u0378','Alice']];
+ const accepted=['「東京」','東京、','東京。','،東京؛','東京🙂','\t東京\n','東京\u00a0'].map(q=>[q,'東京']);
+ for(const [items,wanted] of [[rejected,'f'],[accepted,'t']]){const result=scoped(`set local role app_executor;select ${items.map(([q,v])=>`app.telegram_context_literal_v2('${q}' collate "C",'${v}' collate "C")`).join(',')};`);assert.ok(result.split('\n').includes(items.map(()=>wanted).join('|')));}
  });
  await t.test('runtime cannot read the dependency ledger or call internal context helpers',async()=>{
  const privileges=psql(db,"select has_table_privilege('app_staff','app.telegram_extraction_context_dependencies','select'),has_table_privilege('app_telegram_worker','app.telegram_extraction_context_dependencies','select'),has_function_privilege('app_telegram_worker','app.telegram_extraction_context_claim_v2(text,boolean)','execute'),has_table_privilege('app_executor','app.telegram_history_messages','trigger');");assert.equal(privileges.trim(),'f|f|f|f');
