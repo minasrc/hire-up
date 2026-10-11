@@ -1,7 +1,7 @@
 "use client";
 
 import { useRouter } from 'next/navigation';
-import { useEffect, useRef, useState, type ReactNode } from 'react';
+import { useEffect, useRef, useState, useSyncExternalStore, type ReactNode } from 'react';
 import { Plus, Trash2 } from 'lucide-react';
 
 import { Button } from '@/components/staff-ui/button';
@@ -1371,6 +1371,10 @@ export function MemberRevokeButton({
     );
 }
 
+const subscribeListingReadiness = () => () => {};
+const listingClientReady = () => true;
+const listingServerReady = () => false;
+
 export function JobListingToggle({
     jobId,
     listed,
@@ -1381,6 +1385,8 @@ export function JobListingToggle({
     expectedVersion: string;
 }) {
     const router = useRouter();
+    const ready = useSyncExternalStore(
+        subscribeListingReadiness, listingClientReady, listingServerReady);
     const [busy, setBusy] = useState(false);
     const [error, setError] = useState<string | null>(null);
 
@@ -1389,7 +1395,7 @@ export function JobListingToggle({
             <Button
                 variant="outline"
                 size="sm"
-                disabled={busy}
+                disabled={!ready || busy}
                 onClick={async () => {
                     setBusy(true);
                     setError(null);

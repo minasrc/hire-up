@@ -1187,6 +1187,47 @@ test('staff workspace end-to-end in a real browser', async (t) => {
         );
     });
 
+    await runCase('job listing waits for hydration before allowing the first click', async () => {
+        const hydrating = await desktop.newPage();
+        hydrating.setDefaultTimeout(30_000);
+        let releaseScripts;
+        const scriptsReady = new Promise(resolve => { releaseScripts = resolve; });
+        await hydrating.route('**/_next/static/**/*.js', async route => {
+            await scriptsReady;
+            if (!hydrating.isClosed()) await route.continue().catch(() => {});
+        });
+        try {
+            // Hold client scripts so the real server-rendered control is tested.
+            await hydrating.goto(`${baseURL}/staff/jobs/${CJ_ID.JOB_LEGACY_B}`, { waitUntil: 'commit' });
+            const toggle = hydrating.getByRole('button', { name: /^(List job|Unlist job)$/ });
+            await expect(toggle).toBeVisible();
+            await expect(toggle).toBeDisabled({ timeout: 1500 });
+            const originalLabel = await toggle.innerText();
+            releaseScripts();
+            await expect(toggle).toBeEnabled({ timeout: 30_000 });
+            let submissions = 0;
+            hydrating.on('request', request => {
+                if (new URL(request.url()).pathname === `/api/staff/jobs/${CJ_ID.JOB_LEGACY_B}/listing`
+                    && request.method() === 'POST') submissions++;
+            });
+            for (const label of [originalLabel, originalLabel === 'List job' ? 'Unlist job' : 'List job']) {
+                const acknowledged = hydrating.waitForResponse(response =>
+                    new URL(response.url()).pathname === `/api/staff/jobs/${CJ_ID.JOB_LEGACY_B}/listing`
+                    && response.request().method() === 'POST');
+                await hydrating.getByRole('button', { name: label, exact: true }).click();
+                const result = await acknowledged;
+                assert.equal(result.status(), 200, await result.text());
+                await expect(hydrating.getByRole('button', {
+                    name: label === 'List job' ? 'Unlist job' : 'List job', exact: true,
+                })).toBeEnabled();
+            }
+            assert.equal(submissions, 2, 'each first click submits once and the original listing is restored');
+        } finally {
+            releaseScripts();
+            await hydrating.close();
+        }
+    });
+
     let boardPage;
     const boardCard = (title) => boardPage.locator('div.group').filter({
         has: boardPage.getByRole('heading', { name: title, exact: true }),
