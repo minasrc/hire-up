@@ -28,7 +28,7 @@ export function conversationDeepLink(chatId: string | null, anchor: string | nul
     if (anchor !== null && (!/^[1-9][0-9]{0,9}$/.test(anchor) || Number(anchor) > 2147483647)) return null;
     return { chatId, ...(anchor ? { anchor } : {}) };
 }
-export type SourceUpdateStatus = { chatId: string; mode: string; needsReextraction: boolean; sourceChangeReason: string | null; cursor: string | null; lastCheckedAt: string | null; lastCycleAt: string | null; nextCheckAt: string | null; errorCode: string | null; status: string };
+export type SourceUpdateStatus = { chatId: string; mode: string; needsReextraction: boolean; sourceChangeReason: string | null; cursor: string | null; lastCheckedAt: string | null; lastCycleAt: string | null; nextCheckAt: string | null; errorCode: string | null; status: string; nativeStatus?: 'baseline_pending' | 'waiting' | 'repair_required' | 'live'; lastNativeAt?: string | null; repairRequestedAt?: string | null; repairCompletedAt?: string | null; gapReason?: string | null; nativeErrorCode?: string | null };
 export function sourceStatusLabel(source: SourceUpdateStatus) {
     if (source.status === 'worker_offline') return 'Connector offline; retained messages remain searchable.';
     if (source.status === 'reconnect_required') return 'Reconnect Telegram to check retained messages.';
@@ -37,4 +37,16 @@ export function sourceStatusLabel(source: SourceUpdateStatus) {
     if (source.status === 'checking') return 'Checking a batch of retained messages; this is a partial sweep.';
     if (source.errorCode || source.status === 'waiting') return 'Retained-message checks are delayed. Keep the connector running; reconnect if Telegram requests sign-in.';
     return 'Selected; retained-message check scheduled.';
+}
+
+export function nativeRepairPending(source: SourceUpdateStatus) {
+    return source.nativeStatus === 'baseline_pending' || source.nativeStatus === 'repair_required'
+        || Boolean(source.repairRequestedAt && (!source.repairCompletedAt || Date.parse(source.repairRequestedAt) > Date.parse(source.repairCompletedAt)));
+}
+export function nativeFeedLabel(source: SourceUpdateStatus) {
+    if (source.mode !== 'native_updates_with_reconciliation' || ['off', 'paused', 'worker_offline', 'reconnect_required'].includes(source.status)) return null;
+    if (nativeRepairPending(source)) return 'Telegram update feed has a gap. Retained-source repair is pending; imported history is not confirmed current.';
+    if (source.nativeStatus === 'waiting' || source.nativeErrorCode) return 'Telegram update polling is delayed. Keep the connector running; reconnect if Telegram requests sign-in.';
+    if (source.nativeStatus === 'live') return 'Telegram update feed checkpoint recorded. This does not confirm all retained history is current.';
+    return 'Telegram update feed status is unavailable.';
 }

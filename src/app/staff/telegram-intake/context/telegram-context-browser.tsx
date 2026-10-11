@@ -11,7 +11,7 @@ import { Dialog, DialogContent, DialogDescription, DialogTitle } from '@/compone
 import { StaffDate } from '../../staff-date';
 import { StaffAuthRecoveryPrompt } from '../../auth-recovery';
 import { staffAuthRecovery } from '@/lib/staff-auth-recovery';
-import { Chat, Message, SearchFilters, contextUrl, forwardedLabel, searchPayload, senderLabel, messageExcerpt, pendingFilterChanges, conversationDeepLink, SourceUpdateStatus, sourceStatusLabel } from './context-model';
+import { Chat, Message, SearchFilters, contextUrl, forwardedLabel, searchPayload, senderLabel, messageExcerpt, pendingFilterChanges, conversationDeepLink, SourceUpdateStatus, sourceStatusLabel, nativeFeedLabel, nativeRepairPending } from './context-model';
 
 const endpoint = '/api/staff/telegram-context';
 const emptyFilters: SearchFilters = { query: '', chatId: '', sender: '', from: '', to: '', attachmentsOnly: false };
@@ -100,6 +100,13 @@ export function TelegramContextBrowser() {
         if (!source) return <p className="text-xs text-muted-foreground">{sourceLoading ? 'Loading retained-message check status…' : 'Retained-message check status unavailable for this chat.'}</p>;
         return <div className="space-y-1 text-xs text-muted-foreground">
             <p>{sourceStatusLabel(source)}</p>
+            {nativeFeedLabel(source) ? <p>{nativeFeedLabel(source)}</p> : null}
+            {source.mode === 'native_updates_with_reconciliation' ? <>
+                <p>Last Telegram update feed read: {source.lastNativeAt ? <StaffDate value={source.lastNativeAt} kind="timestamp" /> : 'No committed provider checkpoint recorded'}. This records the provider read, not candidate extraction completion.</p>
+                {nativeRepairPending(source) ? <p className="font-medium">Retained-source repair gap pending. Paused or offline chats cannot finish repair until checks resume.</p> : null}
+                <p>Repair requested: {source.repairRequestedAt ? <StaffDate value={source.repairRequestedAt} kind="timestamp" /> : 'Not recorded'}.</p>
+                <p>Last completed retained-source repair: {source.repairCompletedAt ? <StaffDate value={source.repairCompletedAt} kind="timestamp" /> : 'No completed repair recorded'}.</p>
+            </> : null}
             <p>Last batch checked: {source.lastCheckedAt ? <StaffDate value={source.lastCheckedAt} kind="timestamp" /> : 'Not checked yet'}.</p>
             <p>Last full retained-ID sweep: {source.lastCycleAt ? <StaffDate value={source.lastCycleAt} kind="timestamp" /> : 'No completed sweep recorded'}.</p>
             {source.needsReextraction ? <p className="font-medium">Retained source changed. Candidate re-extraction is pending; existing drafts may contain an earlier version.</p> : null}
@@ -152,7 +159,7 @@ export function TelegramContextBrowser() {
         if (!conversation || conversation.anchorUnavailable) return;
         const node = requestedMessage.current;
         if (!node) return;
-        const frame = requestAnimationFrame(() => { node.scrollIntoView({ block: 'center' }); node.focus({ preventScroll: true }); });
+        const frame = requestAnimationFrame(() => { node.scrollIntoView({ block: 'start' }); node.focus({ preventScroll: true }); });
         return () => cancelAnimationFrame(frame);
     }, [conversation, target?.anchor]);
     function field(key: keyof SearchFilters, value: string | boolean) { setFilters(current => ({ ...current, [key]: value })); }
@@ -172,9 +179,9 @@ export function TelegramContextBrowser() {
     }
     return <section className="mx-auto flex w-full max-w-5xl flex-col gap-6">
         <PageHeader eyebrow="Private workspace" title="Search conversations" description="Find original messages in your retained Telegram history." actions={<Button asChild variant="outline"><Link href="/staff/telegram-intake/chats">Telegram chats</Link></Button>} />
-        <p className="text-sm text-muted-foreground">Private conversations are separate from profiles and CVs. Reviewed source material may be released through the candidate review workflow. Search covers retained imports, including disconnected accounts; Lexical search covers retained source text. The online connector checks selected chats in bounded retained-message batches; large histories take longer to complete a sweep. A partial check does not confirm that all history is current. Unavailable Telegram sources are not confirmed deletions.</p>
+        <p className="text-sm text-muted-foreground">Private conversations are separate from profiles and CVs. Reviewed source material may be released through the candidate review workflow. Keyword search covers retained source text, including disconnected accounts. While the connector is online, selected chats poll Telegram update feeds where supported and use bounded retained-message sweeps to repair baseline or missed-update gaps. Large histories take longer to repair. A provider checkpoint or partial sweep does not confirm all history is current. Unavailable Telegram sources are not confirmed deletions.</p>
         <StaffAuthRecoveryPrompt />
-        <div className="flex flex-wrap items-center gap-3"><Button variant="outline" disabled={sourceLoading || accessBlocked} onClick={async () => { await loadSourceStatus(chats.map(chat => chat.id)); if (target) await loadSourceStatus([target.chatId], 'sourceDialog'); }}>Refresh retained-message status</Button><p role="status" className="text-xs text-muted-foreground">{sourceLoading ? 'Checking retained-message status…' : sourceError || 'Status changes only when loaded or refreshed here.'}</p></div>
+        <div className="flex flex-wrap items-center gap-3"><Button variant="outline" disabled={sourceLoading || accessBlocked} onClick={async () => { await loadSourceStatus(chats.map(chat => chat.id)); if (target) await loadSourceStatus([target.chatId], 'sourceDialog'); }}>Refresh source update status</Button><p role="status" className="text-xs text-muted-foreground">{sourceLoading ? 'Checking source update status…' : sourceError || 'Status changes only when loaded or refreshed here.'}</p></div>
         <Card className="space-y-4 p-5">
             <form onSubmit={event => { event.preventDefault(); void loadChats(null, chatQuery); }} className="flex flex-wrap items-end gap-2"><div className="min-w-0 flex-1 space-y-2"><Label htmlFor="context-chat-query">Find an imported chat</Label><Input id="context-chat-query" value={chatQuery} maxLength={100} onChange={event => setChatQuery(event.target.value)} placeholder="Title or username" /></div><Button type="submit" variant="outline" disabled={chatLoading}>Find chats</Button></form>
             <div className="flex max-h-64 flex-wrap gap-2 overflow-y-auto rounded-lg p-1" aria-label="Imported chat choices" aria-busy={chatLoading}><Button variant={!filters.chatId ? 'secondary' : 'outline'} aria-pressed={!filters.chatId} onClick={() => { field('chatId', ''); setSelectedChat(null); }}>All imported chats</Button>{chats.map(chat => <div key={chat.id} className="w-full space-y-2 rounded-lg border p-3 sm:w-[calc(50%-0.25rem)]"><Button className="max-w-full whitespace-normal break-words text-left" variant={filters.chatId === chat.id ? 'secondary' : 'outline'} aria-pressed={filters.chatId === chat.id} onClick={() => { setSelectedChat(chat); field('chatId', chat.id); }}>{chat.title || 'Untitled chat'}{chat.username ? ` (@${chat.username})` : ''} · Account {chat.accountUserId}</Button>{freshness(chat.id)}</div>)}</div>

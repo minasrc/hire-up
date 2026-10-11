@@ -3,7 +3,7 @@ import test from 'node:test';
 import { readFileSync } from 'node:fs';
 import ts from 'typescript';
 const compiled = ts.transpileModule(readFileSync(new URL('../../src/app/staff/telegram-intake/context/context-model.ts', import.meta.url), 'utf8'), { compilerOptions: { module: ts.ModuleKind.ESNext, target: ts.ScriptTarget.ES2022 } }).outputText;
-const { searchPayload, contextUrl, senderLabel, forwardedLabel, messageExcerpt, pendingFilterChanges, conversationDeepLink, sourceStatusLabel } = await import(`data:text/javascript;base64,${Buffer.from(compiled).toString('base64')}`);
+const { searchPayload, contextUrl, senderLabel, forwardedLabel, messageExcerpt, pendingFilterChanges, conversationDeepLink, sourceStatusLabel, nativeFeedLabel, nativeRepairPending } = await import(`data:text/javascript;base64,${Buffer.from(compiled).toString('base64')}`);
 test('search retains quoted terms and inclusive dates in a POST payload', () => {
     assert.deepEqual(searchPayload({ query: '  "product designer" OR engineer ', chatId: '', sender: ' @ada ', from: '2026-10-01', to: '2026-10-11', attachmentsOnly: true }, 'cursor'), { action: 'search', query: '"product designer" OR engineer', chatId: null, sender: '@ada', from: '2026-10-01', to: '2026-10-11', attachmentsOnly: true, after: 'cursor' });
 });
@@ -54,4 +54,27 @@ test('source freshness describes partial checks, offline and blocked states with
     assert.match(delayed, /delayed/);
     assert.equal(delayed.includes('SECRET_DB_CODE'), false);
     assert.match(sourceStatusLabel({ status: 'scheduled' }), /Selected/);
+});
+
+test('native checkpoint labels do not claim retained history or extraction is current', () => {
+    const source = { mode: 'native_updates_with_reconciliation', status: 'scheduled', nativeStatus: 'live' };
+    assert.match(nativeFeedLabel(source), /checkpoint recorded/);
+    assert.match(nativeFeedLabel(source), /does not confirm/);
+    for (const status of ['off', 'paused', 'worker_offline', 'reconnect_required']) assert.equal(nativeFeedLabel({ ...source, status }), null);
+    assert.equal(nativeFeedLabel({ ...source, mode: 'retained_message_reconciliation' }), null);
+});
+test('initial, selection and provider repair gaps remain pending until a whole repair completes', () => {
+    const source = { mode: 'native_updates_with_reconciliation', status: 'scheduled', nativeStatus: 'live', repairRequestedAt: '2026-10-11T10:00:00Z', repairCompletedAt: '2026-10-11T09:00:00Z', gapReason: 'PROVIDER_GAP' };
+    assert.equal(nativeRepairPending(source), true);
+    assert.match(nativeFeedLabel(source), /repair is pending/);
+    assert.equal(nativeRepairPending({ ...source, status: 'paused' }), true);
+    assert.equal(nativeRepairPending({ ...source, repairCompletedAt: '2026-10-11T11:00:00Z' }), false);
+    assert.equal(nativeRepairPending({ ...source, repairRequestedAt: null, repairCompletedAt: null, gapReason: 'SELECTION_GAP' }), false);
+    assert.equal(nativeRepairPending({ ...source, nativeStatus: 'baseline_pending' }), true);
+    assert.equal(nativeRepairPending({ ...source, nativeStatus: 'repair_required' }), true);
+});
+test('native delays use safe text without exposing provider or database codes', () => {
+    const label = nativeFeedLabel({ mode: 'native_updates_with_reconciliation', status: 'scheduled', nativeStatus: 'waiting', nativeErrorCode: 'INVALID_RESULT' });
+    assert.match(label, /delayed/);
+    assert.equal(label.includes('INVALID_RESULT'), false);
 });
