@@ -1,3 +1,4 @@
+import { formatStaffCalendarDate } from '@/lib/staff-dates';
 import type {
     BonusType,
     Candidate,
@@ -12,15 +13,8 @@ import type {
 
 export const DEMO_TODAY = '2026-09-23';
 
-const receivedDateFormatter = new Intl.DateTimeFormat('en-GB', {
-    day: 'numeric',
-    month: 'short',
-    year: 'numeric',
-    timeZone: 'UTC',
-});
-
 export function formatReceivedDate(iso: string): string {
-    return receivedDateFormatter.format(new Date(`${iso}T00:00:00Z`));
+    return formatStaffCalendarDate(iso);
 }
 
 export const EMPLOYMENT_TYPE_LABELS: Record<EmploymentType, string> = {

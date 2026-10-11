@@ -7,6 +7,7 @@ import * as jsxRuntime from 'react/jsx-runtime';
 import { renderToStaticMarkup } from 'react-dom/server';
 import ts from 'typescript';
 import { staffTimeZone } from '../../src/lib/staff-dates.js';
+import { createStaffTimeZoneModel } from '../../src/app/staff/time-zone-model.ts';
 
 const compiled = ts.transpileModule(readFileSync(
     new URL('../../src/app/staff/time-zone-provider.tsx', import.meta.url), 'utf8'), {
@@ -19,6 +20,9 @@ runInNewContext(compiled, {
         if (name === 'react') return React;
         if (name === 'react/jsx-runtime') return jsxRuntime;
         if (name === '@/lib/staff-dates') return { staffTimeZone };
+        if (name === 'next/navigation') return { useRouter: () => ({ refresh() {} }) };
+        if (name === '@/lib/staff-auth-recovery') return { staffAuthRecovery: { requestEpoch: () => 1, getSnapshot: () => ({ required: false }), require() {} } };
+        if (name === './time-zone-model') return { createStaffTimeZoneModel };
         assert.fail(name);
     },
 });

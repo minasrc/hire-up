@@ -13,6 +13,10 @@ export async function POST(request: Request) {
     catch { return privateResponse(Response.json({ error: 'preference service unavailable' }, { status: 503 })); }
     const denied = staffGateResponse(context);
     if (denied) return privateResponse(denied);
+    const expectedAccount = request.headers.get('x-staff-account-id');
+    if (expectedAccount !== null && expectedAccount !== context.principal?.user_id) {
+        return privateResponse(Response.json({ error: 'account changed', code: 'ACCOUNT_CHANGED' }, { status: 409 }));
+    }
     const body = await request.json().catch(() => null);
     try {
         const result = await saveStaffTimeZone(context.pool, context.identity, context.organizationId, body);

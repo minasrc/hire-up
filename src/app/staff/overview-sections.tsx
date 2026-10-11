@@ -6,11 +6,9 @@ import { Badge } from '@/components/staff-ui/badge';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/staff-ui/card';
 import type { StaffWorkspaceSummary } from '@/lib/workspace-types';
 import { cn } from '@/lib/utils';
+import { StaffDate } from './staff-date';
 
-const formatDate = (iso: string) =>
-    new Date(iso).toLocaleDateString('en-GB', {
-        day: 'numeric', month: 'short', year: 'numeric',
-    });
+const formatDate = (iso: string) => <StaffDate value={iso} />;
 
 function MetricCard({
     label,

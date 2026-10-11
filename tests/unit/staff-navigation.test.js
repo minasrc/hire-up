@@ -52,6 +52,7 @@ function loadShell() {
         '@/components/staff-ui/sheet': inertProxy,
         './record-preview': inertProxy,
         './staff-shell-summary': { StaffShellSummaryContext: React.createContext(null) },
+        './time-zone-settings': { StaffTimeZoneBanner: () => null },
         '@/lib/utils': { cn: (...parts) => parts.filter(Boolean).join(' ') },
     };
     runInNewContext(compiled, {

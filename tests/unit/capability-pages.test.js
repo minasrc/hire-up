@@ -32,6 +32,7 @@ function subject(path, capabilities, { emptyClients = false } = {}) {
         '@/components/staff-preview/shared': Object.fromEntries(['EmptyState', 'PageHeader', 'FieldLabel', 'StatusBadge', 'TagPill'].map(name => [name, name])),
         '@/components/staff-preview/job-document': { JobDocumentView: 'JobDocumentView' },
         '@/lib/job-display': { jobStatusLabel: () => 'Draft' },
+        '../../staff-date': { StaffDate: 'StaffDate' },
         '@/components/staff-ui/button': { Button: 'Button' },
         '@/components/staff-ui/card': Object.fromEntries(['Card', 'CardContent', 'CardDescription', 'CardHeader', 'CardTitle'].map(name => [name, name])),
         '../../workspace-forms': forms, '../../../workspace-forms': forms,
