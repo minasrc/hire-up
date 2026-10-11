@@ -3,6 +3,7 @@ import { createHash } from 'node:crypto';
 import { execFileSync } from 'node:child_process';
 import { resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
+import { selectRunners } from './ci-groups.mjs';
 
 export const JOBS = [
     'quality', 'browser-tests', 'database-foundation', 'database-staff-authorization',
@@ -35,7 +36,9 @@ export function selectJobs(files, full = false, readFile = readRepoFile) {
     for (const file of files) {
         if (/\.md$/i.test(file)) continue;
         selected.add('quality');
-        if (file === '.github/workflows/ci.yml' || file === 'scripts/ci-selection.mjs'
+        if (file === '.github/workflows/ci.yml' || file === '.github/workflows/telegram-maintenance.yml'
+            || ['scripts/ci-selection.mjs', 'scripts/ci-groups.mjs', 'scripts/run-ci-group.mjs',
+                'scripts/run-telegram-maintenance.mjs'].includes(file)
             || file.startsWith('tests/unit/')) continue;
         appChecks = true;
         let jobs;
@@ -55,10 +58,23 @@ export function selectJobs(files, full = false, readFile = readRepoFile) {
             || file === 'src/lib/staff-document-preview-cache.js'
             || /^src\/components\/staff-preview\/(document-preview-provider|pdf-document-preview|real-candidate-documents)\.tsx$/.test(file)) jobs = ['staff-workspace'];
         else if (/^src\/app\/staff\/(applications|clients|jobs)\//.test(file)) jobs = ['staff-workspace'];
+        else if (['src/app/staff/page.tsx', 'src/app/staff/overview-sections.tsx',
+            'src/app/staff/workspace-forms.tsx'].includes(file)) jobs = ['browser-tests', 'staff-workspace'];
         else if (/^src\/app\/staff\/candidates\/search\//.test(file)) jobs = ['profile-search', 'cv-search'];
         else if (/^src\/app\/staff\/candidates\/duplicates\//.test(file)) jobs = ['duplicate-review'];
         else if (/^src\/app\/staff\/candidates\//.test(file)) jobs = ['staff-workspace', 'duplicate-review', 'profile-search', 'cv-analysis'];
-        else if (/^src\/app\/staff\/telegram-intake\//.test(file)) jobs = [...TELEGRAM, 'profile-search'];
+        else if (/^src\/app\/staff\/telegram-intake\/connect\//.test(file)) jobs = ['telegram-connection', 'worker-pairing'];
+        else if (/^src\/app\/staff\/telegram-intake\/chats\//.test(file)) jobs = ['telegram-history'];
+        else if (/^src\/app\/staff\/telegram-intake\/cv\//.test(file)) jobs = ['telegram-cv', 'cv-analysis'];
+        else if (/^src\/app\/staff\/telegram-intake\/cv-analysis\//.test(file)) jobs = ['cv-analysis', 'cv-search'];
+        else if (/^src\/app\/staff\/telegram-intake\/extraction\//.test(file)) jobs = ['telegram-extraction', 'telegram-retention', 'telegram-cv', 'cv-analysis'];
+        else if (/^src\/app\/staff\/telegram-intake\//.test(file)) jobs = [...TELEGRAM, 'profile-search', 'cv-analysis', 'cv-search', 'worker-pairing'];
+        else if (/^src\/app\/api\/(?:staff\/)?telegram-history\//.test(file)) jobs = ['telegram-history', 'telegram-extraction', 'telegram-cv', 'telegram-retention', 'cv-analysis'];
+        else if (/^src\/app\/api\/(?:staff\/)?telegram-connection\//.test(file)) jobs = ['telegram-connection', 'telegram-history', 'telegram-extraction', 'telegram-cv', 'telegram-retention', 'cv-analysis', 'worker-pairing'];
+        else if (/^src\/app\/api\/(?:staff\/)?telegram-extraction\//.test(file)) jobs = ['telegram-extraction', 'telegram-cv', 'telegram-retention', 'cv-analysis'];
+        else if (/^src\/app\/api\/(?:staff\/)?telegram-cv\//.test(file)) jobs = ['telegram-cv', 'cv-analysis'];
+        else if (/^src\/app\/api\/(?:staff\/)?cv-analysis\//.test(file)) jobs = ['cv-analysis', 'cv-search'];
+        else if (/^src\/app\/api\/(?:staff\/)?profile-search\//.test(file)) jobs = ['profile-search', 'cv-search'];
         else if (/^src\/app\/api\/staff\//.test(file)) jobs = STAFF;
         else if (/^(src\/app\/staff\/|src\/components\/staff)/.test(file)) jobs = STAFF_BROWSER;
         else if (/^src\/lib\/(staff-|auth-options|totp|workspace|pipeline-|candidate-|client-job-|privacy-|duplicate-review|worker-pairing)/.test(file)) jobs = STAFF;
@@ -159,7 +175,7 @@ if (process.argv[1] && import.meta.url === pathToFileURL(resolve(process.argv[1]
         plan = { ...all(), reason: 'Selection failed; full validation' };
     }
     appendFileSync(process.env.GITHUB_OUTPUT,
-        `selection=${JSON.stringify(plan.selection)}\napp_checks=${plan.appChecks}\n`);
+        `selection=${JSON.stringify(plan.selection)}\nrunners=${JSON.stringify(selectRunners(plan.selection))}\napp_checks=${plan.appChecks}\n`);
     console.log(JSON.stringify(plan, null, 2));
     if (process.env.GITHUB_STEP_SUMMARY) appendFileSync(process.env.GITHUB_STEP_SUMMARY,
         `### CI selection\n${plan.reason}\n\nJobs: ${JOBS.filter((job) => plan.selection[job]).join(', ') || 'none (no unvalidated code changes)'}\n`);

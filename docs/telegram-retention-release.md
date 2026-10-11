@@ -41,7 +41,7 @@ Set these repository Actions secrets:
   `/api/telegram-maintenance`, with no query string or embedded credentials.
 - `TELEGRAM_MAINTENANCE_SECRET`: the same private maintenance token.
 
-The `Telegram source maintenance` workflow runs every 15 minutes on the default
+The `Telegram source maintenance` workflow runs hourly, at minute 7, on the default
 branch and supports manual dispatch. It needs no npm install, model service,
 Telegram session or personal Mac. Each request processes bounded work; each
 scheduled run makes at most eight requests and stops early when no work can
@@ -55,6 +55,10 @@ request was sent; that is not evidence that cleanup is active. Monitor failed
 runs and repeated `remainingWork: true` results. A database or network failure
 leaves a retryable transaction, not partially decremented quotas. GitHub's
 scheduled jobs can be delayed; this is eventual cleanup, not a deletion-time SLA.
+The hourly schedule reduces scheduled runner starts from 96 to 24 per day.
+Reviewed-source and expired-cache physical cleanup can now wait about an hour,
+plus scheduler delays, while searches still become unusable at their existing
+15-minute expiry. No deletion bound or authorization check is relaxed.
 Use a more reliable hosted scheduler against the same endpoint if an exact
 operational deadline is required.
 
