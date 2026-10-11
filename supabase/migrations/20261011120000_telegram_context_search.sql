@@ -8,7 +8,9 @@ alter table app.telegram_history_messages add column context_sent_at timestamptz
 -- The migration operator must bypass FORCE RLS for the global backfill.
 -- app_owner has no owner-scoped runtime context and would silently update zero rows.
 reset role;
+set local row_security=off;
 update app.telegram_history_messages set context_sent_at=(body->>'sentAt')::timestamptz;
+set local row_security=on;
 set local role app_owner;
 create index telegram_context_document_gin on app.telegram_history_messages using gin(context_document);
 create index telegram_context_order_idx on app.telegram_history_messages(organization_id,owner_user_id,context_sent_at desc,chat_id desc,message_id desc);
@@ -100,7 +102,7 @@ begin
  ), shown as (select * from page order by context_sent_at desc,chat_id desc,message_id desc limit 25)
  select jsonb_build_object('results',coalesce((select jsonb_agg(body || jsonb_build_object('chatId',chat_id,'chatTitle',title) order by context_sent_at desc,chat_id desc,message_id desc) from shown),'[]'::jsonb),
  'nextAfter',case when (select count(*) from page)>25 then (select jsonb_build_object('digest',digest,'sentAt',context_sent_at,'chatId',chat_id,'messageId',message_id::text) from shown order by context_sent_at,chat_id,message_id limit 1) else null end,
- 'query',query,'coverage',jsonb_build_object('retainedMessages',(select count(*) from app.telegram_history_messages))) into result;
+ 'query',query,'coverage',jsonb_build_object('retainedMessages',coalesce((select stored_messages from app.telegram_history_limits),(select count(*) from app.telegram_history_messages)))) into result;
  return result;
 end $$;
 create function app.telegram_context_view_v1(p jsonb) returns jsonb language plpgsql security definer set search_path=pg_catalog,app,pg_temp as $$

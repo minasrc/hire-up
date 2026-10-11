@@ -31,6 +31,7 @@ test('private retained Telegram search and conversation viewer', {timeout:120000
  }
  // Seed before deployment: FORCE RLS must not silently skip the timestamp backfill.
  psql(db,readFileSync(join(dir,'20261011120000_telegram_context_search.sql'),'utf8'));
+ psql(db,`insert into app.telegram_history_limits(organization_id,owner_user_id,stored_messages,stored_bytes) select '${org}','${ID.USER_CUSTOM}',count(*),sum(stored_bytes) from app.telegram_history_messages where owner_user_id='${ID.USER_CUSTOM}';`);
  const search=input=>telegramContextSearch(pool,owner,org,{action:'search',query:'engineering',...input});
  const view=input=>telegramContextView(pool,owner,org,{chatId:chatIds[0],...input});
  await t.test('read-only candidate permission, disconnected history and source text',async()=>{
@@ -52,9 +53,13 @@ test('private retained Telegram search and conversation viewer', {timeout:120000
  });
  await t.test('owner/org isolation, unknown chats and no runtime direct grants',async()=>{
  for(const chatId of chatIds.slice(1)) {await assert.rejects(view({chatId}),{code:'P0002'});assert.equal((await search({chatId})).results.length,0);}
- const other=await telegramContextSearch(pool,who(SUBJECTS.ADMIN2),org,{action:'search',query:'engineering'});assert.equal(other.results.length,1);
+ const other=await telegramContextSearch(pool,who(SUBJECTS.ADMIN2),org,{action:'search',query:'engineering'});assert.equal(other.results.length,1);assert.equal(other.coverage.retainedMessages,1,'Legacy corpus without a quota row falls back to an owner-scoped exact count');
  const sharedOtherOrg=await telegramContextSearch(pool,who(SUBJECTS.SHARED),org,{action:'search',query:'engineering'});assert.equal(sharedOtherOrg.results.length,0);
  await withStaffTransaction(pool,owner,org,['candidates.read'],async({client})=>{await assert.rejects(client.query('select * from app.telegram_history_messages'),{code:'42501'});});
+ });
+ await t.test('migration operator without BYPASSRLS fails instead of silently skipping history',async()=>{
+ psql(db,'create role context_underprivileged_operator nologin inherit nobypassrls;grant app_owner to context_underprivileged_operator;');
+ assert.throws(()=>psql(db,'set session authorization context_underprivileged_operator;set row_security=off;update app.telegram_history_messages set context_sent_at=(body->>\'sentAt\')::timestamptz;'),/row-level security/);
  });
  await t.test('SQL callable boundary rejects malformed requests and cannot mutate history',async()=>{
  const call=p=>withStaffTransaction(pool,owner,org,['candidates.read'],async({client})=>(await client.query('select app.telegram_context_search_v1($1::jsonb)',[JSON.stringify(p)])));
@@ -65,7 +70,7 @@ test('private retained Telegram search and conversation viewer', {timeout:120000
  const latest=await view({});assert.equal(latest.messages.length,50);assert.equal(latest.messages[0].messageId,'76');assert.equal(latest.newerAfter,null);assert.equal(latest.olderBefore,'76');
  const older=await view({before:'76'});assert.equal(older.messages[0].messageId,'26');assert.equal(older.newerAfter,'75');const newer=await view({after:'75'});assert.deepEqual(newer.messages,latest.messages);
  const edge=await view({anchor:'1'});assert.equal(edge.messages.length,21);assert.equal(edge.olderBefore,null);
- psql(db,`delete from app.telegram_history_messages where chat_id='${chatIds[0]}' and message_id=42;`);
+ psql(db,`begin;delete from app.telegram_history_messages where chat_id='${chatIds[0]}' and message_id=42;update app.telegram_history_limits set stored_messages=stored_messages-1,stored_bytes=stored_bytes-100 where owner_user_id='${ID.USER_CUSTOM}';commit;`);
  const purged=await view({anchor:'42'});assert.equal(purged.anchorUnavailable,true);assert.ok(purged.messages.every(m=>m.messageId!=='42'));assert.equal((await search({query:'original'})).results.length,0);assert.equal((await search()).coverage.retainedMessages,124);
  psql(db,`update app.telegram_history_messages set body=jsonb_set(body,'{text}','"Revised source"') where chat_id='${chatIds[0]}' and message_id=43;`);assert.equal((await search({query:'revised'})).results.length,1);
  psql(db,`update app.telegram_history_messages set body=jsonb_set(body,'{kind}','\"unavailable\"') where chat_id='${chatIds[0]}' and message_id=44;`);assert.equal((await view({anchor:'44'})).anchorUnavailable,true);
