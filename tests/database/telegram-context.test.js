@@ -31,6 +31,9 @@ test('private retained Telegram search and conversation viewer', {timeout:120000
  }
  // Seed before deployment: FORCE RLS must not silently skip the timestamp backfill.
  psql(db,readFileSync(join(dir,'20261011120000_telegram_context_search.sql'),'utf8'));
+ psql(db,'create role context_deploy_operator nologin noinherit createrole bypassrls;grant app_owner,app_executor to context_deploy_operator with admin true,inherit false,set true;');
+ psql(db,'set session authorization context_deploy_operator;'+readFileSync(join(dir,'20261011180000_telegram_context_gin.sql'),'utf8'));
+ assert.match(psql(db,"select pg_has_role('context_deploy_operator','app_telegram_context_indexer','set');"),/^f/m);
  psql(db,`insert into app.telegram_history_limits(organization_id,owner_user_id,stored_messages,stored_bytes) select '${org}','${ID.USER_CUSTOM}',count(*),sum(stored_bytes) from app.telegram_history_messages where owner_user_id='${ID.USER_CUSTOM}';`);
  const search=input=>telegramContextSearch(pool,owner,org,{action:'search',query:'engineering',...input});
  const view=input=>telegramContextView(pool,owner,org,{chatId:chatIds[0],...input});
@@ -56,6 +59,17 @@ test('private retained Telegram search and conversation viewer', {timeout:120000
  const other=await telegramContextSearch(pool,who(SUBJECTS.ADMIN2),org,{action:'search',query:'engineering'});assert.equal(other.results.length,1);assert.equal(other.coverage.retainedMessages,1,'Legacy corpus without a quota row falls back to an owner-scoped exact count');
  const sharedOtherOrg=await telegramContextSearch(pool,who(SUBJECTS.SHARED),org,{action:'search',query:'engineering'});assert.equal(sharedOtherOrg.results.length,0);
  await withStaffTransaction(pool,owner,org,['candidates.read'],async({client})=>{await assert.rejects(client.query('select * from app.telegram_history_messages'),{code:'42501'});});
+ });
+ await t.test('GIN helper is non-bypass, internal-only and restores its query scope',async()=>{
+ const privileges=psql(db,`select rolbypassrls,rolsuper,rolcanlogin from pg_roles where rolname='app_telegram_context_indexer';select has_function_privilege('app_staff','app.telegram_context_index_page_v1(jsonb)','execute'),has_function_privilege('app_telegram_worker','app.telegram_context_index_page_v1(jsonb)','execute'),pg_has_role('app_staff','app_telegram_context_indexer','member');`);assert.equal(privileges.trim(),'f|f|f\nf|f|f');
+ await withStaffTransaction(pool,owner,org,['candidates.read'],async({client})=>{await assert.rejects(client.query("select * from app.telegram_context_index_page_v1('{\"action\":\"search\",\"query\":\"engineering\"}')"),{code:'42501'});});
+ const restored=psql(db,`begin;set local role app_executor;select set_config('app.organization_id','${org}',true),set_config('app.actor_id','${ID.USER_CUSTOM}',true);select set_config('app.telegram_context_tsquery','prior',true);select count(*) from app.telegram_context_index_page_v1('{"action":"search","query":"engineering"}');select current_setting('app.telegram_context_tsquery');do $$begin perform app.telegram_context_index_page_v1('{"action":"search","query":"-engineering"}');exception when invalid_parameter_value then null;end$$;select current_setting('app.telegram_context_tsquery');rollback;`);assert.equal(restored.split('\n').filter(x=>x==='prior').length,3);
+ assert.throws(()=>psql(db,`set role app_executor;select * from app.telegram_context_index_page_v1('{"action":"search","query":"engineering"}');`),/Staff scope required/);
+ psql(db,`insert into app.telegram_history_messages(organization_id,owner_user_id,chat_id,message_id,body,stored_bytes) select '${org}','${ID.USER_CUSTOM}','${chatIds[0]}',n,jsonb_build_object('messageId',n::text,'kind','message','sentAt','2026-10-11T12:00:00Z','text',case when n=3000 then 'rareginproof' else 'ordinary' end,'attachments','[]'::jsonb),100 from generate_series(2000,3999)n;analyze app.telegram_history_messages;`);
+ const plan=psql(db,`begin;set local role app_telegram_context_indexer;select set_config('app.organization_id','${org}',true),set_config('app.actor_id','${ID.USER_CUSTOM}',true),set_config('app.telegram_context_tsquery','rareginproof',true);explain(analyze,buffers) select * from app.telegram_history_messages order by context_sent_at desc,chat_id desc,message_id desc limit 26;rollback;`);assert.match(plan,/Bitmap Index Scan on telegram_context_document_gin/);
+ const foreign=psql(db,`begin;set local role app_telegram_context_indexer;select set_config('app.organization_id','${org}',true),set_config('app.actor_id','${ID.USER_CUSTOM}',true),set_config('app.telegram_context_tsquery','engineering',true);select count(*) from app.telegram_history_messages where chat_id in('${chatIds[1]}','${chatIds[2]}');rollback;`);assert.match(foreign,/\n0\n/);
+ const empty=psql(db,`begin;set local role app_telegram_context_indexer;select set_config('app.organization_id','${org}',true),set_config('app.actor_id','${ID.USER_CUSTOM}',true);select count(*) from app.telegram_history_messages;rollback;`);assert.match(empty,/\n0\n/);
+ psql(db,`delete from app.telegram_history_messages where chat_id='${chatIds[0]}' and message_id>=2000;`);
  });
  await t.test('migration operator without BYPASSRLS fails instead of silently skipping history',async()=>{
  psql(db,'create role context_underprivileged_operator nologin inherit nobypassrls;grant app_owner to context_underprivileged_operator;');

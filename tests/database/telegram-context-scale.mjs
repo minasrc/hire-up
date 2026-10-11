@@ -1,3 +1,4 @@
+import assert from 'node:assert/strict';
 import {readFileSync,readdirSync} from 'node:fs';
 import {join} from 'node:path';
 import {randomUUID} from 'node:crypto';
@@ -24,7 +25,9 @@ try{
  console.log('preexistingCorpus',psql(db,'select count(*),sum(stored_bytes) from app.telegram_history_messages;').trim());
  const start=performance.now();psql(db,readFileSync(join(dir,migration),'utf8'));console.log('migration200kWallMs',Math.round(performance.now()-start));
  console.log('backfilledRows',psql(db,'select count(*) from app.telegram_history_messages where context_sent_at is not null;').trim());
- console.log(psql(db,`analyze app.telegram_history_messages;set role app_executor;select set_config('app.organization_id','${I.ORG_A}',false),set_config('app.actor_id','${I.USER_CUSTOM}',false);
- explain(analyze,buffers) select m.message_id from app.telegram_history_messages m join app.telegram_history_chats c on c.id=m.chat_id where m.context_document @@ websearch_to_tsquery('simple','raretoken') and m.context_sent_at is not null order by m.context_sent_at desc,m.chat_id desc,m.message_id desc limit26;`.replace('limit26','limit 26')));
- console.log(psql(db,`set role app_executor;select set_config('app.organization_id','${I.ORG_A}',false),set_config('app.actor_id','${I.USER_CUSTOM}',false);explain(analyze,buffers) select count(*) from app.telegram_history_messages;`));
+ psql(db,readFileSync(join(dir,'20261011180000_telegram_context_gin.sql'),'utf8'));
+ psql(db,`insert into app.telegram_history_limits(organization_id,owner_user_id,stored_messages,stored_bytes) select '${I.ORG_A}','${I.USER_CUSTOM}',count(*),sum(stored_bytes) from app.telegram_history_messages;analyze app.telegram_history_messages;`);
+ const ginPlan=psql(db,`begin;set local role app_telegram_context_indexer;select set_config('app.organization_id','${I.ORG_A}',true),set_config('app.actor_id','${I.USER_CUSTOM}',true),set_config('app.telegram_context_tsquery','raretoken',true);explain(analyze,buffers) select message_id from app.telegram_history_messages where context_sent_at is not null order by context_sent_at desc,chat_id desc,message_id desc limit 26;rollback;`);assert.match(ginPlan,/Bitmap Index Scan on telegram_context_document_gin/);console.log('nonBypassGinPlan',ginPlan);
+ const searchStart=performance.now();console.log('searchResult',psql(db,`begin;set local role app_executor;select set_config('app.organization_id','${I.ORG_A}',true),set_config('app.actor_id','${I.USER_CUSTOM}',true);select jsonb_array_length(r->'results'),r->'coverage' from(select app.telegram_context_search_v1('{"action":"search","query":"raretoken"}')r)q;rollback;`));console.log('searchWallMs',Math.round(performance.now()-searchStart));
+ const coveragePlan=psql(db,`begin;set local role app_executor;select set_config('app.organization_id','${I.ORG_A}',true),set_config('app.actor_id','${I.USER_CUSTOM}',true);explain(analyze,buffers) select coalesce((select stored_messages from app.telegram_history_limits),(select count(*) from app.telegram_history_messages));rollback;`);assert.match(coveragePlan,/Aggregate.*never executed/);console.log('coveragePlan',coveragePlan);
 }catch(e){console.log('SCALE_FAILURE',e.message);process.exitCode=1;}finally{stopAndRemoveContainer(db);}
