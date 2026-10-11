@@ -19,10 +19,11 @@ import { classifyCvDraftRefresh } from './cv/cv-model';
 import { DraftSuggestions } from './extraction/draft-suggestions';
 import { draftName, draftStatus, editableFields, errorFields, fieldLabels, reviewLabels, fieldsForSave, viewLabels } from './intake-model';
 import type { IntakeDraft, IntakeResult, IntakeView, MissingField } from './intake-model';
+import { StaffDate } from '../staff-date';
 
 const endpoint = '/api/staff/telegram-intake/drafts';
 const emptyResult: IntakeResult = { drafts: [], counts: { ready: 0, needs_information: 0, snoozed: 0, duplicates: 0, all: 0 }, page: 1, hasMore: false };
-const dateLabel = (value: string) => value ? new Date(value).toLocaleString() : 'Unknown date';
+const dateLabel = (value: string) => value ? <StaffDate value={value} kind="timestamp" /> : 'Unknown date';
 
 class IntakeError extends Error {
     constructor(message: string, public status: number, public fields: unknown, public result?: Partial<IntakeDraft>) { super(message); }

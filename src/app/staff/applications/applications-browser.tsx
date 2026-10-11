@@ -25,6 +25,7 @@ import {
 import { cn } from '@/lib/utils';
 import { applicationDirectoryQuery } from '@/lib/staff-directory-query';
 import { useDirectoryNavigation } from '../use-directory-navigation';
+import { StaffDate } from '../staff-date';
 
 export interface ApplicationRow {
     applicationId: string;
@@ -59,10 +60,7 @@ const KIND_TONE: Record<string, 'accent' | 'warning' | 'success' | 'restriction'
     withdrawn: 'secondary',
 };
 
-const formatDate = (iso: string) =>
-    new Date(iso).toLocaleDateString('en-GB', {
-        day: 'numeric', month: 'short', year: 'numeric',
-    });
+const formatDate = (iso: string) => <StaffDate value={iso} />;
 
 function serializeFilters(filters: ApplicationFiltersState) {
     const params = new URLSearchParams();

@@ -10,6 +10,7 @@ import { Card } from '@/components/staff-ui/card';
 import { Input } from '@/components/staff-ui/input';
 import { Label } from '@/components/staff-ui/label';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/staff-ui/table';
+import { StaffDate } from '../../staff-date';
 import { extractionEndpoint } from '../extraction/extraction-api';
 import { extractionSelection } from '../extraction/retention-model';
 import { byteLabel, historyPollingDelay, historyViews, importActions, importGuidance, importStatus, selectionPayload, syncStatus } from './history-model';
@@ -24,8 +25,9 @@ type Snapshot = {
     chats: Chat[]; nextCursor: string | null;
 };
 type View = keyof typeof historyViews;
+
 const endpoint = '/api/staff/telegram-history';
-const dateLabel = (date: string) => new Date(date).toLocaleString();
+const dateLabel = (date: string) => <StaffDate value={date} kind="timestamp" />;
 class HistoryError extends Error {
     constructor(public status: number) {
         super(status === 409 ? 'These chats changed. The latest status is loading; review it and retry your action.'

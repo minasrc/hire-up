@@ -3,6 +3,7 @@
 import type { ReactNode } from 'react';
 import Link from 'next/link';
 import { Download, UserRound } from 'lucide-react';
+import { StaffDate } from '../../staff-date';
 
 export interface CandidateProfile {
     candidate: {
@@ -52,9 +53,7 @@ export interface Comparison {
     demoCvExcerpt?: string;
 }
 
-const date = (value: string) => new Date(value).toLocaleDateString('en-GB', {
-    day: 'numeric', month: 'short', year: 'numeric', timeZone: 'UTC',
-});
+const date = (value: string) => <StaffDate value={value} />;
 
 function Profile({
     profile, side, matchedIds, matchedEmails, demo,
@@ -158,7 +157,7 @@ function Profile({
                         className="border-l-2 border-border pl-3 text-sm">
                         <p className="whitespace-pre-wrap">{note.body}</p>
                         <p className="mt-1 text-xs text-muted-foreground">
-                            {note.authorName || 'Staff'} · {date(note.createdAt)}
+                            {note.authorName || 'Staff'} · <StaffDate value={note.createdAt} kind="timestamp" />
                         </p>
                     </li>)}</ul>}
         </div>

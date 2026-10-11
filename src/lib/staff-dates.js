@@ -47,7 +47,12 @@ export function formatStaffDate(value, zone) {
 export function formatStaffTimestamp(value, zone) {
     const output = formatter(zone, true);
     const date = instant(value);
-    return date ? output.format(date) : '—';
+    if (!date) return '—';
+    // Node and Chromium's ICU data disagree on zero-offset labels (GMT vs
+    // GMT+0). Keep the server and hydration text identical without hiding errors.
+    return output.formatToParts(date).map(part =>
+        part.type === 'timeZoneName' && /^GMT[+-]0(?::00)?$/.test(part.value)
+            ? 'GMT' : part.value).join('');
 }
 export function formatStaffCalendarDate(value) {
     if (typeof value !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(value) || value.startsWith('0000-')) return '—';

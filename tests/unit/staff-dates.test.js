@@ -69,3 +69,32 @@ test('formatting is independent of the process time zone', () => {
     ).trim());
     assert.equal(outputs[0], outputs[1]);
 });
+
+test('UTC labels stay identical across ICU zero-offset spellings', async () => {
+    const Original = Intl.DateTimeFormat;
+    let zeroOffsetLabel = 'GMT+0';
+    Intl.DateTimeFormat = class extends Original {
+        format(value) { return super.format(value).replace(/ GMT$/, ` ${zeroOffsetLabel}`); }
+        formatToParts(value) {
+            return super.formatToParts(value).map(part =>
+                part.type === 'timeZoneName' && part.value === 'GMT'
+                    ? { ...part, value: zeroOffsetLabel } : part);
+        }
+    };
+    try {
+        const { formatStaffTimestamp: formatAcrossRuntimes } = await import(
+            '../../src/lib/staff-dates.js?icu-zero-offset-regression');
+        for (zeroOffsetLabel of ['GMT', 'GMT+0', 'GMT-0', 'GMT+0:00']) {
+            assert.equal(formatAcrossRuntimes('2026-01-10T12:34:56Z', 'UTC'),
+                '10 Jan 2026, 12:34:56 GMT');
+            assert.equal(formatAcrossRuntimes('2026-01-10T12:34:56Z', 'Europe/London'),
+                '10 Jan 2026, 12:34:56 GMT');
+        }
+        assert.equal(formatAcrossRuntimes('2026-01-10T12:34:56Z', 'America/New_York'),
+            '10 Jan 2026, 07:34:56 GMT-5');
+        assert.equal(formatAcrossRuntimes('2026-01-10T12:34:56Z', 'Asia/Kolkata'),
+            '10 Jan 2026, 18:04:56 GMT+5:30');
+    } finally {
+        Intl.DateTimeFormat = Original;
+    }
+});

@@ -2,6 +2,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { Badge } from '@/components/staff-ui/badge';
 import { Button } from '@/components/staff-ui/button';
+import { StaffDate } from '../../staff-date';
 import { fieldLabels, type IntakeDraft } from '../intake-model';
 import { analysisAction, analysisEndpoint, analysisRequest, AnalysisError, type AnalysisSnapshot } from './analysis-api';
 import { analysisActive, analysisGuidance, analysisIssue, analysisStatus } from './analysis-model';
@@ -71,7 +72,7 @@ export function CvAnalysisReview({ draft, dirty, busy, conflict, onDraft, onBusy
         {!current && !terminal ? <Button variant="outline" size="sm" disabled={disabled || !snapshot?.canAnalyze} onClick={() => void act({ action: 'analyze', draftId: draft.id, expectedDocumentRevision: draft.documentRevision, operationId: operationIds.current[draft.documentRevision ?? 0] ??= crypto.randomUUID() })}>Analyze attached CV</Button> : null}
         {current ? <article className="space-y-3"><div className="flex flex-wrap items-center justify-between gap-2"><p className="break-words text-sm font-medium">{current.filename}</p><Badge variant="secondary">{analysisStatus(current)}</Badge></div>
             {current.errorCode ? <p className="text-sm">{analysisGuidance(current.errorCode)}</p> : null}
-            {current.status === 'waiting' ? <p className="text-xs text-muted-foreground">Next attempt: {new Date(current.availableAt).toLocaleString()}</p> : null}
+            {current.status === 'waiting' ? <p className="text-xs text-muted-foreground">Next attempt: <StaffDate value={current.availableAt} kind="timestamp" /></p> : null}
             {analysisActive(current.status) ? <p className="text-xs text-muted-foreground">Keep the Mac worker running. Profile edits can be saved while analysis runs.</p> : null}
             {current.issues.map(issue => <p key={issue} className="text-sm">{analysisIssue(issue)}</p>)}
             {!terminal ? <div className="flex flex-wrap gap-2">{current.canRetry ? <Button variant="outline" size="sm" disabled={disabled} onClick={() => void act({ action: 'retry', analysisId: current.id, expectedAnalysisVersion: current.version })}>Retry CV analysis</Button> : null}{analysisActive(current.status) || current.status === 'failed' ? <Button variant="ghost" size="sm" disabled={disabled} onClick={() => void act({ action: 'cancel', analysisId: current.id, expectedAnalysisVersion: current.version })}>Skip CV analysis</Button> : null}</div> : null}

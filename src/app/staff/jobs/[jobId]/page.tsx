@@ -22,6 +22,7 @@ import {
     CardTitle,
 } from '@/components/staff-ui/card';
 import { JobListingToggle, NewRevisionButton, PublishButton } from '../../workspace-forms';
+import { StaffDate } from '../../staff-date';
 
 export const dynamic = 'force-dynamic';
 
@@ -36,14 +37,6 @@ const formatCompensation = (revision: any) => {
         revision?.payPeriod ? ` per ${revision.payPeriod}` : ''
     }`.trim();
 };
-
-const formatDateTime = (iso: string | null | undefined) =>
-    iso
-        ? new Date(iso).toLocaleString('en-GB', {
-              day: 'numeric', month: 'short', year: 'numeric',
-              hour: '2-digit', minute: '2-digit',
-          })
-        : null;
 
 export default async function StaffJobPage(
     { params }: { params: Promise<{ jobId: string }> },
@@ -249,8 +242,8 @@ export default async function StaffJobPage(
                         <CardDescription>
                             Revision #{published.revisionNumber}
                             {published.publishedAt
-                                ? ` · published ${formatDateTime(published.publishedAt)}`
-                                : ''}
+                                ? <> · published <StaffDate value={published.publishedAt} kind="timestamp" /></>
+                                : null}
                         </CardDescription>
                     </CardHeader>
                     <CardContent className="flex flex-col gap-5">

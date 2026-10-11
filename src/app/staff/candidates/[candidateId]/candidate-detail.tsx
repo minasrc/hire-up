@@ -20,6 +20,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/staff-ui/
 import { Textarea } from '@/components/staff-ui/textarea';
 import { cn } from '@/lib/utils';
 import { RealCandidateDocuments } from '@/components/staff-preview/real-candidate-documents';
+import { StaffDate } from '../../staff-date';
 import {
     EditCandidateProfileButton,
     type CandidateProfileOptions,
@@ -40,15 +41,9 @@ const KIND_TONE: Record<string, 'accent' | 'warning' | 'success' | 'restriction'
     withdrawn: 'secondary',
 };
 
-const formatDate = (iso: string) =>
-    new Date(iso).toLocaleDateString('en-GB', {
-        day: 'numeric', month: 'short', year: 'numeric',
-    });
+const formatDate = (iso: string) => <StaffDate value={iso} />;
 
-const formatDateTime = (iso: string) =>
-    new Date(iso).toLocaleString('en-GB', {
-        day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit',
-    });
+const formatDateTime = (iso: string) => <StaffDate value={iso} kind="timestamp" />;
 
 function initials(name: string) {
     return name

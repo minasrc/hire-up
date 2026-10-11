@@ -6,6 +6,7 @@ import { Card } from '@/components/staff-ui/card';
 import { Input } from '@/components/staff-ui/input';
 import { Label } from '@/components/staff-ui/label';
 import { Badge } from '@/components/staff-ui/badge';
+import { StaffDate } from '../../staff-date';
 import { canRenewDevice, createInvitation, deviceStatus, pairingCommand, pairingError } from './pairing-model';
 
 type Device = { id: string; name: string; createdAt: string; expiresAt: string; revokedAt: string | null; lastSeenAt: string | null; connectorLastSeenAt: string | null; compatibleSearchLastSeenAt: string | null };
@@ -13,9 +14,10 @@ type Pairing = { pairingId: string; status: string; name: string; deviceName: st
 type Organization = { id: string; name: string };
 type Listing = { devices: Device[]; pairings: Pairing[]; nextAfter: string | null; organization?: Organization };
 type Invitation = Awaited<ReturnType<typeof createInvitation>> & { name: string; pairingId?: string };
+
 const endpoint = '/api/staff/worker-devices';
 const pairingLabels: Record<string, string> = { invited: 'Waiting for Mac', claimed: 'Ready to confirm', approved: 'Paired', expired: 'Expired', cancelled: 'Cancelled' };
-const date = (value: string | null) => value ? new Date(value).toLocaleString() : 'No activity recorded';
+const date = (value: string | null) => value ? <StaffDate value={value} kind="timestamp" /> : 'No activity recorded';
 class PairingFailure extends Error {
     constructor(public status: number, public code: string, public retryAfterSeconds?: number) { super(pairingError(code, retryAfterSeconds)); }
 }
