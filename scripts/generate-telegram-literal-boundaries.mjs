@@ -1,12 +1,20 @@
-// Run only under Node22 with Unicode16.0. Generated data is pinned; runtime
+// Run under any Node22 release. Official Unicode16.0 data is pinned; runtime
 // matching never depends on the JavaScript engine's or database's locale data.
 import { createHash } from 'node:crypto';
 import { readFileSync, writeFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
-if (process.versions.node.split('.')[0] !== '22' || process.versions.unicode !== '16.0') throw new Error('Generation requires Node22 / Unicode16.0');
+if (process.versions.node.split('.')[0] !== '22') throw new Error('Generation requires Node22');
+const reference = readFileSync(new URL('./reference/unicode-16.0.0/DerivedGeneralCategory.txt', import.meta.url));
+if (createHash('sha256').update(reference).digest('hex') !== '7676ab755a41ef82108460238569e60ad65c191ddafe61b36c6765ec1353f293') throw new Error('Unicode16 reference checksum mismatch');
+const separators = new Uint8Array(0x110000);
+for (const line of reference.toString('utf8').split('\n')) {
+  const match = /^([0-9A-F]+)(?:\.\.([0-9A-F]+))?\s*;\s*([A-Za-z]{2})\s*#/.exec(line);
+  if (!match || !['P', 'S', 'Z'].includes(match[3][0])) continue;
+  separators.fill(1, parseInt(match[1], 16), parseInt(match[2] ?? match[1], 16) + 1);
+}
 const ranges = []; let start = null;
 for (let cp = 0; cp <= 0x110000; cp++) {
-  const allowed = cp < 0x110000 && (cp >= 9 && cp <= 13 || /[\p{P}\p{S}\p{Z}]/u.test(String.fromCodePoint(cp)));
+  const allowed = cp < 0x110000 && (cp >= 9 && cp <= 13 || separators[cp] === 1);
   if (allowed && start === null) start = cp;
   if (!allowed && start !== null) { ranges.push([start, cp]); start = null; }
 }
