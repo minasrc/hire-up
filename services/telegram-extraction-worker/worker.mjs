@@ -1,21 +1,26 @@
-import { EXTRACTION_SCHEMA_VERSION, EXTRACTION_PROMPT_VERSION, EXTRACTION_MESSAGE_LIMIT, EXTRACTION_SOURCE_LIMIT, EXTRACTION_SINGLE_SOURCE_LIMIT, EXTRACTION_BODY_LIMIT, validateExtractionResult, extractionWorkerInput } from '../../src/lib/telegram-extraction-contracts.js';
+import { EXTRACTION_SCHEMA_VERSION, EXTRACTION_PROMPT_VERSION, EXTRACTION_CONTEXT_SCHEMA_VERSION, EXTRACTION_CONTEXT_PROMPT_VERSION, EXTRACTION_CONTEXT_MESSAGE_LIMIT, EXTRACTION_CONTEXT_BYTES, EXTRACTION_MESSAGE_LIMIT, EXTRACTION_SOURCE_LIMIT, EXTRACTION_SINGLE_SOURCE_LIMIT, EXTRACTION_BODY_LIMIT, validateExtractionResult, extractionWorkerInput } from '../../src/lib/telegram-extraction-contracts.js';
 import { ExtractionWorkerError } from './config.mjs';
 
 const uuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const failCodes = new Set(['PROVIDER_UNAVAILABLE', 'INVALID_RESULT', 'WORKER_ERROR']);
 function checkJob(job, now) {
+  if (job?.schemaVersion === EXTRACTION_CONTEXT_SCHEMA_VERSION) {
+    const context = job.source?.contextOnly;
+    const primary = new Set(job.source?.messages?.map(m => m.messageId));
+    if (!Array.isArray(context) || context.length > EXTRACTION_CONTEXT_MESSAGE_LIMIT || Buffer.byteLength(JSON.stringify(context)) > EXTRACTION_CONTEXT_BYTES || context.some(m => !/^[1-9][0-9]{0,9}$/.test(m?.messageId) || typeof m.text !== 'string' || primary.has(m.messageId)) || new Set(context.map(m => m.messageId)).size !== context.length) throw new ExtractionWorkerError('INVALID_JOB');
+  } else if (job?.source && Object.hasOwn(job.source, 'contextOnly')) throw new ExtractionWorkerError('INVALID_JOB');
   const sourceLimit = job?.sourceLimitBytes ?? EXTRACTION_SOURCE_LIMIT;
   const messages = job?.source?.messages;
   const validLimit = sourceLimit === EXTRACTION_SOURCE_LIMIT || (sourceLimit === EXTRACTION_SINGLE_SOURCE_LIMIT && Array.isArray(messages) && messages.length === 1);
   // The host applies canonical PostgreSQL JSON bounds. The worker independently
   // bounds its actual wire JSON, and never widens a normal multi-message batch.
-  if (!job || !uuid.test(job.id) || !uuid.test(job.leaseToken) || !/^[0-9a-f]{64}$/.test(job.sourceDigest) || job.schemaVersion !== EXTRACTION_SCHEMA_VERSION || job.promptVersion !== EXTRACTION_PROMPT_VERSION || !Number.isFinite(Date.parse(job.leaseExpiresAt)) || Date.parse(job.leaseExpiresAt) < now + 75000 || !job.source?.chat || !Array.isArray(messages) || messages.length < 1 || messages.length > EXTRACTION_MESSAGE_LIMIT || !validLimit || Buffer.byteLength(JSON.stringify(job.source)) > sourceLimit) throw new ExtractionWorkerError('INVALID_JOB');
+  if (!job || !uuid.test(job.id) || !uuid.test(job.leaseToken) || !/^[0-9a-f]{64}$/.test(job.sourceDigest) || !([EXTRACTION_SCHEMA_VERSION, EXTRACTION_CONTEXT_SCHEMA_VERSION].includes(job.schemaVersion)) || job.promptVersion !== (job.schemaVersion === EXTRACTION_CONTEXT_SCHEMA_VERSION ? EXTRACTION_CONTEXT_PROMPT_VERSION : EXTRACTION_PROMPT_VERSION) || !Number.isFinite(Date.parse(job.leaseExpiresAt)) || Date.parse(job.leaseExpiresAt) < now + 75000 || !job.source?.chat || !Array.isArray(messages) || messages.length < 1 || messages.length > EXTRACTION_MESSAGE_LIMIT || !validLimit || Buffer.byteLength(JSON.stringify(job.source)) > sourceLimit) throw new ExtractionWorkerError('INVALID_JOB');
 }
 
 // A pending ACK is durable before the first submission. In particular a network
 // failure must never turn a possibly committed completion into a failure report.
 export function createExtractionWorker({ host, provider, pendingStore, now = Date.now }) {
-  let busy = false;
+  let busy = false; let legacyClaim = false;
   async function acknowledge(pending, signal) {
     if (signal?.aborted) throw new ExtractionWorkerError('STOPPED');
     try {
@@ -50,15 +55,24 @@ export function createExtractionWorker({ host, provider, pendingStore, now = Dat
           return await acknowledge(pending, signal);
         }
         if (signal?.aborted) throw new ExtractionWorkerError('STOPPED');
-        const response = await host('claim', {}, { signal });
+        let response;
+        try {
+          response = await host('claim', legacyClaim ? {} : { schemaVersions: [EXTRACTION_SCHEMA_VERSION, EXTRACTION_CONTEXT_SCHEMA_VERSION] }, { signal });
+        } catch (error) {
+          if (legacyClaim || error.status !== 400 || signal?.aborted) throw error;
+          // Old hosts strictly accept only {}. Retry only the rejected claim,
+          // and retain this capability decision until the worker restarts.
+          legacyClaim = true; response = await host('claim', {}, { signal });
+        }
         if (response?.job === null) return 'idle';
         const job = response?.job;
         checkJob(job, now());
         let completion;
         try {
-          const produced = await provider(job.source, { signal });
+          const produced = await provider(job.source, { signal, schemaVersion: job.schemaVersion });
           if (signal?.aborted) throw new ExtractionWorkerError('STOPPED');
           const result = validateExtractionResult(produced.result, job.source);
+          if (produced.metadata?.promptVersion !== job.promptVersion) throw new ExtractionWorkerError('INVALID_RESULT');
           const body = extractionWorkerInput('complete', { jobId: job.id, leaseToken: job.leaseToken, sourceDigest: job.sourceDigest, result, metadata: produced.metadata });
           if (Buffer.byteLength(JSON.stringify(body)) > EXTRACTION_BODY_LIMIT) throw new ExtractionWorkerError('INVALID_RESULT');
           completion = { action: 'complete', body };

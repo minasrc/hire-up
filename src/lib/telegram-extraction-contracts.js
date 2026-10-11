@@ -3,6 +3,10 @@ import { assertUuid } from './candidate-profile-contracts.js';
 import { normalizeTelegramDraftFields } from './telegram-intake-contracts.js';
 
 export const EXTRACTION_SCHEMA_VERSION = 'candidate-extraction-v1';
+export const EXTRACTION_CONTEXT_SCHEMA_VERSION = 'candidate-extraction-v2';
+export const EXTRACTION_CONTEXT_PROMPT_VERSION = 'candidate-extraction-prompt-v2';
+export const EXTRACTION_CONTEXT_MESSAGE_LIMIT = 8;
+export const EXTRACTION_CONTEXT_BYTES = 8192;
 export const EXTRACTION_PROMPT_VERSION = 'candidate-extraction-prompt-v1';
 export const EXTRACTION_BODY_LIMIT = 131072;
 export const EXTRACTION_SOURCE_LIMIT = 49152;
@@ -24,6 +28,19 @@ function object(value, keys) {
 }
 function list(value, min, max) { if (!Array.isArray(value) || value.length < min || value.length > max) invalid(); }
 const text = (v, max) => typeof v === 'string' && v.isWellFormed() && v.length > 0 && v.length <= max;
+
+// ASCII case folding is identical to SQL translate(); non-ASCII text remains
+// exact. Unicode letter/number boundaries prevent short substring promotion.
+export function literalPrimaryValue(quote, value) {
+    const fold = v => v.replace(/[A-Z]/g, c => c.toLowerCase());
+    const q = fold(quote); const v = fold(value); if (!v) return false;
+    for (let at = q.indexOf(v); at !== -1; at = q.indexOf(v, at + v.length)) {
+        const before = Array.from(q.slice(0, at)).at(-1) ?? '';
+        const after = Array.from(q.slice(at + v.length))[0] ?? '';
+        if (!/[\p{L}\p{N}]/u.test(before) && !/[\p{L}\p{N}]/u.test(after)) return true;
+    }
+    return false;
+}
 
 // Quote validation establishes provenance, not semantic truth. Recruiters review
 // every generated draft; the model never receives authority over approved data.
@@ -50,7 +67,9 @@ export function validateExtractionResult(input, source) {
             const value = normalizeTelegramDraftFields({ [f.field]: f.value }, { partial: true })[f.field];
             list(f.evidence, 1, 3); const evidence = f.evidence.map(quote);
             if (new Set(evidence.map(e => `${e.messageId}\0${e.quote}`)).size !== evidence.length) invalid();
-            if (['firstName', 'lastName', 'primaryEmail', 'secondaryEmails'].includes(f.field)) {
+            if (Object.hasOwn(source, 'contextOnly')) {
+                for (const v of Array.isArray(value) ? value : [value]) if (!evidence.some(e => literalPrimaryValue(e.quote, v))) invalid();
+            } else if (['firstName', 'lastName', 'primaryEmail', 'secondaryEmails'].includes(f.field)) {
                 for (const v of Array.isArray(value) ? value : [value]) if (!evidence.some(e => e.quote.toLowerCase().includes(v.toLowerCase()))) invalid();
             }
             return { field: f.field, value, evidence };
@@ -111,12 +130,17 @@ export function extractionStaffAction(input) {
     invalid();
 }
 export function extractionWorkerInput(action, input) {
-    if (action === 'claim') { object(input, []); return {}; }
+    if (action === 'claim') {
+        if (input && Object.keys(input).length === 0) { object(input, []); return {}; }
+        object(input, ['schemaVersions']); list(input.schemaVersions, 1, 2);
+        if (!input.schemaVersions.includes(EXTRACTION_SCHEMA_VERSION) || new Set(input.schemaVersions).size !== input.schemaVersions.length || input.schemaVersions.some(v => ![EXTRACTION_SCHEMA_VERSION, EXTRACTION_CONTEXT_SCHEMA_VERSION].includes(v))) invalid();
+        return { schemaVersions: [...input.schemaVersions] };
+    }
     if (action === 'complete') {
         object(input, ['jobId', 'leaseToken', 'sourceDigest', 'result', 'metadata']);
         object(input.metadata, ['model', 'promptVersion', 'reportedModel']);
         const model = value => typeof value === 'string' && /^[A-Za-z0-9._:/-]{1,120}$/.test(value) && !value.includes('://');
-        if (!model(input.metadata.model) || input.metadata.promptVersion !== EXTRACTION_PROMPT_VERSION || input.metadata.reportedModel !== null && !model(input.metadata.reportedModel)) invalid();
+        if (!model(input.metadata.model) || ![EXTRACTION_PROMPT_VERSION, EXTRACTION_CONTEXT_PROMPT_VERSION].includes(input.metadata.promptVersion) || input.metadata.reportedModel !== null && !model(input.metadata.reportedModel)) invalid();
         if (!/^[0-9a-f]{64}$/.test(input.sourceDigest)) invalid();
     } else if (action === 'fail') {
         object(input, ['jobId', 'leaseToken', 'code', 'retryAfterSeconds']);

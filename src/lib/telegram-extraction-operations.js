@@ -2,15 +2,15 @@ import { withStaffTransaction } from './staff-authorization.js';
 import { assertUuid } from './candidate-profile-contracts.js';
 import { ClientJobContractError } from './client-job-contracts.js';
 import { normalizeTelegramDraftFields } from './telegram-intake-contracts.js';
-import { extractionStaffAction, extractionWorkerInput, validateExtractionResult } from './telegram-extraction-contracts.js';
+import { EXTRACTION_CONTEXT_SCHEMA_VERSION, extractionStaffAction, extractionWorkerInput, validateExtractionResult } from './telegram-extraction-contracts.js';
 const staff = (pool, identity, org, fn) => withStaffTransaction(pool, identity, org, ['candidates.read', 'candidates.write'], fn);
 const result = async (client, sql, args) => (await client.query(sql, args)).rows[0].result;
 export function telegramExtractionStatus(pool, identity, org, filters = {}) {
     const { draftId = null, jobId = null, view = 'all', after = null } = filters;
     if (draftId && jobId) throw new ClientJobContractError({ query: 'Choose a draft or a batch.' });
-    if (jobId) return staff(pool, identity, org, ({ client }) => result(client, 'select app.telegram_extraction_batch_v1($1) as result', [assertUuid(jobId, 'jobId')]));
+    if (jobId) return staff(pool, identity, org, async ({ client }) => ({ ...await result(client, 'select app.telegram_extraction_batch_v1($1) as result', [assertUuid(jobId, 'jobId')]), contextEnabled: process.env.TELEGRAM_EXTRACTION_CONTEXT_ENABLED === 'true' }));
     if (!['all', 'needs_review'].includes(view)) throw new ClientJobContractError({ view: 'Choose a supported view.' });
-    return staff(pool, identity, org, ({ client }) => result(client, 'select app.telegram_extraction_status_v1($1,$2,$3) as result', [draftId == null ? null : assertUuid(draftId, 'draftId'), view, after == null ? null : assertUuid(after, 'after')]));
+    return staff(pool, identity, org, async ({ client }) => ({ ...await result(client, 'select app.telegram_extraction_status_v1($1,$2,$3) as result', [draftId == null ? null : assertUuid(draftId, 'draftId'), view, after == null ? null : assertUuid(after, 'after')]), contextEnabled: process.env.TELEGRAM_EXTRACTION_CONTEXT_ENABLED === 'true' }));
 }
 export function telegramExtractionAction(pool, identity, org, input) {
     const action = extractionStaffAction(input);
@@ -31,7 +31,10 @@ export async function telegramExtractionWorkerOperation(pool, token, action, inp
     try {
         await client.query("begin isolation level read committed; set local role app_telegram_worker; set local statement_timeout='10s'; set local lock_timeout='2s'");
         let output;
-        if (action === 'claim') output = await result(client, 'select app.telegram_extraction_claim_v1($1) as result', [token]);
+        if (action === 'claim') {
+            const contextEnabled = process.env.TELEGRAM_EXTRACTION_CONTEXT_ENABLED === 'true' && parsed.schemaVersions?.includes(EXTRACTION_CONTEXT_SCHEMA_VERSION);
+            output = await result(client, contextEnabled ? 'select app.telegram_extraction_claim_v2($1) as result' : 'select app.telegram_extraction_claim_v1($1) as result', [token]);
+        }
         else if (action === 'fail') output = await result(client, 'select app.telegram_extraction_fail_v1($1,$2,$3,$4,$5) as result', [token, parsed.jobId, parsed.leaseToken, parsed.code, parsed.retryAfterSeconds]);
         else {
             const hasReceiptProbe = await result(client, "select to_regprocedure('app.telegram_extraction_receipt_v1(text,uuid,text,jsonb,jsonb)') is not null as result", []);
