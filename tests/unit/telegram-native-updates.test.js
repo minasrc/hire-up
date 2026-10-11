@@ -88,3 +88,12 @@ test('channel durable ACK replay uses same feed with no provider reread',async t
  await assert.rejects(createNativeWorker({...f,host}).tick(f.c),/channel ACK lost/);await createNativeWorker({...f,host}).tick(f.c);
  assert.equal(f.reads(),1);assert.equal(f.calls.filter(x=>x.a==='channelComplete').length,2);assert.equal(f.calls.at(-1).b.feedId,f.job.id);
 });
+
+test('near-threshold legal wire page uses explicit overflow before canonical SQL can reject it',async t=>{
+ const f=fixture(t);const candidates=Array.from({length:128},(_,i)=>({action:'edit',peer:{kind:'user',id:'12'},messageId:String(i+1)}));
+ const changes=candidates.map(c=>({action:'edit',chatId:f.job.id,chatVersion:1,messageId:c.messageId,record:{messageId:c.messageId,kind:'message',sentAt:'2026-10-11T00:00:00.000Z',editedAt:null,sender:null,replyToMessageId:null,forwardedFrom:null,text:'x'.repeat(12300),attachments:[]}}));
+ assert.ok(Buffer.byteLength(JSON.stringify(changes))>1572864);assert.ok(Buffer.byteLength(JSON.stringify(changes))<2097152);
+ f.c.telegram.native.account=async()=>({kind:'difference',nextState:state,gapReason:null,candidates,changes:()=>changes});
+ const host=async(a,b)=>a==='resolve'?{targets:candidates.map((c,i)=>({index:i,messageId:c.messageId,chatId:f.job.id,chatVersion:1,peer:c.peer}))}:f.host(a,b);
+ await createNativeWorker({...f,host}).tick(f.c);assert.equal(f.calls.at(-1).b.kind,'gap');assert.equal(f.calls.at(-1).b.gapReason,'OVERFLOW');assert.deepEqual(f.calls.at(-1).b.changes,[]);
+});

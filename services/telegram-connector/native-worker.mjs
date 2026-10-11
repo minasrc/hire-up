@@ -2,6 +2,9 @@ import { randomUUID } from 'node:crypto';
 import { HistoryReadError,peerKey } from './history-adapter.mjs';
 const uuid=/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const pendingKey='pending-native-update';
+// Canonical PostgreSQL jsonb text adds separators. Fixed 128-change/attachment
+// schemas have ample headroom below the separate 2 MiB hosted/vault limit.
+const pendingWireLimit=1572864;
 const stateValid=v=>v===null||(v&&['pts','qts','date','seq'].every(k=>Number.isSafeInteger(v[k])&&v[k]>=0&&v[k]<=2147483647));
 export function createNativeWorker({host,vault,now=Date.now,randomId=randomUUID}){
  let busy=false;let nextPoll=0;let scope='';let channelTurn=false;
@@ -56,7 +59,7 @@ export function createNativeWorker({host,vault,now=Date.now,randomId=randomUUID}
    }
    if(!Array.isArray(changes)||changes.length>128)throw new HistoryReadError('INVALID_RESULT');
    const payload={...(job.kind==='channel'?{feedId:job.id}:{}),leaseToken:job.leaseToken,pageId:randomId(),scopeDigest:job.scopeDigest,fromState:job.fromState,nextState:page.nextState,kind:page.kind,gapReason:page.gapReason,changes};
-   if(Buffer.byteLength(JSON.stringify({...proof(c),...payload}))>2097152){payload.changes=[];payload.kind='gap';payload.gapReason='OVERFLOW';}
+   if(Buffer.byteLength(JSON.stringify({...proof(c),...payload}))>pendingWireLimit){payload.changes=[];payload.kind='gap';payload.gapReason='OVERFLOW';}
    const durable={generation:c.generation,payload};save(c,durable);
    const result=await complete(c,durable);return{...result,providerRead};
   }catch(e){
