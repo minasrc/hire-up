@@ -13,7 +13,9 @@ import { withStaffTransaction } from '../../src/lib/staff-authorization.js';
 import { telegramConnectionAction, telegramConnectorOperation } from '../../src/lib/telegram-connection-operations.js';
 import { telegramHistoryAction, telegramHistoryStatus, telegramHistoryWorkerOperation } from '../../src/lib/telegram-history-operations.js';
 import { telegramSourceUpdateStatus } from '../../src/lib/telegram-source-update-operations.js';
+import { telegramExtractionAction, telegramExtractionWorkerOperation } from '../../src/lib/telegram-extraction-operations.js';
 import { createVault } from '../../services/telegram-connector/vault.mjs';
+import { createNativeWorker } from '../../services/telegram-connector/native-worker.mjs';
 import { telegramNativeWorkerOperation } from '../../src/lib/telegram-native-update-operations.js';
 import { createHistoryWorker } from '../../services/telegram-connector/history-worker.mjs';
 
@@ -124,7 +126,7 @@ test('native account state commits atomically with selected retained mutations',
 
 
     await runtime.tick(context); await runtime.tick(context); await runtime.tick(context);
-    for(const name of ['20261002230000_telegram_continuous_sync.sql','20261011130000_telegram_source_updates.sql','20261011140000_telegram_source_refresh.sql','20261011160000_telegram_native_account_updates.sql','20261011170000_telegram_native_channel_updates.sql']) psql(db,readFileSync(join(migrationsDir,name),'utf8'));
+    for(const name of readdirSync(migrationsDir).filter(name=>name>=migration&&name<='20261011200000_telegram_literal_boundaries.sql'&&name.endsWith('.sql')).sort()) psql(db,readFileSync(join(migrationsDir,name),'utf8'));
     chat=(await status()).chats[0];
     const proof={connectionId:context.connectionId,generation:context.generation,connectionLeaseToken:context.connectionLeaseToken,accountUserId};
     const native=(a,b={})=>telegramNativeWorkerOperation(workerPool,token,a,{...proof,...b});
@@ -161,6 +163,41 @@ test('native account state commits atomically with selected retained mutations',
       assert.equal(psql(db,`select stored_bytes=(select sum(stored_bytes) from app.telegram_history_messages) from app.telegram_history_limits`).trim(),'t');
     });
     await t.test('concurrent claim and complete use consistent owner quota lock ordering',async()=>{job=(await native('claim')).job;const p=nativePage(job,'difference',{...baseline,pts:12});const results=await Promise.all([native('claim'),native('complete',p)]);assert.equal(results[1].ok,true);});
+    await t.test('native context-only deletion fences dependent v2 extraction and lost ACK survives origin disposal',async()=>{
+      const previousFlag=process.env.TELEGRAM_EXTRACTION_CONTEXT_ENABLED;
+      try{
+        chat=(await status()).chats[0];
+        await telegramExtractionAction(pool,owner,org,{action:'setExtraction',chats:[{chatId:chat.id,expectedVersion:chat.version}],enabled:true});
+        const extract=(action,body)=>telegramExtractionWorkerOperation(workerPool,token,action,body);
+        const extractionBody=j=>({jobId:j.id,leaseToken:j.leaseToken,sourceDigest:j.sourceDigest,result:{subjects:[]},metadata:{model:'synthetic-native-context',reportedModel:null,promptVersion:j.promptVersion}});
+        const origin=(await extract('claim',{})).job;await extract('complete',extractionBody(origin));
+        incoming=[{...message('104','I am a candidate based in Madrid.'),replyToMessageId:'100'}];
+        psql(db,`update app.telegram_history_chats set next_sync_at=now()-interval '1 second' where id='${chat.id}'`);clock+=5001;
+        await runtime.tick(context);await runtime.tick(context);
+        process.env.TELEGRAM_EXTRACTION_CONTEXT_ENABLED='true';
+        const dependent=(await extract('claim',{schemaVersions:['candidate-extraction-v1','candidate-extraction-v2']})).job;
+        assert.equal(dependent.schemaVersion,'candidate-extraction-v2');
+        assert.deepEqual(dependent.source.messages.map(m=>m.messageId),['104']);
+        assert.ok(dependent.source.contextOnly.some(m=>m.messageId==='100'));
+        const staleCompletion=extractionBody(dependent);let providerReads=0;let loseAck=true;const acknowledgements=[];
+        context.telegram.native={account:async({fromState})=>{providerReads++;return{kind:'difference',nextState:{...fromState,pts:fromState.pts+1},gapReason:null,candidates:[{action:'delete',peer:null,messageId:'100'}],changes:targets=>targets.map(target=>({action:'delete',chatId:target.chatId,chatVersion:target.chatVersion,messageId:target.messageId,record:null}))};}};
+        const nativeHost=async(action,body)=>{const result=await telegramNativeWorkerOperation(workerPool,token,action,body);if(action==='complete'){acknowledgements.push(result);if(loseAck){loseAck=false;throw new Error('SYNTHETIC_NATIVE_CONTEXT_ACK_LOST');}}return result;};
+        await assert.rejects(createNativeWorker({host:nativeHost,vault,now}).tick(context),/SYNTHETIC_NATIVE_CONTEXT_ACK_LOST/);
+        assert.equal(psql(db,`select source_invalidated_at is not null and error_code='SOURCE_CHANGED' and source->'contextOnly'='[]'::jsonb and encode(source_digest,'hex')<>'${dependent.sourceDigest}' from app.telegram_extraction_jobs where id='${dependent.id}'`).trim(),'t');
+        assert.equal(psql(db,`select source_availability from app.telegram_history_messages where chat_id='${chat.id}' and message_id=100`).trim(),'deleted');
+        await assert.rejects(extract('complete',staleCompletion),{code:'40001'});
+        const disposed=JSON.parse(psql(db,`update app.telegram_extraction_jobs set source_release_requested_at=now() where id='${origin.id}';select app.telegram_retention_purge_v1('${origin.id}')`).trim());
+        assert.equal(disposed.purged,true);
+        await createNativeWorker({host:nativeHost,vault:createVault(vaultConfig),now}).tick(context);
+        assert.equal(providerReads,1,'Encrypted native ACK replay must not read Telegram again after source disposal');
+        assert.equal(acknowledgements[1].replayed,true);
+        assert.equal(psql(db,`select count(*) from app.telegram_history_messages where chat_id='${chat.id}' and message_id=100`).trim(),'0');
+        assert.equal(psql(db,`select count(*) from app.telegram_extraction_sources where chat_id='${chat.id}' and message_id=100`).trim(),'1','Disposed context keeps its import tombstone');
+        assert.equal(psql(db,`select count(*) from app.telegram_history_messages where chat_id='${chat.id}' and message_id=104`).trim(),'1','Independent primary source remains retained');
+        assert.equal(psql(db,`select stored_bytes=coalesce((select sum(stored_bytes) from app.telegram_history_messages),0) from app.telegram_history_limits`).trim(),'t');
+        assert.equal(vault.loadHistory(context.connectionId,accountUserId,'pending-native-update'),null);
+      }finally{if(previousFlag===undefined)delete process.env.TELEGRAM_EXTRACTION_CONTEXT_ENABLED;else process.env.TELEGRAM_EXTRACTION_CONTEXT_ENABLED=previousFlag;}
+    });
     await t.test('pause fences pending completion; provider gap resets whole retained repair',async()=>{
       job=(await native('claim')).job;const old=nativePage(job,'difference',{...baseline,pts:13});
       chat=(await status()).chats[0];await action({action:'pause',chatId:chat.id,expectedVersion:chat.version});
