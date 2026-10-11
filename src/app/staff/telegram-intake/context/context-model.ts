@@ -1,5 +1,5 @@
 export type Attachment = { id: string | null; kind: string; filename: string | null; mimeType: string | null; sizeBytes: number | null };
-export type Message = { chatId: string; messageId: string; chatTitle: string; text: string | null; sentAt: string; editedAt: string | null; sender: { peer: unknown; username: string | null; displayName: string | null } | null; attachments: Attachment[]; replyToMessageId: string | null; forwardedFrom: { peer: { kind: string; id: string } | null; displayName: string | null } | null };
+export type Message = { chatId: string; messageId: string; kind: 'message' | 'service' | 'unavailable'; chatTitle: string; text: string | null; sentAt: string | null; editedAt: string | null; sender: { peer: unknown; username: string | null; displayName: string | null } | null; attachments: Attachment[]; replyToMessageId: string | null; forwardedFrom: { peer: { kind: string; id: string } | null; displayName: string | null } | null };
 export type Chat = { id: string; title: string; username: string | null; accountUserId: string };
 export type SearchFilters = { query: string; chatId: string; sender: string; from: string; to: string; attachmentsOnly: boolean };
 export function searchPayload(filters: SearchFilters, after: string | null = null) {
