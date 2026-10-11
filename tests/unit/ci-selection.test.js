@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import test from 'node:test';
 import { JOBS, planEvent, reusableRun, selectJobs } from '../../scripts/ci-selection.mjs';
+import { RUNNERS } from '../../scripts/ci-groups.mjs';
 
 const selected = (paths) => Object.entries(selectJobs(paths).selection).filter(([, enabled]) => enabled).map(([job]) => job);
 const base = 'a'.repeat(40);
@@ -28,6 +29,19 @@ test('directory and search UI changes run dependent workflows, without unrelated
         ['quality', 'staff-workspace', 'duplicate-review', 'profile-search', 'cv-analysis']);
     assert.deepEqual(selected(['src/app/staff/candidates/search/page.tsx']), ['quality', 'profile-search', 'cv-search']);
     assert.deepEqual(selected(['src/app/for-employers/page.jsx']), ['quality', 'browser-tests']);
+});
+
+test('overview and client/job/member forms keep route guards and real workspace coverage', () => {
+    for (const file of ['src/app/staff/page.tsx', 'src/app/staff/overview-sections.tsx', 'src/app/staff/workspace-forms.tsx']) {
+        assert.deepEqual(selected([file]), ['quality', 'browser-tests', 'staff-workspace']);
+    }
+    const fixtures = readFileSync(new URL('../staff-workspace/workspace.test.js', import.meta.url), 'utf8');
+    for (const regression of ['overview renders live metrics', 'job creation persists', 'member invitation records locally']) {
+        assert.ok(fixtures.includes(regression), regression);
+    }
+    // Editing shared auth instead of the consuming form still selects every
+    // dependent browser workflow, including the scoped Mac/Telegram workers.
+    assert.ok(selected(['src/lib/staff-mutation.ts']).includes('worker-pairing'));
 });
 
 test('document preview consumers run their authenticated workflow, not unrelated worker suites', () => {
@@ -139,13 +153,61 @@ test('PR selection uses merge-base diff, includes deleted paths and rejects untr
 test('all workflow suites are controlled by the selector and the aggregate gate covers every job', () => {
     const workflow = readFileSync(new URL('../../.github/workflows/ci.yml', import.meta.url), 'utf8');
     const jobs = [...workflow.split(/^jobs:\n/m)[1].matchAll(/^  ([a-z][a-z-]+):$/gm)].map((match) => match[1]);
-    assert.deepEqual(jobs.filter((job) => !['plan', 'validation'].includes(job)), JOBS);
-    for (const job of JOBS) {
+    assert.deepEqual(jobs.filter((job) => !['plan', 'validation'].includes(job)), Object.keys(RUNNERS));
+    assert.deepEqual(Object.values(RUNNERS).flat().sort(), [...JOBS].sort());
+    for (const job of Object.keys(RUNNERS)) {
         const needs = job === 'browser-tests' ? '[plan, quality]' : 'plan';
-        assert.ok(workflow.includes(`  ${job}:\n    needs: ${needs}\n    if: \${{ fromJSON(needs.plan.outputs.selection)['${job}'] }}`));
+        const output = ['quality', 'browser-tests', 'database-foundation'].includes(job) ? 'selection' : 'runners';
+        assert.ok(workflow.includes(`  ${job}:\n    needs: ${needs}\n    if: \${{ fromJSON(needs.plan.outputs.${output})['${job}'] }}`));
     }
-    assert.ok(workflow.includes(`needs: [plan, ${JOBS.join(', ')}]`));
-    assert.ok(workflow.includes("if (enabled && results[job]?.result !== 'success')"));
+    assert.ok(workflow.includes(`needs: [plan, ${Object.keys(RUNNERS).join(', ')}]`));
+    assert.ok(workflow.includes('run: node scripts/run-ci-group.mjs validate'));
+});
+
+test('feature APIs retain all downstream workflow consumers without unrelated staff suites', () => {
+    const dependents = {
+        'telegram-history': ['telegram-history', 'telegram-extraction', 'telegram-cv', 'telegram-retention', 'cv-analysis'],
+        'telegram-connection': ['telegram-connection', 'telegram-history', 'telegram-extraction', 'telegram-cv', 'telegram-retention', 'cv-analysis', 'worker-pairing'],
+        'telegram-extraction': ['telegram-extraction', 'telegram-cv', 'telegram-retention', 'cv-analysis'],
+        'telegram-cv': ['telegram-cv', 'cv-analysis'],
+        'profile-search': ['profile-search', 'cv-search'],
+        'cv-analysis': ['cv-analysis', 'cv-search'],
+    };
+    for (const [feature, suites] of Object.entries(dependents)) {
+        for (const prefix of ['src/app/api/staff/', 'src/app/api/']) {
+            assert.deepEqual(selected([`${prefix}${feature}/route.ts`]).sort(), ['quality', ...suites].sort());
+        }
+    }
+    // Fixtures that call these endpoints must continue to be selected, even
+    // when the route is only used to prepare data for a downstream feature.
+    for (const suite of JOBS.filter(suite => !['quality', 'browser-tests'].includes(suite) && !suite.startsWith('database-'))) {
+        const testName = suite === 'staff-workspace' ? 'workspace' : suite;
+        const fixture = readFileSync(new URL(`../staff-workspace/${testName}.test.js`, import.meta.url), 'utf8');
+        for (const feature of Object.keys(dependents)) {
+            if (fixture.includes(`/api/staff/${feature}`) || fixture.includes(`/api/${feature}/worker/`)) {
+                assert.ok(dependents[feature].includes(suite), `${feature} must cover ${suite}`);
+            }
+        }
+    }
+    assert.ok(selected(['src/lib/staff-api.server.js']).includes('database-staff-authorization'));
+    assert.deepEqual(selected(['supabase/migrations/new.sql']), JOBS);
+});
+
+test('Telegram page coverage includes its consumers; shared intake still covers the whole chain', () => {
+    assert.deepEqual(selected(['src/app/staff/telegram-intake/chats/history-model.js']), ['quality', 'telegram-history']);
+    assert.deepEqual(selected(['src/app/staff/telegram-intake/connect/worker-pairing-panel.tsx']), ['quality', 'telegram-connection', 'worker-pairing']);
+    assert.ok(selected(['src/app/staff/telegram-intake/extraction/batch-source.tsx']).includes('cv-analysis'));
+    for (const job of ['telegram-intake', 'telegram-history', 'profile-search', 'cv-analysis', 'cv-search', 'worker-pairing']) {
+        assert.ok(selected(['src/app/staff/telegram-intake/intake-model.ts']).includes(job));
+    }
+});
+
+test('maintenance and group policy changes avoid expensive application checks', () => {
+    for (const file of ['.github/workflows/telegram-maintenance.yml', 'scripts/run-telegram-maintenance.mjs',
+        'scripts/ci-groups.mjs', 'scripts/run-ci-group.mjs']) {
+        assert.deepEqual(selected([file]), ['quality']);
+        assert.equal(selectJobs([file]).appChecks, false);
+    }
 });
 
 test('browser job consumes the quality build without rebuilding or falling back to dev', () => {
