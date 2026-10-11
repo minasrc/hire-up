@@ -81,6 +81,31 @@ export async function getCandidateProfile(pool, identity, organizationId, input)
         });
 }
 
+export async function getCandidateDetail(pool, identity, organizationId, input) {
+    const { candidateId } = requireKeys(input, ['candidateId']);
+    const normalizedId = assertUuid(candidateId, 'candidateId');
+    try {
+        return await withStaffTransaction(
+            pool, identity, organizationId, CANDIDATE_READ, async ({ client }) => {
+                const { rows } = await client.query(
+                    `select app.get_candidate_profile_v1($1::uuid) as workspace,
+                        app.get_candidate_upload_details_v1($1::uuid) as upload_details`,
+                    [normalizedId]);
+                return {
+                    workspace: rows[0].workspace,
+                    uploadDetails: rows[0].upload_details,
+                };
+            });
+    } catch (error) {
+        if (error?.code !== '42883' || isMissingProfileFunctionError(error)) throw error;
+        // The combined read rolls back before retrying. Older deployments can
+        // display their profile even when the optional upload function is absent.
+        const workspace = await getCandidateProfile(
+            pool, identity, organizationId, { candidateId: normalizedId });
+        return { workspace, uploadDetails: null };
+    }
+}
+
 export async function listCandidateProfiles(
     pool, identity, organizationId, input = {},
 ) {

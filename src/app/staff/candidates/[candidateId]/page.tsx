@@ -2,7 +2,7 @@ import { resolveCandidateRedirect } from '@/lib/candidate-profile-read';
 import { notFound, redirect } from 'next/navigation';
 import { getCandidateUploadDetails } from '@/lib/candidate-upload-operations';
 import {
-    getCandidateProfile,
+    getCandidateDetail,
     isMissingProfileFunctionError,
 } from '@/lib/candidate-profile-operations';
 import { getCandidateWorkspace } from '@/lib/pipeline-operations';
@@ -40,10 +40,13 @@ export default async function StaffCandidatePage({
     const gate = await requireStaffVerified();
     const { candidateId } = await params;
     let workspace = null;
+    let uploadDetails = null;
     let profileUnavailable = false;
     try {
-        workspace = await getCandidateProfile(
+        const detail = await getCandidateDetail(
             gate.pool, gate.identity, gate.organizationId, { candidateId });
+        workspace = detail.workspace;
+        uploadDetails = detail.uploadDetails;
     } catch (error) {
         if (error instanceof StaffAuthorizationError && error.code === 'FORBIDDEN') {
             return denied;
@@ -73,13 +76,14 @@ export default async function StaffCandidatePage({
         }
     }
 
-    let uploadDetails = null;
-    try {
-        uploadDetails = await getCandidateUploadDetails(
-            gate.pool, gate.identity, gate.organizationId, { candidateId });
-    } catch (error) {
-        // Older deployments can still display existing profiles before rollout.
-        if ((error as { code?: string })?.code !== '42883') throw error;
+    if (profileUnavailable) {
+        try {
+            uploadDetails = await getCandidateUploadDetails(
+                gate.pool, gate.identity, gate.organizationId, { candidateId });
+        } catch (error) {
+            // Older deployments can still display existing profiles before rollout.
+            if ((error as { code?: string })?.code !== '42883') throw error;
+        }
     }
 
     return (

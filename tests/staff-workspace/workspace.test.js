@@ -1674,9 +1674,9 @@ test('staff workspace end-to-end in a real browser', async (t) => {
         await page.getByRole('button', { name: 'Add note' }).click();
         await notePosted;
         await page.getByText('Note added.').waitFor();
-        await page.getByText('Synthetic browser note').waitFor();
+        await expect(page.getByRole('tabpanel', { name: 'Notes' }).getByText('Synthetic browser note', { exact: true })).toBeVisible();
         await page.reload({ waitUntil: 'domcontentloaded' });
-        await page.getByText('Synthetic browser note').waitFor();
+        await expect(page.getByRole('tabpanel', { name: 'Notes' }).getByText('Synthetic browser note', { exact: true })).toBeVisible();
     });
 
     await runCase('candidate detail tabs follow the URL query', async () => {
@@ -2433,9 +2433,18 @@ test('staff workspace end-to-end in a real browser', async (t) => {
         assert.equal(psql(container, `select secondary_emails[1] from app.candidates where id = '${savedCandidateId}'`).trim(), 'secondary@example.test');
         assert.ok(Array.from(storedCvs.values()).some(bytes => bytes.equals(createSyntheticPdf())));
         const savedDocumentId = psql(container, `select current_document_id from app.candidates where id = '${savedCandidateId}'`).trim();
-        const downloaded = await desktop.request.get(`${baseURL}/api/staff/documents/${savedDocumentId}`);
-        assert.equal(downloaded.status(), 200);
-        assert.ok((await downloaded.body()).equals(createSyntheticPdf()), 'The uploaded CV downloads through the existing authorized document API');
+        // Explicitly carry the browser's synthetic session: the API client's
+        // cookie jar omits renewed Secure cookies on this loopback HTTP server.
+        const signedDownload = await fetch(`${baseURL}/api/staff/documents/${savedDocumentId}`, {
+            headers: { cookie: cookieHeader(await desktop.cookies()) },
+            redirect: 'manual',
+        });
+        assert.equal(signedDownload.status, 302);
+        const signedURL = new URL(signedDownload.headers.get('location'));
+        assert.equal(signedURL.origin, storageURL);
+        const downloaded = await fetch(signedURL);
+        assert.equal(downloaded.status, 200);
+        assert.ok(Buffer.from(await downloaded.arrayBuffer()).equals(createSyntheticPdf()), 'The uploaded CV downloads through the existing authorized document API');
 
         const heading = page.getByRole('heading', {
             name: 'Profile Persona', level: 1 });
@@ -2487,7 +2496,7 @@ test('staff workspace end-to-end in a real browser', async (t) => {
         await page.getByRole('heading', {
             name: 'Profile Persona Edited', level: 1 }).waitFor();
         await page.getByText('Senior QA').waitFor();
-        await page.getByText('Updated summary.').waitFor();
+        await expect(page.getByText('Updated summary.', { exact: true }).filter({ visible: true })).toBeVisible();
         await page.getByText(/Owner: Synthetic Recruiter B/).waitFor();
         assert.equal(
             await page.getByTestId('candidate-primary-email').count(), 0,
@@ -2499,7 +2508,7 @@ test('staff workspace end-to-end in a real browser', async (t) => {
         await page.reload({ waitUntil: 'domcontentloaded' });
         await page.getByRole('heading', {
             name: 'Profile Persona Edited', level: 1 }).waitFor();
-        await page.getByText('Updated summary.').waitFor();
+        await expect(page.getByText('Updated summary.', { exact: true }).filter({ visible: true })).toBeVisible();
         assert.equal(await page.getByTestId('candidate-primary-email').count(), 0);
         assert.equal(await page.getByRole('link', { name: 'Profile' }).count(), 0);
 
