@@ -128,12 +128,12 @@ test('native account state commits atomically with selected retained mutations',
 
 
     await runtime.tick(context); await runtime.tick(context); await runtime.tick(context);
-    for(const name of ['20261002230000_telegram_continuous_sync.sql','20261011130000_telegram_source_updates.sql','20261011140000_telegram_source_refresh.sql','20261011160000_telegram_native_account_updates.sql']) psql(db,readFileSync(join(migrationsDir,name),'utf8'));
+    for(const name of ['20261002230000_telegram_continuous_sync.sql','20261011130000_telegram_source_updates.sql','20261011140000_telegram_source_refresh.sql','20261011160000_telegram_native_account_updates.sql','20261011170000_telegram_native_channel_updates.sql']) psql(db,readFileSync(join(migrationsDir,name),'utf8'));
     chat=(await status()).chats[0];
     const proof={connectionId:context.connectionId,generation:context.generation,connectionLeaseToken:context.connectionLeaseToken,accountUserId};
     const native=(a,b={})=>telegramNativeWorkerOperation(workerPool,token,a,{...proof,...b});
     const nativePage=(j,kind,nextState,changes=[],gapReason=null)=>({leaseToken:j.leaseToken,pageId:randomUUID(),scopeDigest:j.scopeDigest,fromState:j.fromState,nextState,kind,gapReason,changes});
-    const baseline={pts:10,qts:0,date:100,seq:1};
+    const baseline={pts:10,qts:2,date:100,seq:1};
     let job=(await native('claim')).job;
     assert.equal(job.baseline,true);
     await native('complete',nativePage(job,'baseline',baseline,[],'INITIAL_BASELINE'));
@@ -145,6 +145,9 @@ test('native account state commits atomically with selected retained mutations',
       try{
        const p=nativePage(job,'empty',baseline);delete p.leaseToken;
        await assert.rejects(direct('select app.telegram_native_complete_v1($1,$2,$3,$4,$5,$6,$7::jsonb)',[...args,null,JSON.stringify(p)]),{code:'40001'});
+       await assert.rejects(native('complete',nativePage(job,'difference',{...baseline,date:99})),{code:'22023'});
+       await assert.rejects(native('complete',nativePage(job,'difference',{...baseline,qts:1})),{code:'22023'});
+       const badReason=nativePage(job,'difference',baseline);badReason.gapReason={};delete badReason.leaseToken;await assert.rejects(direct('select app.telegram_native_complete_v1($1,$2,$3,$4,$5,$6,$7::jsonb)',[...args,job.leaseToken,JSON.stringify(badReason)]),{code:'22023'});
        const malformed=nativePage(job,'empty',{});delete malformed.leaseToken;
        await assert.rejects(direct('select app.telegram_native_complete_v1($1,$2,$3,$4,$5,$6,$7::jsonb)',[...args,job.leaseToken,JSON.stringify(malformed)]),{code:'22023'});
        await assert.rejects(direct('select app.telegram_native_defer_v1($1,$2,$3,$4,$5,$6,$7,$8)',[...args,job.leaseToken,null,60]),{code:'22023'});
@@ -161,6 +164,7 @@ test('native account state commits atomically with selected retained mutations',
       assert.equal(psql(db,`select source_availability from app.telegram_history_messages where chat_id='${chat.id}' and message_id=102`).trim(),'deleted');
       assert.equal(psql(db,`select stored_bytes=(select sum(stored_bytes) from app.telegram_history_messages) from app.telegram_history_limits`).trim(),'t');
     });
+    await t.test('concurrent claim and complete use consistent owner quota lock ordering',async()=>{job=(await native('claim')).job;const p=nativePage(job,'difference',{...baseline,pts:12});const results=await Promise.all([native('claim'),native('complete',p)]);assert.equal(results[1].ok,true);});
     await t.test('pause fences pending completion; provider gap resets whole retained repair',async()=>{
       job=(await native('claim')).job;const old=nativePage(job,'difference',{...baseline,pts:13});
       chat=(await status()).chats[0];await action({action:'pause',chatId:chat.id,expectedVersion:chat.version});

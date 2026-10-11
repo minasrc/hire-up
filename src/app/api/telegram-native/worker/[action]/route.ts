@@ -7,13 +7,13 @@ let pool: pg.Pool | undefined;
 export async function POST(request: Request, { params }: { params: Promise<{ action: string }> }) {
     const disabled = telegramFeatureResponse(); if (disabled) return disabled;
     const { action } = await params;
-    if (!['claim', 'resolve', 'complete', 'defer'].includes(action)) return telegramJson({ error: 'not found' }, 404);
+    if (!['claim', 'resolve', 'complete', 'defer','channelClaim','channelResolve','channelComplete','channelDefer'].includes(action)) return telegramJson({ error: 'not found' }, 404);
     if (request.headers.has('origin')) return telegramJson({ error: 'Worker requests only.' }, 403);
     const authorization = request.headers.get('authorization') ?? '';
     if (!/^Bearer [A-Za-z0-9_-]{64}$/.test(authorization)) return telegramJson({ error: 'unauthorized' }, 401);
     const connectionString = process.env.TELEGRAM_WORKER_DATABASE_URL;
-    if (!connectionString) return telegramJson({ error: 'History worker not configured.' }, 503);
+    if (!connectionString) return telegramJson({ error: 'Native Telegram worker not configured.' }, 503);
     pool ??= new pg.Pool({ connectionString, max: 2, idleTimeoutMillis: 10000 });
-    try { return telegramJson(await telegramNativeWorkerOperation(pool, authorization.slice(7), action, await readTelegramJson(request, action === 'complete' ? NATIVE_BODY_LIMIT : 65536))); }
+    try { return telegramJson(await telegramNativeWorkerOperation(pool, authorization.slice(7), action, await readTelegramJson(request, ['complete','channelComplete'].includes(action) ? NATIVE_BODY_LIMIT : 65536))); }
     catch (error) { return telegramErrorResponse(error); }
 }

@@ -10,6 +10,7 @@ const id=v=>{if(typeof v!=='string'||!/^[1-9][0-9]{0,9}$/.test(v)||BigInt(v)>214
 const digest=v=>{if(typeof v!=='string'||!/^[a-f0-9]{64}$/.test(v))fail();return v;};
 export function nativeState(v){exact(v,['pts','qts','date','seq']);return Object.fromEntries(['pts','qts','date','seq'].map(k=>[k,int(v[k])]));}
 export function nativeUpdateInput(action,input){
+ if(action.startsWith('channel')){const base=action.slice(7);const normalized=base[0].toLowerCase()+base.slice(1);if(normalized==='claim')return nativeUpdateInput('claim',input);const {feedId,...rest}=input;return {...nativeUpdateInput(normalized,rest),feedId:assertUuid(feedId,'feedId')};}
  const proof=historyProof(input);
  if(action==='claim'){exact(input,proofKeys);return{proof};}
  if(action==='defer'){

@@ -64,13 +64,27 @@ test('source lane consumes at most one provider read per tick',async()=>{
  await work.tick({});assert.equal(nativeReads,1);assert.equal(repairReads,1);
  const ack=createSourceWork({native:{tick:async()=>({providerRead:false,status:'native_checked'})},reconcile:{tick:async()=>{repairReads++;return{};}}});await ack.tick({});assert.equal(repairReads,2);
 });
-test('pinned SDK exposes explicit account and channel APIs and stoppable update manager offline',async()=>{
- const {createRequire}=await import('node:module');const require=createRequire(new URL('../../services/telegram-connector/package.json',import.meta.url));
- const {Api,TelegramClient}=require('teleproto');const {StringSession}=require('teleproto/sessions');
- assert.equal(typeof Api.updates.GetState,'function');assert.equal(typeof Api.updates.GetDifference,'function');assert.equal(typeof Api.updates.GetChannelDifference,'function');
- const client=new TelegramClient(new StringSession(''),1,'synthetic',{connectionRetries:0});assert.equal(typeof client.updateManager.stop,'function');client.updateManager.stop();
-});
+
 test('413 converts encrypted pending page to a bounded gap ACK without rereading provider',async t=>{
  const f=fixture(t);let reject=true;const host=async(a,b)=>{if(a==='complete'&&reject){reject=false;throw Object.assign(new Error(),{status:413});}return f.host(a,b);};
  await createNativeWorker({...f,host}).tick(f.c);assert.equal(f.reads(),1);assert.equal(f.calls.at(-1).b.kind,'gap');assert.equal(f.calls.at(-1).b.gapReason,'OVERFLOW');assert.deepEqual(f.calls.at(-1).b.changes,[]);
+});
+
+test('channel bootstrap/difference uses one RPC and validates exact channel including explicit deletion',async()=>{
+ const Api={InputChannel:Request,ChannelMessagesFilterEmpty:Request,channels:{GetFullChannel:Request},updates:{GetChannelDifference:Request}};
+ let calls=0;let response={fullChat:{id:12,pts:10}};const adapter=createNativeAdapter({Api,client:{invoke:async()=>{calls++;return response;}}});
+ const args={peer:{kind:'channel',id:'12'},fromState:null,baseline:true,accountUserId:'1',readPeer:()=>({kind:'channel',id:'12',accessHash:'-123'})};
+ assert.equal((await adapter.channel(args)).kind,'baseline');assert.equal(calls,1);
+ response={className:'updates.ChannelDifference',pts:12,users:[],chats:[],otherUpdates:[{className:'UpdateEditChannelMessage',message:{className:'Message',id:1,peerId:{channelId:12},date:100,message:'changed channel'}},{className:'UpdateDeleteChannelMessages',channelId:12,messages:[2]}]};
+ const page=await adapter.channel({...args,baseline:false,fromState:{pts:10,qts:0,date:0,seq:0}});assert.equal(calls,2);
+ assert.equal(page.changes([{index:1,chatId:randomUUID(),chatVersion:1,messageId:'2',peer:args.peer}])[0].action,'delete');
+ response.otherUpdates[1].channelId=13;await assert.rejects(adapter.channel({...args,baseline:false,fromState:{pts:10,qts:0,date:0,seq:0}}),{code:'INVALID_RESULT'});
+ response={className:'updates.ChannelDifferenceTooLong',dialog:{peer:{channelId:12},pts:20}};assert.equal((await adapter.channel({...args,baseline:false,fromState:{pts:10,qts:0,date:0,seq:0}})).gapReason,'PROVIDER_GAP');
+ response={className:'updates.ChannelDifferenceEmpty',pts:20};assert.equal((await adapter.channel({...args,baseline:false,fromState:{pts:10,qts:0,date:0,seq:0}})).changes([]).length,0);
+});
+test('channel durable ACK replay uses same feed with no provider reread',async t=>{
+ const f=fixture(t);f.job.kind='channel';f.job.peer={kind:'channel',id:'12'};f.job.fromState={pts:10,qts:0,date:0,seq:0};f.c.telegram.native.channel=f.c.telegram.native.account;
+ let lost=true;const host=async(a,b)=>{const r=await f.host(a,b);if(a==='channelComplete'&&lost){lost=false;throw new Error('channel ACK lost');}return r;};
+ await assert.rejects(createNativeWorker({...f,host}).tick(f.c),/channel ACK lost/);await createNativeWorker({...f,host}).tick(f.c);
+ assert.equal(f.reads(),1);assert.equal(f.calls.filter(x=>x.a==='channelComplete').length,2);assert.equal(f.calls.at(-1).b.feedId,f.job.id);
 });

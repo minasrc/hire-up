@@ -7,7 +7,7 @@ export function createHostClient({ server, token, fetchImpl = fetch, timeoutMs =
   if (!/^[A-Za-z0-9_-]{64}$/.test(token)) throw new Error('INVALID_WORKER_TOKEN');
   if (!['connection', 'history', 'source-updates', 'native'].includes(service)) throw new Error('INVALID_SERVICE');
   const limit = service === 'native' ? 2097152 : service !== 'connection' ? 262144 : 16384;
-  const actions = service === 'native' ? ['claim', 'resolve', 'complete', 'defer'] : service !== 'connection' ? ['claim', 'complete', 'defer'] : ['heartbeat', 'claim', 'update'];
+  const actions = service === 'native' ? ['claim', 'resolve', 'complete', 'defer','channelClaim','channelResolve','channelComplete','channelDefer'] : service !== 'connection' ? ['claim', 'complete', 'defer'] : ['heartbeat', 'claim', 'update'];
   return async (action, body = {}) => {
     if (!actions.includes(action)) throw new Error('INVALID_ACTION');
     const serialized = JSON.stringify(body);
