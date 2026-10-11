@@ -1,3 +1,4 @@
+import { telegramSourceUpdateStatus } from '../../src/lib/telegram-source-update-operations.js';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
@@ -46,4 +47,9 @@ test('SDK reconciliation validates peer and exact IDs; inaccessible response nev
  response={messages:[]};await assert.rejects(adapter.reconcile(args),{code:'PEER_UNAVAILABLE'});
  response={messages:[{className:'Message',id:1,peerId:{chatId:13},date:1,message:'wrong chat'}]};await assert.rejects(adapter.reconcile(args),{code:'PEER_UNAVAILABLE'});
  response={messages:[{className:'MessageEmpty',id:2}]};await assert.rejects(adapter.reconcile(args),{code:'PEER_UNAVAILABLE'});
+});
+
+test('staff freshness reads require 1–50 unique explicit UUIDs before touching the database',()=>{
+ for(const ids of [null,[],[null],['bad'],Array(51).fill(randomUUID())]) assert.throws(()=>telegramSourceUpdateStatus(null,null,null,ids));
+ const id=randomUUID();assert.throws(()=>telegramSourceUpdateStatus(null,null,null,[id,id]));
 });

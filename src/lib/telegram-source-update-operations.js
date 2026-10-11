@@ -1,3 +1,5 @@
+import { assertUuid } from './candidate-profile-contracts.js';
+import { ClientJobContractError } from './client-job-contracts.js';
 import { withStaffTransaction } from './staff-authorization.js';
 import { sourceUpdateInput } from './telegram-source-update-contracts.js';
 export async function telegramSourceUpdateWorkerOperation(pool, token, action, input) {
@@ -22,6 +24,8 @@ export async function telegramSourceUpdateWorkerOperation(pool, token, action, i
     finally { client.release(); }
 }
 
-export function telegramSourceUpdateStatus(pool, identity, org) {
- return withStaffTransaction(pool, identity, org, ['candidates.read'], async ({client}) => (await client.query('select app.telegram_source_updates_status_v1() as result')).rows[0].result);
+export function telegramSourceUpdateStatus(pool, identity, org, chatIds) {
+ if (!Array.isArray(chatIds) || chatIds.length<1 || chatIds.length>50 || new Set(chatIds).size!==chatIds.length) throw new ClientJobContractError({chatIds:'Select between 1 and 50 chats.'});
+ const ids=chatIds.map(id=>assertUuid(id,'chatIds'));
+ return withStaffTransaction(pool, identity, org, ['candidates.read'], async ({client}) => (await client.query('select app.telegram_source_updates_status_v1($1::uuid[]) as result',[ids])).rows[0].result);
 }

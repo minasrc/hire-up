@@ -265,11 +265,24 @@ test('source freshness integrates with retained history and durable checkpoints'
         await runtime.tick(context); await runtime.tick(context); assert.equal(savedCheckpoint(), '313');
     });
     psql(db, readFileSync(join(migrationsDir, '20261011130000_telegram_source_updates.sql'), 'utf8'));
+    psql(db, readFileSync(join(migrationsDir, '20261011140000_telegram_source_refresh.sql'), 'utf8'));
     await t.test('retained reconciliation commits edits, replays ACKs, sweeps old IDs, and fences pause', async () => {
       const sourceHost = (action,body) => telegramSourceUpdateWorkerOperation(workerPool,token,action,body);
       const proof = {connectionId:context.connectionId,generation:context.generation,connectionLeaseToken:context.connectionLeaseToken,accountUserId};
       const j=(await sourceHost('claim',proof)).job;
       assert.ok(j.messageIds.length>0); assert.ok(Number(j.messageIds[0])<=100, 'Starts at old retained IDs');
+      async function direct(sql,args) {
+        const client=await workerPool.connect();
+        try {await client.query('begin;set local role app_telegram_worker');return await client.query(sql,args);}
+        finally {await client.query('rollback');client.release();}
+      }
+      const directProof=[token,proof.connectionId,proof.generation,proof.connectionLeaseToken,proof.accountUserId];
+      await assert.rejects(direct('select app.telegram_source_updates_defer_v1($1,$2,$3,$4,$5,$6,$7,$8,$9)',[...directProof,j.id,j.leaseToken,null,60]),{code:'22023'});
+      await assert.rejects(direct('select app.telegram_source_updates_defer_v1($1,$2,$3,$4,$5,$6,$7,$8,$9)',[...directProof,j.id,j.leaseToken,'FLOOD_WAIT',null]),{code:'22023'});
+      await assert.rejects(direct('select app.telegram_source_updates_complete_v1($1,$2,$3,$4,$5,$6,$7,$8::jsonb)',[...directProof,j.id,null,JSON.stringify({pageId:randomUUID(),records:[]})]),{code:'40001'});
+      await assert.rejects(direct('select app.telegram_source_updates_complete_v1($1,$2,$3,$4,$5,$6,$7,$8::jsonb)',[...directProof,j.id,j.leaseToken,null]),{code:'22023'});
+      await assert.rejects(withStaffTransaction(pool,owner,org,['candidates.read'],({client})=>client.query('select app.telegram_source_updates_status_v1(null::uuid[])')),{code:'22023'});
+
       const bodies=JSON.parse(psql(db,`select jsonb_agg(body order by message_id) from app.telegram_history_messages where chat_id='${chat.id}' and message_id in (${j.messageIds.join(',')})`).trim());
       bodies[0].text='Edited retained message'; bodies[0].editedAt=sentAt;
       const page={...proof,jobId:j.id,jobLeaseToken:j.leaseToken,pageId:randomUUID(),records:bodies};
@@ -283,7 +296,7 @@ test('source freshness integrates with retained history and durable checkpoints'
       chat=(await status()).chats[0];await action({action:'pause',chatId:chat.id,expectedVersion:chat.version});
       await assert.rejects(sourceHost('complete',{...proof,jobId:next.id,jobLeaseToken:next.leaseToken,pageId:randomUUID(),records:bodies}),{code:'40001'});
       assert.equal((await sourceHost('claim',proof)).job,null);
-      assert.equal((await telegramSourceUpdateStatus(pool,owner,org))[0].mode,'retained_message_reconciliation');
+      assert.equal((await telegramSourceUpdateStatus(pool,owner,org,[chat.id]))[0].mode,'retained_message_reconciliation');
       chat=(await status()).chats[0];await action({action:'resume',chatId:chat.id,expectedVersion:chat.version});
       const affectedDraft=psql(db,`select draft_id from app.telegram_extraction_proposals where job_id=(select job_id from app.telegram_extraction_sources where chat_id='${chat.id}' and message_id=104) limit 1`).trim();
       const independentJob=randomUUID();
@@ -297,7 +310,7 @@ test('source freshness integrates with retained history and durable checkpoints'
       await sourceHost('complete',{...proof,jobId:changed.id,jobLeaseToken:changed.leaseToken,pageId:randomUUID(),records:affected});
       assert.equal(psql(db,`select source_invalidated_at is not null and source_purged_at is null and error_code='SOURCE_CHANGED' from app.telegram_extraction_jobs where id=(select job_id from app.telegram_extraction_sources where chat_id='${chat.id}' and message_id=104)`).trim(),'t');
       assert.equal(psql(db,`select count(*) from app.telegram_evidence where extraction_job_id=(select job_id from app.telegram_extraction_sources where chat_id='${chat.id}' and message_id=104)`).trim(),'0');
-      assert.equal((await telegramSourceUpdateStatus(pool,owner,org)).find(c=>c.chatId===chat.id).needsReextraction,true);
+      assert.equal((await telegramSourceUpdateStatus(pool,owner,org,[chat.id])).find(c=>c.chatId===chat.id).needsReextraction,true);
       const protectedDraft=await getTelegramDraft(pool,owner,org,affectedDraft);
       assert.equal(protectedDraft.fields.firstName,'Alex','Independent current applied proposal preserves matching fact');
       assert.equal(protectedDraft.fields.lastName,'Smith','Human field preserved');
@@ -321,7 +334,7 @@ test('source freshness integrates with retained history and durable checkpoints'
         last=Number(sweep.messageIds.at(-1));await sourceHost('complete',{...proof,jobId:sweep.id,jobLeaseToken:sweep.leaseToken,pageId:randomUUID(),records});
       }
       assert.equal(last,313,'Full sweep includes latest retained ID, without permanent recent window');
-      assert.ok((await telegramSourceUpdateStatus(pool,owner,org)).find(c=>c.chatId===chat.id).lastCycleAt);
+      assert.ok((await telegramSourceUpdateStatus(pool,owner,org,[chat.id])).find(c=>c.chatId===chat.id).lastCycleAt);
       const oldJob=psql(db,`select job_id from app.telegram_extraction_sources where chat_id='${chat.id}' and message_id=100`).trim();
       psql(db,`update app.telegram_extraction_jobs set source_release_requested_at=now() where id='${oldJob}'`);
       const purged=JSON.parse(psql(db,`select app.telegram_retention_purge_v1('${oldJob}')`).trim());

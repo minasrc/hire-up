@@ -50,7 +50,7 @@ begin
  d:=sha256(convert_to(p_page::text,'UTF8'));
  if s.receipt_id=(p_page->>'pageId')::uuid then
  if s.receipt_digest<>d then raise exception 'Receipt changed' using errcode='40001'; end if; return s.receipt_result||jsonb_build_object('replayed',true); end if;
- if s.lease_token is distinct from p_lease or s.lease_expires_at<=now() then raise exception 'Sweep lease changed' using errcode='40001'; end if;
+ if p_lease is null or s.lease_token is null or s.lease_expires_at is null or s.lease_token is distinct from p_lease or s.lease_expires_at<=now() then raise exception 'Sweep lease changed' using errcode='40001'; end if;
  if jsonb_typeof(p_page->'records') is distinct from 'array' or jsonb_array_length(p_page->'records')<>jsonb_array_length(s.ids) or (select count(distinct x->>'messageId') from jsonb_array_elements(p_page->'records') x)<>jsonb_array_length(s.ids) then raise exception 'Incomplete source page' using errcode='22023'; end if;
  perform app.telegram_extraction_lock_v1();
  select * into quota from app.telegram_history_limits for update;
@@ -67,7 +67,7 @@ begin
  if not found or m.body=r then continue; end if;
  -- Invalidate the entire dependent batch: leased results and all copied raw evidence
  -- become unusable atomically, while reviewed candidate fields are preserved.
- for jid in select id from app.telegram_extraction_jobs where (m.body-'editedAt') is distinct from (r-'editedAt') and chat_id=ch.id and source is not null and source->'messages' @> jsonb_build_array(jsonb_build_object('messageId',r->>'messageId')) for update loop
+ for jid in select id from app.telegram_extraction_jobs where (m.body-'editedAt') is distinct from (r-'editedAt') and id=m.extraction_job_id and chat_id=ch.id and source is not null and source_invalidated_at is null and source_purged_at is null and source->'messages' @> jsonb_build_array(jsonb_build_object('messageId',r->>'messageId')) for update loop
  update app.telegram_drafts d0 set fields=case when d0.status in('approved','discarded') then d0.fields else coalesce((select jsonb_object_agg(key,value) from jsonb_each(d0.fields) where key=any(d0.human_fields) or not exists(select 1 from app.telegram_extraction_proposals affected where affected.job_id=jid and affected.draft_id=d0.id and affected.field=key and affected.suggested_value=value) or exists(select 1 from app.telegram_extraction_proposals other join app.telegram_extraction_jobs valid_job on valid_job.id=other.job_id where other.job_id<>jid and other.draft_id=d0.id and other.field=key and other.suggested_value=value and other.status='applied' and valid_job.error_code is distinct from 'SOURCE_CHANGED')),'{}') end,version=version+1,updated_at=now() where id in(select id from app.telegram_retention_drafts_v1(jid));
  update app.telegram_extraction_proposals set status='dismissed',suggested_value='null',evidence='[]' where job_id=jid;
  delete from app.telegram_draft_evidence where evidence_id in(select id from app.telegram_evidence where extraction_job_id=jid);
@@ -89,7 +89,7 @@ create function app.telegram_source_updates_defer_v1(p_token text,p_connection u
 declare a app.telegram_history_accounts;
 begin
  a:=app.telegram_history_worker_v1(p_token,p_connection,p_generation,p_connection_lease,p_user);
- if a.id is null or p_code not in('FLOOD_WAIT','TELEGRAM_UNAVAILABLE','PEER_UNAVAILABLE','PEER_CACHE_MISSING','MESSAGE_TOO_LARGE') or p_delay not between 1 and 604800 then raise exception 'Invalid sweep defer' using errcode='22023'; end if;
+ if a.id is null or p_code is null or p_delay is null or p_lease is null or p_code not in('FLOOD_WAIT','TELEGRAM_UNAVAILABLE','PEER_UNAVAILABLE','PEER_CACHE_MISSING','MESSAGE_TOO_LARGE') or p_delay not between 1 and 604800 then raise exception 'Invalid sweep defer' using errcode='22023'; end if;
  update app.telegram_source_sweeps s set lease_token=null,lease_expires_at=null,due_at=now()+make_interval(secs=>p_delay),error_code=p_code from app.telegram_history_chats c where c.id=s.chat_id and c.account_id=a.id and c.selected and s.chat_id=p_chat and s.generation=p_generation and s.chat_version=c.version and s.lease_token=p_lease;
  if not found then raise exception 'Sweep changed' using errcode='40001'; end if;
  if p_code='FLOOD_WAIT' then update app.telegram_history_accounts set cooldown_until=now()+make_interval(secs=>p_delay) where id=a.id; end if;
