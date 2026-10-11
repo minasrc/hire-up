@@ -5,7 +5,11 @@ set local statement_timeout='30s';
 set local role app_owner;
 alter table app.telegram_history_messages add column context_document tsvector generated always as (to_tsvector('simple'::regconfig, coalesce(body->>'text',''))) stored;
 alter table app.telegram_history_messages add column context_sent_at timestamptz;
+-- The migration operator must bypass FORCE RLS for the global backfill.
+-- app_owner has no owner-scoped runtime context and would silently update zero rows.
+reset role;
 update app.telegram_history_messages set context_sent_at=(body->>'sentAt')::timestamptz;
+set local role app_owner;
 create index telegram_context_document_gin on app.telegram_history_messages using gin(context_document);
 create index telegram_context_order_idx on app.telegram_history_messages(organization_id,owner_user_id,context_sent_at desc,chat_id desc,message_id desc);
 create index telegram_context_chat_title_idx on app.telegram_history_chats(organization_id,owner_user_id,title,id);

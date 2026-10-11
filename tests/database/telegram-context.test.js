@@ -16,7 +16,7 @@ const message=(i)=>({messageId:String(i),kind:'message',sentAt:`2026-10-${i%2?'1
 test('private retained Telegram search and conversation viewer', {timeout:120000},async t=>{
  assertLocalTestEnvironment(); const db=await startPostgresContainer('pgtelegramcontext',POSTGRES_17_IMAGE,{publish:true}); let pool;
  t.after(async()=>{await pool?.end();stopAndRemoveContainer(db);});
- for(const f of readdirSync(dir).filter(f=>f>='20260922090000_foundation_roles.sql'&&f<='20261011120000_telegram_context_search.sql'&&f.endsWith('.sql')).sort()) psql(db,readFileSync(join(dir,f),'utf8'));
+ for(const f of readdirSync(dir).filter(f=>f>='20260922090000_foundation_roles.sql'&&f<'20261011120000_telegram_context_search.sql'&&f.endsWith('.sql')).sort()) psql(db,readFileSync(join(dir,f),'utf8'));
  const password=installStaffFixture(db); pool=new pg.Pool(staffPoolOptions(db,password,4));
  const chatIds=[];
  for(const [index,user,organization] of [[0,ID.USER_CUSTOM,org],[1,ID.USER_ADMIN2,org],[2,ID.USER_SHARED,ID.ORG_B]]){
@@ -29,6 +29,8 @@ test('private retained Telegram search and conversation viewer', {timeout:120000
  const inserts=[]; for(let i=1;i<= (index===0?125:1);i++) {const body=JSON.stringify(message(i)).replaceAll("'","''");inserts.push(`insert into app.telegram_history_messages(organization_id,owner_user_id,chat_id,message_id,body,stored_bytes) values('${organization}','${user}','${chat}',${i},'${body}',100);`);} psql(db,inserts.join('\n'));
  if(index===0) psql(db,`insert into app.telegram_history_chats(organization_id,owner_user_id,account_id,peer_kind,peer_id,title) select '${organization}','${user}','${account}','user',n::text,'Same title' from generate_series(2001,2055)n;`);
  }
+ // Seed before deployment: FORCE RLS must not silently skip the timestamp backfill.
+ psql(db,readFileSync(join(dir,'20261011120000_telegram_context_search.sql'),'utf8'));
  const search=input=>telegramContextSearch(pool,owner,org,{action:'search',query:'engineering',...input});
  const view=input=>telegramContextView(pool,owner,org,{chatId:chatIds[0],...input});
  await t.test('read-only candidate permission, disconnected history and source text',async()=>{
