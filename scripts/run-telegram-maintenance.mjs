@@ -1,3 +1,4 @@
+import { appendFileSync } from 'node:fs';
 import { pathToFileURL } from 'node:url';
 
 export async function requestMaintenance({ url, secret, fetchImpl = fetch }) {
@@ -49,12 +50,33 @@ export async function drainMaintenance(options, request = requestMaintenance) {
     return totals;
 }
 
-if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
-    const url = process.env.TELEGRAM_MAINTENANCE_URL;
-    const secret = process.env.TELEGRAM_MAINTENANCE_SECRET;
-    if (!url && !secret) console.log('Telegram maintenance is not configured; no request sent.');
-    else {
-        try { console.log(JSON.stringify(await drainMaintenance({ url, secret }))); }
-        catch { console.error('Telegram maintenance failed. Check hosted configuration and service health.'); process.exitCode = 1; }
+export async function runMaintenanceCommand({ environment = process.env, drain = drainMaintenance, log = console.log, error = console.error, summary = value => {
+    if (environment.GITHUB_STEP_SUMMARY) appendFileSync(environment.GITHUB_STEP_SUMMARY, value);
+} } = {}) {
+    const url = environment.TELEGRAM_MAINTENANCE_URL;
+    const secret = environment.TELEGRAM_MAINTENANCE_SECRET;
+    if (!url || !secret) {
+        const message = 'Telegram maintenance is not configured; no request sent. Configure both maintenance secrets before enabling Telegram intake.';
+        error(message);
+        summary(`Telegram cleanup failed: configuration is incomplete. No cleanup request was sent.\n`);
+        return 1;
     }
+    try {
+        const result = await drain({ url, secret });
+        log(JSON.stringify(result));
+        summary(`Telegram cleanup completed ${result.runs} bounded request(s): ${result.messagesPurged} messages removed, ${result.bytesFreed} bytes freed, ${result.queryResultRowsDeleted} cached results removed.\n`);
+        if (result.remainingWork) {
+            log('Telegram cleanup still has pending work. Review repeated backlogs and sources held for review.');
+            summary('Pending work remains. Sources awaiting review may be held; repeated backlogs require an operator check.\n');
+        }
+        return 0;
+    } catch {
+        error('Telegram maintenance failed. Check hosted configuration and service health.');
+        summary('Telegram cleanup failed. No successful cleanup is established by this run.\n');
+        return 1;
+    }
+}
+
+if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
+    process.exitCode = await runMaintenanceCommand();
 }
