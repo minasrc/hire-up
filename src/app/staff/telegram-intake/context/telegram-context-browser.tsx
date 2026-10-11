@@ -11,7 +11,7 @@ import { Dialog, DialogContent, DialogDescription, DialogTitle } from '@/compone
 import { StaffDate } from '../../staff-date';
 import { StaffAuthRecoveryPrompt } from '../../auth-recovery';
 import { staffAuthRecovery } from '@/lib/staff-auth-recovery';
-import { Chat, Message, SearchFilters, contextUrl, forwardedLabel, searchPayload, senderLabel, messageExcerpt, pendingFilterChanges, conversationDeepLink } from './context-model';
+import { Chat, Message, SearchFilters, contextUrl, forwardedLabel, searchPayload, senderLabel, messageExcerpt, pendingFilterChanges, conversationDeepLink, SourceUpdateStatus, sourceStatusLabel } from './context-model';
 
 const endpoint = '/api/staff/telegram-context';
 const emptyFilters: SearchFilters = { query: '', chatId: '', sender: '', from: '', to: '', attachmentsOnly: false };
@@ -37,9 +37,12 @@ export function TelegramContextBrowser() {
     const [conversation, setConversation] = useState<Conversation | null>(null);
     const [contextLoading, setContextLoading] = useState(false);
     const [contextError, setContextError] = useState('');
+    const [sourceStatuses, setSourceStatuses] = useState<SourceUpdateStatus[]>([]);
+    const [sourceLoading, setSourceLoading] = useState(false);
+    const [sourceError, setSourceError] = useState('');
     const controllers = useRef<Record<string, AbortController>>({});
     const invalidated = useRef(false);
-    const loadVersions = useRef({ chats: 0, search: 0, context: 0 });
+    const loadVersions = useRef({ chats: 0, search: 0, context: 0, source: 0 });
     const searchButton = useRef<HTMLButtonElement>(null);
     const selectedChat = useRef<Chat | null>(null);
 
@@ -47,7 +50,7 @@ export function TelegramContextBrowser() {
         invalidated.current = true;
         Object.values(controllers.current).forEach(controller => controller.abort());
         setResult(null); setConversation(null); setChats([]); setFilters(emptyFilters); setSubmitted(null); setChatQuery(''); setChatAfter(null); setChatCursors([null]); setResultCursors([null]); setAppliedChatQuery(''); setTarget(null); selectedChat.current = null;
-        setLoading(false); setChatLoading(false); setContextLoading(false);
+        setLoading(false); setChatLoading(false); setContextLoading(false); setSourceStatuses([]); setSourceError(''); setSourceLoading(false);
     }
     async function read<T>(key: string, url: string, body?: unknown): Promise<T | null> {
         if (invalidated.current) return null;
@@ -70,6 +73,32 @@ export function TelegramContextBrowser() {
             if (failure instanceof ContextError) throw failure;
             throw new Error('Unable to reach conversation search. Check your network connection and retry. Stored messages remain searchable when the Telegram connector is offline.');
         }
+    }
+    async function loadSourceStatus() {
+        if (invalidated.current) return;
+        const version = ++loadVersions.current.source;
+        setSourceLoading(true); setSourceError(''); setSourceStatuses([]);
+        try {
+            const data = await read<SourceUpdateStatus[]>('source', '/api/staff/telegram-source-updates');
+            if (data) setSourceStatuses(data);
+        } catch (failure) {
+            if (version === loadVersions.current.source) {
+                if (failure instanceof ContextError && [401, 403, 428].includes(failure.status)) setSourceError(failure.message);
+                else if (!invalidated.current) setSourceError('Retained-message check status is unavailable. Retry to check it; stored keyword search is still available.');
+            }
+        } finally {
+            if (version === loadVersions.current.source && !controllers.current.source?.signal.aborted) setSourceLoading(false);
+        }
+    }
+    function freshness(chatId: string) {
+        const source = sourceStatuses.find(row => row.chatId === chatId);
+        if (!source) return <p className="text-xs text-muted-foreground">{sourceLoading ? 'Loading retained-message check status…' : 'Retained-message check status unavailable for this chat.'}</p>;
+        return <div className="space-y-1 text-xs text-muted-foreground">
+            <p>{sourceStatusLabel(source)}</p>
+            <p>Last batch checked: {source.lastCheckedAt ? <StaffDate value={source.lastCheckedAt} kind="timestamp" /> : 'Not checked yet'}.</p>
+            <p>Last full retained-ID sweep: {source.lastCycleAt ? <StaffDate value={source.lastCycleAt} kind="timestamp" /> : 'No completed sweep recorded'}.</p>
+            {source.needsReextraction ? <p className="font-medium">Retained source changed. Candidate re-extraction is pending; existing drafts may contain an earlier version.</p> : null}
+        </div>;
     }
     async function loadChats(after: string | null = null, query = chatQuery, cursors: (string | null)[] = [null]) {
         if (invalidated.current) return;
@@ -97,13 +126,13 @@ export function TelegramContextBrowser() {
     }
     function openContext(chatId: string, anchor?: string) { const next = { chatId, anchor }; setTarget(next); void loadContext(next); }
     useEffect(() => {
-        void loadChats();
+        void loadChats(); void loadSourceStatus();
         const params = new URLSearchParams(window.location.search);
         const chatId = params.get('chatId'); const anchor = params.get('messageId');
         const deepLink = conversationDeepLink(chatId, anchor);
         if (deepLink) openContext(deepLink.chatId, deepLink.anchor);
         const invalidate = () => clearPrivate();
-        const retry = () => { invalidated.current = false; setError(''); setContextError(''); void loadChats(null, ''); };
+        const retry = () => { invalidated.current = false; setError(''); setContextError(''); void loadChats(null, '').then(() => loadSourceStatus()); };
         window.addEventListener('staff-session-invalidated', invalidate); window.addEventListener('staff-auth-retry', retry);
         return () => { Object.values(controllers.current).forEach(controller => controller.abort()); window.removeEventListener('staff-session-invalidated', invalidate); window.removeEventListener('staff-auth-retry', retry); };
         // Initial reads and recovery deliberately discard all private search state.
@@ -126,11 +155,12 @@ export function TelegramContextBrowser() {
     }
     return <section className="mx-auto flex w-full max-w-5xl flex-col gap-6">
         <PageHeader eyebrow="Private workspace" title="Search conversations" description="Find original messages in your retained Telegram history." actions={<Button asChild variant="outline"><Link href="/staff/telegram-intake/chats">Telegram chats</Link></Button>} />
-        <p className="text-sm text-muted-foreground">Private conversations are separate from profiles and CVs. Reviewed source material may be released through the candidate review workflow. Search covers retained imports, including disconnected accounts; removed sources and later Telegram edits may be unavailable.</p>
+        <p className="text-sm text-muted-foreground">Private conversations are separate from profiles and CVs. Reviewed source material may be released through the candidate review workflow. Search covers retained imports, including disconnected accounts; Lexical search covers retained source text. The online connector checks selected chats in bounded retained-message batches; large histories take longer to complete a sweep. A partial check does not confirm that all history is current. Unavailable Telegram sources are not confirmed deletions.</p>
         <StaffAuthRecoveryPrompt />
+        <div className="flex flex-wrap items-center gap-3"><Button variant="outline" disabled={sourceLoading || invalidated.current} onClick={() => void loadSourceStatus()}>Refresh retained-message status</Button><p role="status" className="text-xs text-muted-foreground">{sourceLoading ? 'Checking retained-message status…' : sourceError || 'Status changes only when loaded or refreshed here.'}</p></div>
         <Card className="space-y-4 p-5">
             <form onSubmit={event => { event.preventDefault(); void loadChats(null); }} className="flex flex-wrap items-end gap-2"><div className="min-w-0 flex-1 space-y-2"><Label htmlFor="context-chat-query">Find an imported chat</Label><Input id="context-chat-query" value={chatQuery} maxLength={100} onChange={event => setChatQuery(event.target.value)} placeholder="Title or username" /></div><Button type="submit" variant="outline" disabled={chatLoading}>Find chats</Button></form>
-            <div className="flex max-h-64 flex-wrap gap-2 overflow-y-auto rounded-lg p-1" aria-label="Imported chat choices" aria-busy={chatLoading}><Button variant={!filters.chatId ? 'secondary' : 'outline'} aria-pressed={!filters.chatId} onClick={() => { field('chatId', ''); selectedChat.current = null; }}>All imported chats</Button>{chats.map(chat => <Button key={chat.id} className="max-w-full whitespace-normal break-words text-left" variant={filters.chatId === chat.id ? 'secondary' : 'outline'} aria-pressed={filters.chatId === chat.id} onClick={() => { selectedChat.current = chat; field('chatId', chat.id); }}>{chat.title || 'Untitled chat'}{chat.username ? ` (@${chat.username})` : ''} · Account {chat.accountUserId}</Button>)}</div>
+            <div className="flex max-h-64 flex-wrap gap-2 overflow-y-auto rounded-lg p-1" aria-label="Imported chat choices" aria-busy={chatLoading}><Button variant={!filters.chatId ? 'secondary' : 'outline'} aria-pressed={!filters.chatId} onClick={() => { field('chatId', ''); selectedChat.current = null; }}>All imported chats</Button>{chats.map(chat => <div key={chat.id} className="w-full space-y-2 rounded-lg border p-3 sm:w-[calc(50%-0.25rem)]"><Button className="max-w-full whitespace-normal break-words text-left" variant={filters.chatId === chat.id ? 'secondary' : 'outline'} aria-pressed={filters.chatId === chat.id} onClick={() => { selectedChat.current = chat; field('chatId', chat.id); }}>{chat.title || 'Untitled chat'}{chat.username ? ` (@${chat.username})` : ''} · Account {chat.accountUserId}</Button>{freshness(chat.id)}</div>)}</div>
             <p role="status" className="text-sm text-muted-foreground">{chatLoading ? 'Loading chats…' : chatError || (!chats.length ? 'No imported chats match this chat search.' : '')}{filters.chatId ? ` Searching in ${selectedChat.current?.title || 'selected chat'}.` : ''}</p>
             <div className="flex flex-wrap items-center gap-2"><span className="text-xs">Chat page {chatCursors.length}</span><Button size="sm" variant="outline" disabled={chatLoading || chatCursors.length === 1} onClick={() => { const previous = chatCursors.slice(0, -1); void loadChats(previous.at(-1), appliedChatQuery, previous); }}>Previous chat page</Button>{chatAfter ? <Button size="sm" variant="outline" disabled={chatLoading} onClick={() => void loadChats(chatAfter, appliedChatQuery, [...chatCursors, chatAfter])}>Next chat page</Button> : null}</div>
         </Card>
@@ -152,7 +182,7 @@ export function TelegramContextBrowser() {
             <DialogTitle>{conversation?.chat.title || 'Private conversation'}</DialogTitle><DialogDescription>Original retained messages in chronological order. Attachment details are metadata; files are not downloaded here.</DialogDescription>
             <p role="status" aria-live="polite" className="text-sm">{contextLoading ? 'Loading conversation…' : contextError}</p>
             {contextError && target ? <Button variant="outline" onClick={() => void loadContext(target)}>Retry conversation</Button> : null}
-            {conversation ? <><p className="text-xs text-muted-foreground">Telegram account {conversation.chat.accountUserId}</p>{conversation.anchorUnavailable ? <p role="status" className="rounded-lg border p-3 text-sm">The requested message is not retained or is no longer available. Available conversation messages are shown below.</p> : null}<div className="flex flex-wrap gap-2">{conversation.olderBefore ? <Button variant="outline" onClick={() => void loadContext({ chatId: conversation.chat.id, before: conversation.olderBefore! })}>Older messages</Button> : null}{conversation.newerAfter ? <Button variant="outline" onClick={() => void loadContext({ chatId: conversation.chat.id, after: conversation.newerAfter! })}>Newer messages</Button> : null}<Button variant="ghost" onClick={() => void loadContext({ chatId: conversation.chat.id })}>Latest messages</Button></div>{conversation.messages.length ? conversation.messages.map(message => messageCard(message, true)) : <p className="text-sm">No retained messages are available in this conversation.</p>}</> : null}
+            {conversation ? <><p className="text-xs text-muted-foreground">Telegram account {conversation.chat.accountUserId}</p>{freshness(conversation.chat.id)}{conversation.anchorUnavailable ? <p role="status" className="rounded-lg border p-3 text-sm">The requested message is not retained or is no longer available. Available conversation messages are shown below.</p> : null}<div className="flex flex-wrap gap-2">{conversation.olderBefore ? <Button variant="outline" onClick={() => void loadContext({ chatId: conversation.chat.id, before: conversation.olderBefore! })}>Older messages</Button> : null}{conversation.newerAfter ? <Button variant="outline" onClick={() => void loadContext({ chatId: conversation.chat.id, after: conversation.newerAfter! })}>Newer messages</Button> : null}<Button variant="ghost" onClick={() => void loadContext({ chatId: conversation.chat.id })}>Latest messages</Button></div>{conversation.messages.length ? conversation.messages.map(message => messageCard(message, true)) : <p className="text-sm">No retained messages are available in this conversation.</p>}</> : null}
         </DialogContent></Dialog>
     </section>;
 }

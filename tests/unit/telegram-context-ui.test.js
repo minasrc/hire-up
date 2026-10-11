@@ -3,7 +3,7 @@ import test from 'node:test';
 import { readFileSync } from 'node:fs';
 import ts from 'typescript';
 const compiled = ts.transpileModule(readFileSync(new URL('../../src/app/staff/telegram-intake/context/context-model.ts', import.meta.url), 'utf8'), { compilerOptions: { module: ts.ModuleKind.ESNext, target: ts.ScriptTarget.ES2022 } }).outputText;
-const { searchPayload, contextUrl, senderLabel, forwardedLabel, messageExcerpt, pendingFilterChanges, conversationDeepLink } = await import(`data:text/javascript;base64,${Buffer.from(compiled).toString('base64')}`);
+const { searchPayload, contextUrl, senderLabel, forwardedLabel, messageExcerpt, pendingFilterChanges, conversationDeepLink, sourceStatusLabel } = await import(`data:text/javascript;base64,${Buffer.from(compiled).toString('base64')}`);
 test('search retains quoted terms and inclusive dates in a POST payload', () => {
     assert.deepEqual(searchPayload({ query: '  "product designer" OR engineer ', chatId: '', sender: ' @ada ', from: '2026-10-01', to: '2026-10-11', attachmentsOnly: true }, 'cursor'), { action: 'search', query: '"product designer" OR engineer', chatId: null, sender: '@ada', from: '2026-10-01', to: '2026-10-11', attachmentsOnly: true, after: 'cursor' });
 });
@@ -42,4 +42,16 @@ test('deep links require canonical identifier structure and positive bounded mes
     for (const anchor of ['0', '01', '-1', '2147483648', '999999999999999999', '']) assert.equal(conversationDeepLink(chatId, anchor), null);
     assert.equal(conversationDeepLink('a'.repeat(36), '1'), null);
     assert.equal(conversationDeepLink('--------1111-4111-8111-111111111111', '1'), null);
+});
+
+test('source freshness describes partial checks, offline and blocked states without raw codes', () => {
+    assert.match(sourceStatusLabel({ status: 'worker_offline' }), /remain searchable/);
+    assert.match(sourceStatusLabel({ status: 'reconnect_required' }), /Reconnect/);
+    assert.match(sourceStatusLabel({ status: 'off' }), /not selected/);
+    assert.match(sourceStatusLabel({ status: 'paused' }), /Paused or cancelled/);
+    assert.match(sourceStatusLabel({ status: 'checking' }), /partial sweep/);
+    const delayed = sourceStatusLabel({ status: 'waiting', errorCode: 'SECRET_DB_CODE' });
+    assert.match(delayed, /delayed/);
+    assert.equal(delayed.includes('SECRET_DB_CODE'), false);
+    assert.match(sourceStatusLabel({ status: 'scheduled' }), /Selected/);
 });
