@@ -141,3 +141,5 @@ receipts remain intact. Same-device renewal and display metadata updates are
 allowed without changing the original encrypted namespace. Keep using the same
 stateDirectory when adopting a paired credential for an existing identity; do not
 copy, rotate or regenerate its token merely to start the launcher.
+
+The worker supports both candidate-extraction-v1 and candidate-extraction-v2 and advertises both on claim. V2 adds a bounded `contextOnly` array with a separate prompt; all output evidence, identity and attachment references must still come from primary messages. Host opt-in `TELEGRAM_EXTRACTION_CONTEXT_ENABLED=true` defaults off. See [bounded context contract](../../docs/telegram-extraction-context-v2.md) for deployment, privacy acceptance, version recovery and retention behavior.

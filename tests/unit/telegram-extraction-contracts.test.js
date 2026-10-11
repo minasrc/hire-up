@@ -35,3 +35,40 @@ test('retention decisions and automatic extraction settings are explicit, bounde
     for (const input of [{ ...release, mode: 'automatic' }, { ...release, expectedSourceVersion: null }, { ...release, ownerId: id }]) assert.throws(() => extractionStaffAction(input));
     assert.equal(EXTRACTION_SINGLE_SOURCE_LIMIT, 327680);
 });
+
+test('worker version negotiation accepts legacy empty claim and bounded explicit capability list', () => {
+  assert.deepEqual(extractionWorkerInput('claim', {}), {});
+  assert.deepEqual(extractionWorkerInput('claim', { schemaVersions: ['candidate-extraction-v1', 'candidate-extraction-v2'] }), { schemaVersions: ['candidate-extraction-v1', 'candidate-extraction-v2'] });
+  for (const input of [{ schemaVersions: [] }, { schemaVersions: ['candidate-extraction-v2'] }, { schemaVersions: ['candidate-extraction-v2', 'candidate-extraction-v2'] }, { schemaVersions: ['candidate-extraction-v3'] }, { schemaVersions: ['candidate-extraction-v1'], enabled: true }]) assert.throws(() => extractionWorkerInput('claim', input));
+});
+
+test('v2 literal primary support covers every supported field and rejects context-only aliases', () => {
+  const values = { firstName: 'Alice', lastName: 'Smith', primaryEmail: 'ALICE@example.test', secondaryEmails: ['OTHER@example.test'], headline: 'Rust engineer', location: 'Madrid', professionalUrl: 'https://www.linkedin.com/in/alice', professionalSummary: 'Five years of engineering experience', compensationPreference: 'EUR 80000' };
+  const quoted = Object.values(values).flat().join('; ');
+  for (const [field, value] of Object.entries(values)) {
+    const primary = { messages: [{ ...source.messages[0], text: quoted }], contextOnly: [] };
+    const r = { subjects: [{ key: 'literal', identity: null, facts: [{ field, value, evidence: [{ messageId: '10', quote: quoted }] }], attachments: [] }] };
+    assert.doesNotThrow(() => validateExtractionResult(r, primary), field);
+    const bad = structuredClone(r); bad.subjects[0].facts[0].value = field === 'secondaryEmails' ? ['missing@example.test'] : field === 'primaryEmail' ? 'missing@example.test' : field === 'professionalUrl' ? 'https://www.linkedin.com/in/other' : 'Context Only Value';
+    assert.throws(() => validateExtractionResult(bad, primary), field);
+  }
+  const thanks = { messages: [{ ...source.messages[0], text: 'Thanks!' }], contextOnly: [{ messageId: '9', text: 'Bob is a Rust engineer in Madrid.' }] };
+  const inferred = { subjects: [{ key: 's1', identity: null, facts: [{ field: 'professionalSummary', value: 'Rust engineer in Madrid', evidence: [{ messageId: '10', quote: 'Thanks!' }] }], attachments: [] }] };
+  assert.throws(() => validateExtractionResult(inferred, thanks));
+  assert.doesNotThrow(() => validateExtractionResult(inferred, { messages: thanks.messages }), 'Original v1 review semantics remain unchanged');
+  for (const [quote, value] of [['Rust', 'ru'], ['midnight', 'mid'], ['business', 'US'], ['東京語', '東京'], ['élaborate', 'lab']]) {
+    const r = { subjects: [{ key: 's', identity: null, facts: [{ field: 'professionalSummary', value, evidence: [{ messageId: '10', quote }] }], attachments: [] }] };
+    assert.throws(() => validateExtractionResult(r, { messages: [{ ...source.messages[0], text: quote }], contextOnly: [] }), `${value} in ${quote}`);
+  }
+});
+
+test('pinned separator boundaries reject multilingual letters/numerics and accept punctuation', () => {
+  for (const [quote, value] of [['東京語', '東京'], ['٣Alice', 'Alice'], ['Alice٣', 'Alice'], ['Alice²', 'Alice'], ['ⅣAlice', 'Alice'], ['Alice𐒠', 'Alice'], ['𐒠Alice', 'Alice'], ['e\u0301', 'e'], ['Alice\u200d', 'Alice'], ['Alice\u0378', 'Alice']]) {
+    const r = { subjects: [{ key: 's', identity: null, facts: [{ field: 'professionalSummary', value, evidence: [{ messageId: '10', quote }] }], attachments: [] }] };
+    assert.throws(() => validateExtractionResult(r, { messages: [{ ...source.messages[0], text: quote }], contextOnly: [] }), `${value} in ${quote}`);
+  }
+  for (const quote of ['「東京」', '東京、', '東京。', '،東京؛', '東京🙂', '🙂東京🙂', '\t東京\n', '東京\u00a0']) {
+    const r = { subjects: [{ key: 's', identity: null, facts: [{ field: 'professionalSummary', value: '東京', evidence: [{ messageId: '10', quote }] }], attachments: [] }] };
+    assert.doesNotThrow(() => validateExtractionResult(r, { messages: [{ ...source.messages[0], text: quote }], contextOnly: [] }), quote);
+  }
+});

@@ -4,7 +4,7 @@ export const GROUPS = {
         'database-privacy-operations', 'database-client-jobs', 'database-staff-totp'],
     'staff-workflows': ['staff-workspace', 'duplicate-review', 'worker-pairing'],
     'telegram-workflows': ['telegram-intake', 'telegram-connection', 'telegram-history',
-        'telegram-extraction', 'telegram-cv', 'telegram-retention'],
+        'telegram-context', 'telegram-source-updates', 'telegram-extraction', 'telegram-cv', 'telegram-retention'],
     'search-workflows': ['profile-search', 'cv-analysis', 'cv-search'],
 };
 
@@ -27,6 +27,8 @@ export const COMMANDS = {
     'telegram-intake': ['test:telegram-intake'],
     'telegram-connection': ['test:telegram-connection'],
     'telegram-history': ['test:telegram-history'],
+    'telegram-context': ['test:telegram-context'],
+    'telegram-source-updates': ['test:telegram-source-updates'],
     'telegram-extraction': ['test:telegram-extraction'],
     'telegram-cv': ['test:telegram-cv'],
     'telegram-retention': ['test:telegram-retention'],

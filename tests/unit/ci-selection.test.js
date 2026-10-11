@@ -166,8 +166,8 @@ test('all workflow suites are controlled by the selector and the aggregate gate 
 
 test('feature APIs retain all downstream workflow consumers without unrelated staff suites', () => {
     const dependents = {
-        'telegram-history': ['telegram-history', 'telegram-extraction', 'telegram-cv', 'telegram-retention', 'cv-analysis'],
-        'telegram-connection': ['telegram-connection', 'telegram-history', 'telegram-extraction', 'telegram-cv', 'telegram-retention', 'cv-analysis', 'worker-pairing'],
+        'telegram-history': ['telegram-history', 'telegram-context', 'telegram-source-updates', 'telegram-extraction', 'telegram-cv', 'telegram-retention', 'cv-analysis'],
+        'telegram-connection': ['telegram-connection', 'telegram-history', 'telegram-context', 'telegram-source-updates', 'telegram-extraction', 'telegram-cv', 'telegram-retention', 'cv-analysis', 'worker-pairing'],
         'telegram-extraction': ['telegram-extraction', 'telegram-cv', 'telegram-retention', 'cv-analysis'],
         'telegram-cv': ['telegram-cv', 'cv-analysis'],
         'profile-search': ['profile-search', 'cv-search'],
@@ -182,7 +182,7 @@ test('feature APIs retain all downstream workflow consumers without unrelated st
     // when the route is only used to prepare data for a downstream feature.
     for (const suite of JOBS.filter(suite => !['quality', 'browser-tests'].includes(suite) && !suite.startsWith('database-'))) {
         const testName = suite === 'staff-workspace' ? 'workspace' : suite;
-        const fixture = readFileSync(new URL(`../staff-workspace/${testName}.test.js`, import.meta.url), 'utf8');
+        const fixture = readFileSync(new URL(suite === 'telegram-source-updates' ? '../database/telegram-source-updates-runtime.test.js' : `../staff-workspace/${testName}.test.js`, import.meta.url), 'utf8');
         for (const feature of Object.keys(dependents)) {
             if (fixture.includes(`/api/staff/${feature}`) || fixture.includes(`/api/${feature}/worker/`)) {
                 assert.ok(dependents[feature].includes(suite), `${feature} must cover ${suite}`);
@@ -194,7 +194,7 @@ test('feature APIs retain all downstream workflow consumers without unrelated st
 });
 
 test('Telegram page coverage includes its consumers; shared intake still covers the whole chain', () => {
-    assert.deepEqual(selected(['src/app/staff/telegram-intake/chats/history-model.js']), ['quality', 'telegram-history']);
+    assert.deepEqual(selected(['src/app/staff/telegram-intake/chats/history-model.js']), ['quality', 'telegram-history', 'telegram-source-updates']);
     assert.deepEqual(selected(['src/app/staff/telegram-intake/connect/worker-pairing-panel.tsx']), ['quality', 'telegram-connection', 'worker-pairing']);
     assert.ok(selected(['src/app/staff/telegram-intake/extraction/batch-source.tsx']).includes('cv-analysis'));
     for (const job of ['telegram-intake', 'telegram-history', 'profile-search', 'cv-analysis', 'cv-search', 'worker-pairing']) {
@@ -232,4 +232,16 @@ test('browser job consumes the quality build without rebuilding or falling back 
     for (const section of [quality, browser]) {
         for (const line of ["E2E_REAL_BACKEND: '0'", "NEXT_PUBLIC_SUPABASE_URL: ''", "NEXT_PUBLIC_SUPABASE_ANON_KEY: ''", "SUPABASE_SERVICE_ROLE_KEY: ''", 'NEXTAUTH_URL: http://127.0.0.1:3000', 'NEXTAUTH_SECRET: local-playwright-secret']) assert.ok(section.includes(line), line);
     }
+});
+
+test('conversation search and freshness retain separate workflow checks', () => {
+    for (const path of ['src/app/staff/telegram-intake/context/page.tsx', 'src/app/api/staff/telegram-context/route.ts', 'tests/database/telegram-context.test.js', 'tests/staff-workspace/telegram-context.test.js']) assert.deepEqual(selected([path]), ['quality', 'telegram-context']);
+    for (const path of ['tests/database/telegram-source-updates-runtime.test.js', 'tests/database/telegram-source-refresh-runtime.test.js', 'tests/database/telegram-native-account-runtime.test.js', 'tests/database/telegram-native-channel-runtime.test.js']) assert.deepEqual(selected([path]), ['quality', 'telegram-source-updates']);
+    assert.deepEqual(selected(['tests/telegram-connector/native-sdk.test.js']), ['quality', 'telegram-source-updates']);
+    assert.deepEqual(selected(['tests/evals/telegram-context/harness.test.mjs']), ['quality', 'telegram-extraction']);
+    assert.deepEqual(selected(['src/app/staff/candidates/[candidateId]/private-telegram-provenance.tsx']), ['quality', 'telegram-context']);
+    assert.ok(selected(['src/app/staff/candidates/[candidateId]/candidate-detail.tsx']).includes('telegram-context'));
+    const suites = selected(['src/app/api/telegram-source-updates/worker/complete/route.ts']);
+    for (const suite of ['telegram-context','telegram-source-updates','telegram-extraction','telegram-cv','telegram-retention']) assert.ok(suites.includes(suite));
+    assert.deepEqual(selected(['supabase/migrations/20261011120000_telegram_context_search.sql']), JOBS);
 });

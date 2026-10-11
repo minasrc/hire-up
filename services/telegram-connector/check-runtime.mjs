@@ -6,6 +6,7 @@ import { StringSession } from 'teleproto/sessions';
 import { Logger } from 'teleproto/extensions';
 import { computeCheck } from 'teleproto/Password.js';
 import { createTelegramFactory } from './telegram-adapter.mjs';
+import { createHistoryAdapter } from './history-adapter.mjs';
 import { createCvAdapter } from './cv-adapter.mjs';
 import { FileMigrateError, FileReferenceExpiredError } from 'teleproto/errors/RPCErrorList.js';
 assert.equal(Number(process.versions.node.split('.')[0]), 22);
@@ -28,4 +29,6 @@ for (const [error, expected] of [[new FileMigrateError({ capture: 4, request: un
   const cv = createCvAdapter({ Api, client: { invoke: async () => { throw error; } } });
   await assert.rejects(cv.inspect({ peer: { kind: 'user', id: '123' }, messageId: '1', attachment: {}, readPeer: () => null }), value => value.code === expected);
 }
+const sourceAdapter = createHistoryAdapter({ Api, client: { invoke: async request => { assert.ok(request.getBytes().length >= 20); return { messages: [new Api.MessageEmpty({ id: 1 })], chats: [], users: [] }; } } });
+for (const kind of ['chat', 'channel']) assert.equal((await sourceAdapter.reconcile({ peer: { kind, id: '123' }, messageIds: ['1'], accountUserId: '456', readPeer: () => ({ kind, id: '123', accessHash: '-123' }), cachePeer: () => {} }))[0].kind, 'unavailable');
 process.stdout.write('Telegram runtime imports and API contract passed (offline).\n');

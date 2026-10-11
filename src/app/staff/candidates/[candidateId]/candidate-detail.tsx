@@ -21,6 +21,7 @@ import { Textarea } from '@/components/staff-ui/textarea';
 import { cn } from '@/lib/utils';
 import { RealCandidateDocuments } from '@/components/staff-preview/real-candidate-documents';
 import { StaffDate } from '../../staff-date';
+import { PrivateTelegramProvenance } from './private-telegram-provenance';
 import {
     EditCandidateProfileButton,
     type CandidateProfileOptions,
@@ -440,6 +441,8 @@ export function CandidateDetail({
                     </CardContent>
                 </Card>
             ) : null}
+
+            <PrivateTelegramProvenance key={candidate.candidateId} candidateId={candidate.candidateId} />
 
             <Tabs value={tab} onValueChange={setTab}>
                 <TabsList>

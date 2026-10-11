@@ -351,9 +351,26 @@ test('Telegram extraction protects recruiter edits, reviews evidence and approve
         assert.deepEqual(empty.draftIds, []);
         await refreshProgress();
         await expect(page.getByText(/The model suggested no candidates/)).toBeVisible();
+        // Presentation fixture only: real v2 leasing, attribution and dependency retention are database-tested.
+        const originalSource = psql(db, `select source::text from app.telegram_extraction_jobs where id='${job.id}'`).trim();
+        const contextSource = JSON.parse(originalSource);
+        // This batch normally has a primary CV. Remove it only from the temporary
+        // presentation snapshot so the background-only attachment gate is isolated.
+        assert.ok(contextSource.messages.some(message => message.attachments.length));
+        contextSource.messages = contextSource.messages.map(message => ({ ...message, attachments: [] }));
+        contextSource.contextOnly = [{ messageId: '999999', kind: 'message', text: 'Background recruiter asks about client priorities.', sentAt: new Date().toISOString(), sender: { displayName: 'Background Recruiter', username: 'background_recruiter' }, attachments: [{ kind: 'document', filename: 'context-only.pdf', mimeType: 'application/pdf', sizeBytes: 123 }] }];
+        psql(db, `update app.telegram_extraction_jobs set source='${JSON.stringify(contextSource).replaceAll("'", "''")}'::jsonb where id='${job.id}'`);
         await page.getByRole('button', { name: 'Review source messages', exact: true }).first().click();
         const sourcePanel = page.getByRole('region', { name: 'Private batch source', exact: true });
         await expect(sourcePanel.getByText('General recruiting discussion without a candidate profile.', { exact: true })).toHaveCount(40);
+        const background = sourcePanel.getByRole('region', { name: 'Background conversation context', exact: true });
+        await expect(background.getByText(/Background Recruiter · Message 999999/)).toBeVisible();
+        await expect(background.getByText('Background recruiter asks about client priorities.', { exact: true })).toBeVisible();
+        await expect(background.getByText(/cannot supply standalone candidate facts/)).toBeVisible();
+        await expect(background.getByText(/context-only.pdf/)).toBeVisible();
+        await expect(sourcePanel.getByRole('region', { name: 'Create draft from batch CV', exact: true })).toHaveCount(0);
+        psql(db, `update app.telegram_extraction_jobs set source='${originalSource.replaceAll("'", "''")}'::jsonb where id='${job.id}'`);
+
         await page.getByRole('button', { name: 'Hide source messages', exact: true }).click();
         for (let index = 0; index < 4; index += 1) {
             const batch = page.getByLabel('Extraction batch from Synthetic candidate conversation', { exact: true }).nth(index);
@@ -376,6 +393,42 @@ test('Telegram extraction protects recruiter edits, reviews evidence and approve
         await page.setViewportSize({ width: 390, height: 844 });
         await page.evaluate(() => window.scrollTo(0, 0));
         await page.screenshot({ path: join(root, 'test-results/staff-workspace-telegram-extraction-mobile.png'), fullPage: true });
+        // Hold actual authenticated reads across session invalidation; neither queue nor source may reappear.
+        const extractionPage = `${baseURL}/staff/telegram-intake/extraction`;
+        for (const sourceRead of [true, false]) {
+            let releaseRead;
+            let readStarted;
+            const started = new Promise(resolve => { readStarted = resolve; });
+            const held = new Promise(resolve => { releaseRead = resolve; });
+            await page.route(`${extractionURL}**`, async route => {
+                const request = route.request();
+                if (request.method() !== 'GET' || new URL(request.url()).searchParams.has('jobId') !== sourceRead) return route.continue();
+                const response = await route.fetch();
+                readStarted(); await held;
+                await route.fulfill({ response }).catch(() => {}); // Invalidation legitimately aborts the client request.
+            });
+            if (sourceRead) await page.getByRole('button', { name: 'Review source messages', exact: true }).first().click();
+            else await page.getByRole('button', { name: 'Refresh progress', exact: true }).click();
+            await started;
+            await page.evaluate(() => window.dispatchEvent(new CustomEvent('staff-session-invalidated')));
+            releaseRead();
+            await expect(page.getByRole('region', { name: 'Private batch source', exact: true })).toHaveCount(0);
+            await expect(page.getByLabel('Extraction batch from Synthetic candidate conversation', { exact: true })).toHaveCount(0);
+            await expect(page.getByRole('button', { name: 'Refresh progress', exact: true })).toBeDisabled();
+            await page.unroute(`${extractionURL}**`);
+            await page.goto(extractionPage);
+            await expect(page.getByLabel('Extraction batch from Synthetic candidate conversation', { exact: true })).toHaveCount(4);
+        }
+        await page.route(`${extractionURL}**`, async route => {
+            if (route.request().method() !== 'GET' || !new URL(route.request().url()).searchParams.has('jobId')) return route.continue();
+            await route.fulfill({ status: 428, contentType: 'application/json', body: JSON.stringify({ error: 'MFA_REQUIRED' }) });
+        });
+        await page.getByRole('button', { name: 'Review source messages', exact: true }).first().click();
+        await expect(page.getByRole('region', { name: 'Private batch source', exact: true })).toHaveCount(0);
+        await expect(page.getByLabel('Extraction batch from Synthetic candidate conversation', { exact: true })).toHaveCount(0);
+        await expect(page.getByRole('button', { name: 'Refresh progress', exact: true })).toBeDisabled();
+        assert.deepEqual(pageErrors, []);
+
     } catch (error) {
         console.error(output.join('').slice(-14_000));
         throw error;
