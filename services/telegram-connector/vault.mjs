@@ -93,7 +93,7 @@ export function createVault({ root, server, workerId }) {
     },
     saveHistory(connectionId, accountId, key, record) {
       const json = JSON.stringify(record);
-      if (Buffer.byteLength(json) > 524288) throw new Error('HISTORY_CACHE_TOO_LARGE');
+      if (Buffer.byteLength(json) > (key === 'pending-native-update' ? 6291456 : 524288)) throw new Error('HISTORY_CACHE_TOO_LARGE');
       const iv = randomBytes(12);
       const cipher = createCipheriv('aes-256-gcm', encryptionKey, iv);
       cipher.setAAD(Buffer.from(`${scope}:history:${connectionId}:${accountId}:${key}`));
@@ -103,7 +103,7 @@ export function createVault({ root, server, workerId }) {
     loadHistory(connectionId, accountId, key) {
       const path = historyFile(connectionId, accountId, key);
       if (!existsSync(path)) return null;
-      const record = JSON.parse(readPrivateFile(path, 750000));
+      const record = JSON.parse(readPrivateFile(path, key === 'pending-native-update' ? 9000000 : 750000));
       const decipher = createDecipheriv('aes-256-gcm', encryptionKey, Buffer.from(record.iv, 'base64'));
       decipher.setAAD(Buffer.from(`${scope}:history:${connectionId}:${accountId}:${key}`));
       decipher.setAuthTag(Buffer.from(record.tag, 'base64'));

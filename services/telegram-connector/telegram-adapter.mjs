@@ -1,3 +1,4 @@
+import { createNativeAdapter } from './native-adapter.mjs';
 import { createHistoryAdapter } from './history-adapter.mjs';
 import { createCvAdapter } from './cv-adapter.mjs';
 
@@ -35,7 +36,7 @@ export async function createTelegramFactory({ apiId, apiHash }, runtime) {
       throw new Error('AUTH_FAILED');
     }
     return {
-      history: createHistoryAdapter({ client, Api }),
+      history: { ...createHistoryAdapter({ client, Api }), native: createNativeAdapter({ client, Api }) },
       cv: createCvAdapter({ client, Api }),
       session: () => client.session.save(),
       close: async () => { client.removeEventHandler(handler); await client.destroy(); },
