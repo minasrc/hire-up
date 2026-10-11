@@ -1214,6 +1214,10 @@ test('staff workspace end-to-end in a real browser', async (t) => {
     });
 
     await runCase('the public board revalidates and gates stale actions', async () => {
+        const pageErrors = [];
+        const capturePageError = error => pageErrors.push(error.message);
+        page.on('pageerror', capturePageError);
+        t.after(() => page.off('pageerror', capturePageError));
         const anonymous = await browser.newContext();
         boardPage = await anonymous.newPage();
         boardPage.setDefaultTimeout(90_000);
@@ -1240,9 +1244,10 @@ test('staff workspace end-to-end in a real browser', async (t) => {
         const unlisting = page.waitForResponse(
             (response) => response.url()
                 .includes(`/api/staff/jobs/${createdJobId}/listing`)
-                && response.request().method() === 'POST' && response.ok());
+                && response.request().method() === 'POST');
         await page.getByRole('button', { name: 'Unlist job' }).click();
-        await unlisting;
+        const unlistingResult = await unlisting;
+        assert.equal(unlistingResult.status(), 200, await unlistingResult.text());
         assert.ok(!(await publicJobTitles()).includes('Synthetic Browser Job Edited'));
 
         await boardPage.evaluate(() => window.dispatchEvent(new Event('focus')));
@@ -1256,9 +1261,10 @@ test('staff workspace end-to-end in a real browser', async (t) => {
         const listing = page.waitForResponse(
             (response) => response.url()
                 .includes(`/api/staff/jobs/${createdJobId}/listing`)
-                && response.request().method() === 'POST' && response.ok());
+                && response.request().method() === 'POST');
         await page.getByRole('button', { name: 'List job' }).click();
-        await listing;
+        const listingResult = await listing;
+        assert.equal(listingResult.status(), 200, await listingResult.text());
         await focusBoard();
         const restored = boardCard('Synthetic Browser Job Edited');
         await restored.waitFor();
@@ -1267,9 +1273,10 @@ test('staff workspace end-to-end in a real browser', async (t) => {
         const relisting = page.waitForResponse(
             (response) => response.url()
                 .includes(`/api/staff/jobs/${createdJobId}/listing`)
-                && response.request().method() === 'POST' && response.ok());
+                && response.request().method() === 'POST');
         await page.getByRole('button', { name: 'Unlist job' }).click();
-        await relisting;
+        const relistingResult = await relisting;
+        assert.equal(relistingResult.status(), 200, await relistingResult.text());
         assert.ok(!(await publicJobTitles()).includes('Synthetic Browser Job Edited'));
 
         await boardPage.evaluate(() => window.dispatchEvent(new Event('focus')));
@@ -1277,6 +1284,7 @@ test('staff workspace end-to-end in a real browser', async (t) => {
         if (clickedApply) await expect(goneNotice).toBeVisible();
         await expect(restored).toHaveCount(0);
         await expect(boardPage.getByRole('dialog')).toHaveCount(0);
+        assert.deepEqual(pageErrors, [], 'listing actions must not trigger hydration errors');
     });
 
     await runCase('an open application keeps entered data when the job vanishes', async () => {
