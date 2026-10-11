@@ -4,6 +4,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import Link from 'next/link';
 import { Button } from '@/components/staff-ui/button';
 import { Card } from '@/components/staff-ui/card';
+import { readPrivateProvenance, PrivateProvenanceTimeout } from './private-provenance-read';
 import { staffAuthRecovery } from '@/lib/staff-auth-recovery';
 import { StaffAuthRecoveryPrompt } from '../../auth-recovery';
 import { TelegramProvenance, provenanceLink, provenanceSourceLabel, provenanceVisible } from './telegram-provenance-model';
@@ -29,7 +30,7 @@ export function PrivateTelegramProvenance({ candidateId }: { candidateId: string
         setLoading(true); setError(''); setSnapshot(null); setCursors(stack);
         try {
             const params = new URLSearchParams(); const after = stack.at(-1); if (after) params.set('after', after);
-            const response = await fetch(`/api/staff/candidates/${encodeURIComponent(candidateId)}/telegram-context${params.size ? `?${params}` : ''}`, { cache: 'no-store', signal: controller.signal });
+            const response = await readPrivateProvenance(`/api/staff/candidates/${encodeURIComponent(candidateId)}/telegram-context${params.size ? `?${params}` : ''}`, controller.signal);
             if (controller.signal.aborted || active.blocked || epoch !== staffAuthRecovery.requestEpoch()) return;
             if (response.status === 404) { setHidden(true); return; }
             if ([401, 403, 428].includes(response.status)) {
@@ -37,11 +38,14 @@ export function PrivateTelegramProvenance({ candidateId }: { candidateId: string
                 setError('Access to private source links is unavailable. Verify your access before retrying.'); return;
             }
             if (!response.ok) throw new Error('service unavailable');
-            const data: TelegramProvenance = await response.json();
+            const data: TelegramProvenance = response.data;
             if (controller.signal.aborted || active.blocked || epoch !== staffAuthRecovery.requestEpoch()) return;
             setSnapshot(data); setHidden(false); staffAuthRecovery.accepted(epoch);
-        } catch {
-            if (!controller.signal.aborted && !active.blocked) setError('Private source links could not be loaded. Check your connection and retry.');
+        } catch (failure) {
+            if (!controller.signal.aborted && !active.blocked && epoch === staffAuthRecovery.requestEpoch()) {
+                setSnapshot(null);
+                setError(failure instanceof PrivateProvenanceTimeout ? failure.message : 'Private source links could not be loaded. Check your connection and retry.');
+            }
         } finally { if (!controller.signal.aborted && active.controller === controller) setLoading(false); }
     }, [candidateId, clearPrivate]);
     useEffect(() => {

@@ -1619,6 +1619,30 @@ test('staff workspace end-to-end in a real browser', async (t) => {
         await expect(reviewToggle).toHaveAttribute('aria-pressed', 'true');
     });
 
+    await runCase('disabled candidate provenance completes without blocking the detail page', async () => {
+        const response = await desktop.request.get(`${baseURL}/api/staff/candidates/${CJ_ID.CANDIDATE_B}/telegram-context`);
+        assert.equal(response.status(), 404);
+        await gotoStaff(page, `${baseURL}/staff/candidates/${CJ_ID.CANDIDATE_B}`);
+        // gotoStaff's existing network-idle check proves this private read no
+        // longer blocks the browser; cancellation need not be transport success.
+        await expect(page.getByLabel('Private Telegram provenance', { exact: true })).toHaveCount(0);
+        await expect(page.getByRole('tab', { name: /Applications/ })).toHaveAttribute('aria-selected', 'true');
+    });
+
+    await runCase('candidate provenance authentication denials finish their private reads', async () => {
+        const endpoint = `${baseURL}/api/staff/candidates/${CJ_ID.CANDIDATE_B}/telegram-context`;
+        for (const status of [401, 428]) {
+            await page.route(endpoint, route => route.fulfill({ status, contentType: 'application/json', body: JSON.stringify({ error: 'Synthetic access denial' }) }));
+            try {
+                await gotoStaff(page, `${baseURL}/staff/candidates/${CJ_ID.CANDIDATE_B}`);
+                const privateSources = page.getByLabel('Private Telegram provenance', { exact: true });
+                await expect(privateSources.getByText('Access to private source links is unavailable. Verify your access before retrying.', { exact: true })).toBeVisible();
+                await expect(privateSources.getByText('Loading private source links…', { exact: true })).toHaveCount(0);
+                await expect(privateSources.getByRole('link', { name: /Original Telegram source/ })).toHaveCount(0);
+            } finally { await page.unroute(endpoint); }
+        }
+    });
+
     await runCase('candidate stage select is readable and the transition persists', async () => {
         await gotoStaff(page, `${baseURL}/staff/candidates/${CJ_ID.CANDIDATE_B}`);
         const trigger = page.getByRole('combobox', {
