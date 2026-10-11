@@ -11,7 +11,7 @@ import { Dialog, DialogContent, DialogDescription, DialogTitle } from '@/compone
 import { StaffDate } from '../../staff-date';
 import { StaffAuthRecoveryPrompt } from '../../auth-recovery';
 import { staffAuthRecovery } from '@/lib/staff-auth-recovery';
-import { Chat, Message, SearchFilters, contextUrl, forwardedLabel, searchPayload, senderLabel } from './context-model';
+import { Chat, Message, SearchFilters, contextUrl, forwardedLabel, searchPayload, senderLabel, messageExcerpt, pendingFilterChanges, conversationDeepLink } from './context-model';
 
 const endpoint = '/api/staff/telegram-context';
 const emptyFilters: SearchFilters = { query: '', chatId: '', sender: '', from: '', to: '', attachmentsOnly: false };
@@ -25,6 +25,9 @@ export function TelegramContextBrowser() {
     const [result, setResult] = useState<SearchResult | null>(null);
     const [chats, setChats] = useState<Chat[]>([]);
     const [chatQuery, setChatQuery] = useState('');
+    const [chatCursors, setChatCursors] = useState<(string | null)[]>([null]);
+    const [resultCursors, setResultCursors] = useState<(string | null)[]>([null]);
+    const [appliedChatQuery, setAppliedChatQuery] = useState('');
     const [chatAfter, setChatAfter] = useState<string | null>(null);
     const [chatError, setChatError] = useState('');
     const [chatLoading, setChatLoading] = useState(false);
@@ -43,7 +46,7 @@ export function TelegramContextBrowser() {
     function clearPrivate() {
         invalidated.current = true;
         Object.values(controllers.current).forEach(controller => controller.abort());
-        setResult(null); setConversation(null); setChats([]); setFilters(emptyFilters); setSubmitted(null); setChatQuery(''); setChatAfter(null); setTarget(null); selectedChat.current = null;
+        setResult(null); setConversation(null); setChats([]); setFilters(emptyFilters); setSubmitted(null); setChatQuery(''); setChatAfter(null); setChatCursors([null]); setResultCursors([null]); setAppliedChatQuery(''); setTarget(null); selectedChat.current = null;
         setLoading(false); setChatLoading(false); setContextLoading(false);
     }
     async function read<T>(key: string, url: string, body?: unknown): Promise<T | null> {
@@ -68,21 +71,24 @@ export function TelegramContextBrowser() {
             throw new Error('Unable to reach conversation search. Check your network connection and retry. Stored messages remain searchable when the Telegram connector is offline.');
         }
     }
-    async function loadChats(after: string | null = null, query = chatQuery) {
+    async function loadChats(after: string | null = null, query = chatQuery, cursors: (string | null)[] = [null]) {
+        if (invalidated.current) return;
         const version = ++loadVersions.current.chats;
-        setChatLoading(true); setChatError('');
+        setChatLoading(true); setChatError(''); setChats([]); setChatCursors(cursors); setAppliedChatQuery(query);
         try { const data = await read<{ chats: Chat[]; nextAfter: string | null }>('chats', endpoint, { action: 'chats', query, after }); if (data) { setChats(data.chats); setChatAfter(data.nextAfter); } }
         catch (failure) { if (version === loadVersions.current.chats) setChatError((failure as Error).message); }
         finally { if (version === loadVersions.current.chats && !controllers.current.chats?.signal.aborted) setChatLoading(false); }
     }
-    async function search(next: SearchFilters, after: string | null = null) {
+    async function search(next: SearchFilters, after: string | null = null, cursors: (string | null)[] = [null]) {
+        if (invalidated.current) return;
         const version = ++loadVersions.current.search;
-        setLoading(true); setError(''); setResult(null); setSubmitted(next);
+        setLoading(true); setError(''); setResult(null); setSubmitted(next); setResultCursors(cursors);
         try { const data = await read<SearchResult>('search', endpoint, searchPayload(next, after)); if (data) setResult(data); }
         catch (failure) { if (version === loadVersions.current.search) setError((failure as Error).message); }
         finally { if (version === loadVersions.current.search && !controllers.current.search?.signal.aborted) setLoading(false); }
     }
     async function loadContext(next: { chatId: string; anchor?: string; before?: string; after?: string }) {
+        if (invalidated.current) return;
         const version = ++loadVersions.current.context;
         setContextLoading(true); setContextError(''); setConversation(null);
         try { const data = await read<Conversation>('context', contextUrl(next.chatId, next)); if (data) setConversation(data); }
@@ -94,7 +100,8 @@ export function TelegramContextBrowser() {
         void loadChats();
         const params = new URLSearchParams(window.location.search);
         const chatId = params.get('chatId'); const anchor = params.get('messageId');
-        if (chatId && /^[0-9a-f-]{36}$/i.test(chatId) && (!anchor || /^\d+$/.test(anchor))) openContext(chatId, anchor || undefined);
+        const deepLink = conversationDeepLink(chatId, anchor);
+        if (deepLink) openContext(deepLink.chatId, deepLink.anchor);
         const invalidate = () => clearPrivate();
         const retry = () => { invalidated.current = false; setError(''); setContextError(''); void loadChats(null, ''); };
         window.addEventListener('staff-session-invalidated', invalidate); window.addEventListener('staff-auth-retry', retry);
@@ -110,10 +117,10 @@ export function TelegramContextBrowser() {
             {!inContext ? <p className="break-words text-sm text-muted-foreground">{senderLabel(message.sender)}</p> : null}
             {message.sender?.displayName && message.sender.username ? <p className="break-words text-xs text-muted-foreground">@{message.sender.username.replace(/^@/, '')}</p> : null}
             {inContext && target?.anchor === message.messageId ? <p className="text-xs font-medium">Requested message</p> : null}
-            <blockquote className="whitespace-pre-wrap break-words text-sm">{message.text || 'No retained message text.'}</blockquote>
+            <blockquote className={`whitespace-pre-wrap break-words text-sm ${inContext ? '' : 'line-clamp-5'}`}>{inContext ? message.text || 'No retained message text.' : messageExcerpt(message.text)}</blockquote>
             {message.editedAt ? <p className="text-xs text-muted-foreground">Imported edit timestamp: <StaffDate value={message.editedAt} kind="timestamp" /></p> : null}
             {forwarded ? <p className="break-words text-xs text-muted-foreground">Forwarded from: {forwarded}</p> : null}
-            {message.attachments.length ? <ul className="space-y-1 text-xs text-muted-foreground">{message.attachments.map(attachment => <li className="break-words" key={attachment.id}>{attachment.filename || attachment.kind} · {attachment.mimeType || attachment.kind}{attachment.sizeBytes !== null ? ` · ${attachment.sizeBytes.toLocaleString()} bytes` : ''} · Metadata only</li>)}</ul> : null}
+            {message.attachments.length ? <ul className="space-y-1 text-xs text-muted-foreground">{message.attachments.map((attachment, index) => <li className="break-words" key={`${index}:${attachment.id ?? 'attachment'}`}>{attachment.filename || attachment.kind} · {attachment.mimeType || attachment.kind}{attachment.sizeBytes !== null ? ` · ${attachment.sizeBytes.toLocaleString()} bytes` : ''} · Metadata only</li>)}</ul> : null}
             <div className="flex flex-wrap gap-2">{!inContext ? <Button variant="outline" size="sm" onClick={() => openContext(message.chatId, message.messageId)}>View conversation</Button> : null}{message.replyToMessageId ? <Button variant="ghost" size="sm" onClick={() => openContext(message.chatId, message.replyToMessageId!)}>View replied-to message</Button> : null}</div>
         </Card>;
     }
@@ -123,22 +130,24 @@ export function TelegramContextBrowser() {
         <StaffAuthRecoveryPrompt />
         <Card className="space-y-4 p-5">
             <form onSubmit={event => { event.preventDefault(); void loadChats(null); }} className="flex flex-wrap items-end gap-2"><div className="min-w-0 flex-1 space-y-2"><Label htmlFor="context-chat-query">Find an imported chat</Label><Input id="context-chat-query" value={chatQuery} maxLength={100} onChange={event => setChatQuery(event.target.value)} placeholder="Title or username" /></div><Button type="submit" variant="outline" disabled={chatLoading}>Find chats</Button></form>
-            <div className="flex flex-wrap gap-2" aria-busy={chatLoading}><Button variant={!filters.chatId ? 'secondary' : 'outline'} aria-pressed={!filters.chatId} onClick={() => { field('chatId', ''); selectedChat.current = null; }}>All imported chats</Button>{chats.map(chat => <Button key={chat.id} className="max-w-full whitespace-normal break-words text-left" variant={filters.chatId === chat.id ? 'secondary' : 'outline'} aria-pressed={filters.chatId === chat.id} onClick={() => { selectedChat.current = chat; field('chatId', chat.id); }}>{chat.title || 'Untitled chat'}{chat.username ? ` (@${chat.username})` : ''} · Account {chat.accountUserId}</Button>)}</div>
+            <div className="flex max-h-64 flex-wrap gap-2 overflow-y-auto rounded-lg p-1" aria-label="Imported chat choices" aria-busy={chatLoading}><Button variant={!filters.chatId ? 'secondary' : 'outline'} aria-pressed={!filters.chatId} onClick={() => { field('chatId', ''); selectedChat.current = null; }}>All imported chats</Button>{chats.map(chat => <Button key={chat.id} className="max-w-full whitespace-normal break-words text-left" variant={filters.chatId === chat.id ? 'secondary' : 'outline'} aria-pressed={filters.chatId === chat.id} onClick={() => { selectedChat.current = chat; field('chatId', chat.id); }}>{chat.title || 'Untitled chat'}{chat.username ? ` (@${chat.username})` : ''} · Account {chat.accountUserId}</Button>)}</div>
             <p role="status" className="text-sm text-muted-foreground">{chatLoading ? 'Loading chats…' : chatError || (!chats.length ? 'No imported chats match this chat search.' : '')}{filters.chatId ? ` Searching in ${selectedChat.current?.title || 'selected chat'}.` : ''}</p>
-            <div className="flex gap-2"><Button size="sm" variant="ghost" disabled={chatLoading} onClick={() => void loadChats(null)}>First chat page</Button>{chatAfter ? <Button size="sm" variant="outline" disabled={chatLoading} onClick={() => void loadChats(chatAfter)}>Next chat page</Button> : null}</div>
+            <div className="flex flex-wrap items-center gap-2"><span className="text-xs">Chat page {chatCursors.length}</span><Button size="sm" variant="outline" disabled={chatLoading || chatCursors.length === 1} onClick={() => { const previous = chatCursors.slice(0, -1); void loadChats(previous.at(-1), appliedChatQuery, previous); }}>Previous chat page</Button>{chatAfter ? <Button size="sm" variant="outline" disabled={chatLoading} onClick={() => void loadChats(chatAfter, appliedChatQuery, [...chatCursors, chatAfter])}>Next chat page</Button> : null}</div>
         </Card>
         <Card className="p-5"><form className="grid gap-4 sm:grid-cols-2" onSubmit={event => { event.preventDefault(); void search(filters); }}>
             <div className="space-y-2 sm:col-span-2"><Label htmlFor="context-query">Message words or phrase</Label><Input id="context-query" required maxLength={500} value={filters.query} onChange={event => field('query', event.target.value)} placeholder='developer OR "product designer"' /><p className="text-xs text-muted-foreground">Use quotes for phrases, OR for alternatives, and a minus sign to exclude a word. Search terms stay in this page only.</p></div>
-            <div className="space-y-2"><Label htmlFor="context-sender">Exact Telegram username</Label><Input id="context-sender" value={filters.sender} maxLength={64} onChange={event => field('sender', event.target.value)} placeholder="@username (optional)" /></div>
+            <div className="space-y-2"><Label htmlFor="context-sender">Exact Telegram username</Label><Input id="context-sender" value={filters.sender} maxLength={33} onChange={event => field('sender', event.target.value)} placeholder="@username (optional)" /></div>
             <label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={filters.attachmentsOnly} onChange={event => field('attachmentsOnly', event.target.checked)} />Messages with attachments only</label>
             <div className="space-y-2"><Label htmlFor="context-from">From date (UTC, inclusive)</Label><Input id="context-from" type="date" value={filters.from} onChange={event => field('from', event.target.value)} /></div><div className="space-y-2"><Label htmlFor="context-to">To date (UTC, inclusive)</Label><Input id="context-to" type="date" value={filters.to} min={filters.from || undefined} onChange={event => field('to', event.target.value)} /></div>
             <Button ref={searchButton} type="submit" disabled={loading || invalidated.current}>Search messages</Button>
         </form></Card>
-        <div aria-live="polite" role="status" className="text-sm">{loading ? 'Searching retained messages…' : error || (result ? `${result.results.length} results on this page, newest first. ${result.coverage.retainedMessages.toLocaleString()} retained messages in the selected coverage.` : 'Enter words to search your private message history.')}</div>
-        {error ? <Button variant="outline" disabled={loading || invalidated.current || !submitted} onClick={() => submitted && void search(submitted)}>Retry search</Button> : null}
+        <div aria-live="polite" role="status" className="text-sm">{loading ? 'Searching retained messages…' : error || (result ? `${result.results.length} results on this page, newest first. ${result.coverage.retainedMessages.toLocaleString()} retained message records across your private imports.` : 'Enter words to search your private message history.')}</div>
+        {pendingFilterChanges(filters, submitted) ? <p role="status" className="text-sm text-muted-foreground">You have unapplied filter changes. Search messages to apply them; result pagination uses your previous search.</p> : null}
+        {chatQuery.trim() !== appliedChatQuery.trim() ? <p className="text-xs text-muted-foreground">Chat search changes are unapplied. Find chats to apply them; chat pagination uses the previous chat search.</p> : null}
+        {error ? <Button variant="outline" disabled={loading || invalidated.current || !submitted} onClick={() => submitted && void search(submitted, resultCursors.at(-1), resultCursors)}>Retry search</Button> : null}
         {result && !result.results.length ? <Card className="p-5">No retained messages match these terms and filters. Try broader terms or another chat.</Card> : null}
         {result?.results.map(message => messageCard(message))}
-        {result && submitted ? <div className="flex gap-2"><Button variant="ghost" disabled={loading} onClick={() => void search(submitted)}>First result page</Button>{result.nextAfter ? <Button variant="outline" disabled={loading} onClick={() => void search(submitted, result.nextAfter)}>Next result page</Button> : null}</div> : null}
+        {result && submitted ? <div className="flex flex-wrap items-center gap-2"><span className="text-xs">Result page {resultCursors.length}</span><Button variant="outline" disabled={loading || resultCursors.length === 1} onClick={() => { const previous = resultCursors.slice(0, -1); void search(submitted, previous.at(-1), previous); }}>Previous result page</Button>{result.nextAfter ? <Button variant="outline" disabled={loading} onClick={() => void search(submitted, result.nextAfter, [...resultCursors, result.nextAfter])}>Next result page</Button> : null}</div> : null}
         <Dialog open={Boolean(target)} onOpenChange={open => { if (!open) { controllers.current.context?.abort(); setTarget(null); setConversation(null); setContextError(''); } }}><DialogContent className="max-h-[90dvh] max-w-3xl overflow-y-auto" onCloseAutoFocus={event => { event.preventDefault(); searchButton.current?.focus(); }}>
             <DialogTitle>{conversation?.chat.title || 'Private conversation'}</DialogTitle><DialogDescription>Original retained messages in chronological order. Attachment details are metadata; files are not downloaded here.</DialogDescription>
             <p role="status" aria-live="polite" className="text-sm">{contextLoading ? 'Loading conversation…' : contextError}</p>
