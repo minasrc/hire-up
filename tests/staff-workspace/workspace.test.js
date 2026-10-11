@@ -2760,6 +2760,15 @@ test('staff workspace end-to-end in a real browser', async (t) => {
             await userPage.goto(`${baseURL}/staff`, { waitUntil: 'domcontentloaded' });
             await userPage.waitForURL(/\/staff\/mfa\/enroll/, { waitUntil: 'domcontentloaded', timeout: 30_000 });
             const secret = psql(container, `select secret from app.totp_credentials where organization_id = '${ORG_ID}' and user_id = '${CJ_ID.USER_B_REC}' and status = 'pending'`).trim();
+            let enrollmentSubmissions = 0;
+            await userPage.route('**/api/staff/mfa/enroll', async route => {
+                enrollmentSubmissions++;
+                const response = await route.fetch();
+                // Keep the real backend response pending beyond the default
+                // five-second UI assertion budget, as cold CI routes can be.
+                await new Promise(resolve => setTimeout(resolve, 6000));
+                if (!userPage.isClosed()) await route.fulfill({ response });
+            });
             await expect(async () => {
                 const input = userPage.getByLabel('Authenticator code');
                 await input.fill('');
@@ -2767,9 +2776,19 @@ test('staff workspace end-to-end in a real browser', async (t) => {
                 await expect(userPage.getByRole('button', { name: 'Enable two-factor' }))
                     .toBeEnabled({ timeout: 1500 });
             }).toPass({ timeout: 30_000 });
+            const enrollmentResponse = userPage.waitForResponse(response =>
+                new URL(response.url()).pathname === '/api/staff/mfa/enroll'
+                && response.request().method() === 'POST', { timeout: 30_000 });
             await userPage.getByRole('button', { name: 'Enable two-factor' }).click();
+            const enrollmentResult = await enrollmentResponse;
+            assert.equal(enrollmentResult.status(), 200, await enrollmentResult.text());
+            assert.equal(enrollmentSubmissions, 1);
+            const enrollment = await enrollmentResult.json();
+            assert.equal(enrollment.backupCodes.length, 10);
             await expect(userPage.getByLabel('Your backup codes')).toBeVisible();
             const newCodes = (await userPage.getByLabel('Your backup codes').inputValue()).split('\n');
+            assert.deepEqual(newCodes, enrollment.backupCodes,
+                'the displayed codes match the acknowledged enrollment');
             assert.equal(newCodes.length, 10);
             assert.notDeepEqual(newCodes, oldCodes);
             await userPage.getByLabel('I saved my backup codes').check();
