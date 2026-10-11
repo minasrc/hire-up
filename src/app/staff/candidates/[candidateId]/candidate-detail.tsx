@@ -24,6 +24,7 @@ import { StaffDate } from '../../staff-date';
 import {
     EditCandidateProfileButton,
     type CandidateProfileOptions,
+    type CandidateProfileSnapshot,
 } from '../candidate-profile-dialog';
 
 const AVATAR_PALETTE = [
@@ -284,13 +285,37 @@ function NoteComposer({ candidateId }: { candidateId: string }) {
 const DETAIL_TABS = ['applications', 'documents', 'notes'] as const;
 
 export function CandidateDetail({
-    workspace,
+    workspace: serverWorkspace,
     profileUnavailable = false,
 }: {
     workspace: Workspace;
     profileUnavailable?: boolean;
 }) {
     const router = useRouter();
+    const [savedProfile, setSavedProfile] = useState<CandidateProfileSnapshot | null>(null);
+    const [profileMessage, setProfileMessage] = useState('');
+    const useSavedProfile = savedProfile
+        && savedProfile.candidate.candidateId === serverWorkspace.candidate.candidateId
+        && BigInt(savedProfile.candidate.version) > BigInt(serverWorkspace.candidate.version);
+    const workspace = useSavedProfile ? {
+        ...serverWorkspace,
+        candidate: { ...serverWorkspace.candidate, ...savedProfile.candidate },
+        identifiers: savedProfile.identifiers,
+    } : serverWorkspace;
+    const profileSaved = (candidateId: string, profile?: CandidateProfileSnapshot) => {
+        if (candidateId !== serverWorkspace.candidate.candidateId) return;
+        if (!profile || profile.candidate?.candidateId !== candidateId
+            || typeof profile.candidate.version !== 'string'
+            || !/^[1-9][0-9]{0,18}$/.test(profile.candidate.version)
+            || !Array.isArray(profile.identifiers)) {
+            router.refresh();
+            return;
+        }
+        setSavedProfile(current => current && current.candidate.candidateId === candidateId
+            && BigInt(current.candidate.version) > BigInt(profile.candidate.version)
+            ? current : profile);
+        setProfileMessage('Profile updated.');
+    };
     const { candidate, identifiers, applications, stages, documents, notes, capabilities } =
         workspace;
     const searchParams = useSearchParams();
@@ -314,7 +339,8 @@ export function CandidateDetail({
     const email = candidate.email !== undefined
         ? candidate.email
         : identifiers.find((entry) => entry.kind === 'email')?.value;
-    const secondaryEmails = candidate.secondaryEmails ?? [];
+    const secondaryEmails = (candidate.secondaryEmails ?? [])
+        .filter(value => value.trim().toLowerCase() !== email?.trim().toLowerCase());
     const otherEmails = Array.from(new Set(identifiers
         .filter((entry) => entry.kind === 'email'
             && entry.value.trim().toLowerCase() !== email?.trim().toLowerCase()
@@ -394,11 +420,13 @@ export function CandidateDetail({
                             }}
                             candidateId={candidate.candidateId}
                             version={String(candidate.version)}
-                            onSaved={() => router.refresh()}
+                            onSaved={profileSaved}
                         />
                     </div>
                 ) : null}
             </div>
+
+            {profileMessage && savedProfile?.candidate.candidateId === candidate.candidateId ? <p role="status" className="text-sm text-muted-foreground">{profileMessage}</p> : null}
 
             {candidate.professionalSummary ? (
                 <Card>
