@@ -9,8 +9,8 @@ async function handle(request: Request) {
         const context = await staffApiContext(); const denied = staffGateResponse(context); if (denied) { denied.headers.set('cache-control', 'private, no-store'); return denied; }
         const args = [context.pool, context.identity, context.organizationId] as const;
         const params = new URL(request.url).searchParams;
-        if (request.method === 'GET' && [...params.keys()].some(k => !['chatId', 'anchor', 'before', 'after'].includes(k))) return telegramJson({ error: 'Invalid conversation request.' }, 400);
-        if (request.method === 'GET' && [...params.keys()].some(k => params.getAll(k).length > 1)) return telegramJson({ error: 'Invalid conversation request.' }, 400);
+        if (request.method === 'GET' && Array.from(params.keys()).some(k => !['chatId', 'anchor', 'before', 'after'].includes(k))) return telegramJson({ error: 'Invalid conversation request.' }, 400);
+        if (request.method === 'GET' && Array.from(params.keys()).some(k => params.getAll(k).length > 1)) return telegramJson({ error: 'Invalid conversation request.' }, 400);
         return telegramJson(request.method === 'GET'
             ? await telegramContextView(...args, Object.fromEntries(params))
             : await telegramContextSearch(...args, await readTelegramJson(request, 8192)));

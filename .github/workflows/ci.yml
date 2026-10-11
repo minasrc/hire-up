@@ -234,12 +234,13 @@ jobs:
       - name: Install Chromium once for this group
         run: npx playwright install --with-deps chromium
       - name: Install isolated Telegram SDK once
-        if: ${{ fromJSON(env.CI_SELECTION)['telegram-connection'] || fromJSON(env.CI_SELECTION)['telegram-history'] || fromJSON(env.CI_SELECTION)['telegram-cv'] }}
+        if: ${{ fromJSON(env.CI_SELECTION)['telegram-connection'] || fromJSON(env.CI_SELECTION)['telegram-history'] || fromJSON(env.CI_SELECTION)['telegram-source-updates'] || fromJSON(env.CI_SELECTION)['telegram-cv'] }}
         run: npm ci --ignore-scripts --prefix services/telegram-connector
       - name: Check installed Telegram SDK without connecting
-        if: ${{ fromJSON(env.CI_SELECTION)['telegram-connection'] || fromJSON(env.CI_SELECTION)['telegram-history'] }}
+        if: ${{ fromJSON(env.CI_SELECTION)['telegram-connection'] || fromJSON(env.CI_SELECTION)['telegram-history'] || fromJSON(env.CI_SELECTION)['telegram-source-updates'] }}
         run: |
           node services/telegram-connector/check-runtime.mjs
+          node --test tests/telegram-connector/native-sdk.test.js
           node node_modules/typescript/bin/tsc --noEmit --skipLibCheck --strict --target es2022 --module nodenext --moduleResolution nodenext services/telegram-connector/sdk-contract.mts
       - name: Run selected suites sequentially with isolated databases
         run: node scripts/run-ci-group.mjs telegram-workflows

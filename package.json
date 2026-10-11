@@ -39,7 +39,9 @@
     "test:telegram-retention": "node --test --test-concurrency=1 tests/database/telegram-retention.test.js tests/database/telegram-retention-runtime.test.js tests/staff-workspace/telegram-retention.test.js",
     "test:cv-analysis": "CV_PARSER_DOCKER=1 node --test --test-concurrency=1 tests/database/cv-analysis-parser.test.js tests/database/cv-analysis.test.js tests/database/cv-analysis-runtime.test.js tests/staff-workspace/cv-analysis.test.js",
     "test:cv-search": "node --test --test-concurrency=1 tests/database/cv-search.test.js tests/database/cv-search-relevance.test.js tests/database/cv-search-scale.test.js tests/staff-workspace/cv-search.test.js",
-    "test:worker-pairing": "node --test --test-concurrency=1 tests/database/worker-pairing.test.js tests/database/worker-pairing-runtime.test.js tests/staff-workspace/worker-pairing.test.js"
+    "test:worker-pairing": "node --test --test-concurrency=1 tests/database/worker-pairing.test.js tests/database/worker-pairing-runtime.test.js tests/staff-workspace/worker-pairing.test.js",
+    "test:telegram-context": "node --test --test-concurrency=1 tests/database/telegram-context.test.js tests/database/telegram-candidate-context.test.js tests/staff-workspace/telegram-context.test.js",
+    "test:telegram-source-updates": "node --test --test-concurrency=1 tests/database/telegram-source-updates-runtime.test.js tests/database/telegram-source-refresh-runtime.test.js tests/database/telegram-native-account-runtime.test.js tests/database/telegram-native-channel-runtime.test.js"
   },
   "dependencies": {
     "@heroui/accordion": "^2.2.25",
