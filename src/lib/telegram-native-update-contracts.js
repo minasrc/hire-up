@@ -1,7 +1,7 @@
 import { ClientJobContractError } from './client-job-contracts.js';
 import { assertUuid } from './candidate-profile-contracts.js';
 import { historyProof,historyPeer,historyWorkerInput } from './telegram-history-contracts.js';
-export const NATIVE_BODY_LIMIT=6291456;
+export const NATIVE_BODY_LIMIT=2097152;
 const proofKeys=['connectionId','generation','connectionLeaseToken','accountUserId'];
 const fail=()=>{throw new ClientJobContractError({input:'Invalid native Telegram request.'});};
 const exact=(v,keys)=>{if(!v||typeof v!=='object'||Array.isArray(v)||Object.keys(v).some(k=>!keys.includes(k)))fail();};

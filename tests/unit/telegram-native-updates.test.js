@@ -70,3 +70,7 @@ test('pinned SDK exposes explicit account and channel APIs and stoppable update 
  assert.equal(typeof Api.updates.GetState,'function');assert.equal(typeof Api.updates.GetDifference,'function');assert.equal(typeof Api.updates.GetChannelDifference,'function');
  const client=new TelegramClient(new StringSession(''),1,'synthetic',{connectionRetries:0});assert.equal(typeof client.updateManager.stop,'function');client.updateManager.stop();
 });
+test('413 converts encrypted pending page to a bounded gap ACK without rereading provider',async t=>{
+ const f=fixture(t);let reject=true;const host=async(a,b)=>{if(a==='complete'&&reject){reject=false;throw Object.assign(new Error(),{status:413});}return f.host(a,b);};
+ await createNativeWorker({...f,host}).tick(f.c);assert.equal(f.reads(),1);assert.equal(f.calls.at(-1).b.kind,'gap');assert.equal(f.calls.at(-1).b.gapReason,'OVERFLOW');assert.deepEqual(f.calls.at(-1).b.changes,[]);
+});

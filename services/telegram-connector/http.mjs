@@ -6,7 +6,7 @@ export function createHostClient({ server, token, fetchImpl = fetch, timeoutMs =
   if (url.username || url.password || url.search || url.hash || url.pathname !== '/' || (url.protocol !== 'https:' && !(url.protocol === 'http:' && ['127.0.0.1', '[::1]', 'localhost'].includes(url.hostname)))) throw new Error('INVALID_SERVER');
   if (!/^[A-Za-z0-9_-]{64}$/.test(token)) throw new Error('INVALID_WORKER_TOKEN');
   if (!['connection', 'history', 'source-updates', 'native'].includes(service)) throw new Error('INVALID_SERVICE');
-  const limit = service === 'native' ? 6291456 : service !== 'connection' ? 262144 : 16384;
+  const limit = service === 'native' ? 2097152 : service !== 'connection' ? 262144 : 16384;
   const actions = service === 'native' ? ['claim', 'resolve', 'complete', 'defer'] : service !== 'connection' ? ['claim', 'complete', 'defer'] : ['heartbeat', 'claim', 'update'];
   return async (action, body = {}) => {
     if (!actions.includes(action)) throw new Error('INVALID_ACTION');

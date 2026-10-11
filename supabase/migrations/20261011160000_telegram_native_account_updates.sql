@@ -94,7 +94,7 @@ begin
  if a.id is null then raise exception 'Native account changed' using errcode='40001';end if;
  select * into n from app.telegram_native_accounts where account_id=a.id for update;
  if not found or n.generation is distinct from p_generation or n.scope_digest is distinct from app.telegram_native_scope_v1(a.id) then raise exception 'Native scope changed' using errcode='40001';end if;
- if not coalesce(app.telegram_history_keys_v1(p_page,array['pageId','scopeDigest','fromState','nextState','kind','gapReason','changes']) and p_page ?& array['pageId','scopeDigest','fromState','nextState','kind','gapReason','changes'] and jsonb_typeof(p_page->'pageId')='string' and jsonb_typeof(p_page->'scopeDigest')='string',false) or octet_length(p_page::text)>6291456 or p_page->>'scopeDigest' is distinct from n.scope_digest then raise exception 'Invalid native page' using errcode='22023';end if;
+ if not coalesce(app.telegram_history_keys_v1(p_page,array['pageId','scopeDigest','fromState','nextState','kind','gapReason','changes']) and p_page ?& array['pageId','scopeDigest','fromState','nextState','kind','gapReason','changes'] and jsonb_typeof(p_page->'pageId')='string' and jsonb_typeof(p_page->'scopeDigest')='string',false) or octet_length(p_page::text)>2097152 or p_page->>'scopeDigest' is distinct from n.scope_digest then raise exception 'Invalid native page' using errcode='22023';end if;
  d:=sha256(convert_to(p_page::text,'UTF8'));
  if n.receipt_id=(p_page->>'pageId')::uuid then
  if n.receipt_digest<>d or n.receipt_generation is distinct from p_generation or n.receipt_scope is distinct from n.scope_digest then raise exception 'Native receipt changed' using errcode='40001';end if;return n.receipt_result||jsonb_build_object('replayed',true);end if;

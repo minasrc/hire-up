@@ -22,7 +22,8 @@ export function createNativeWorker({host,vault,now=Date.now,randomId=randomUUID}
   requireActive(c);let result;
   try{result=await host('complete',{...proof(c),...p.payload});}
   catch(e){
-   if(![400,409,422].includes(e.status))throw e;
+   if(e.status===413&&p.payload.kind!=='gap'){p.payload={...p.payload,pageId:randomId(),kind:'gap',gapReason:'OVERFLOW',changes:[]};save(c,p);return complete(c,p);}
+   if(![400,409,413,422].includes(e.status))throw e;
    if(e.status!==409){p.rejectionCode=e.status===422?'CAPACITY_LIMIT':'INVALID_RESULT';save(c,p);await defer(c,p.payload.leaseToken,p.rejectionCode);}
    clear(c);return{status:'stale',providerRead:false};
   }
@@ -51,11 +52,11 @@ export function createNativeWorker({host,vault,now=Date.now,randomId=randomUUID}
    if(page.candidates.length){
     const targets=await host('resolve',{...proof(c),leaseToken:job.leaseToken,scopeDigest:job.scopeDigest,candidates:page.candidates});requireActive(c);
     if(!Array.isArray(targets.targets)||targets.targets.length>128)throw new HistoryReadError('INVALID_RESULT');
-    if(targets.overflow===true){page.kind='gap';page.gapReason='OVERFLOW';}else changes=page.changes(targets.targets);
+    if(targets.overflow===true){page.kind='gap';page.gapReason='OVERFLOW';}else{try{changes=page.changes(targets.targets);}catch(e){if(e.code==='MESSAGE_TOO_LARGE'){page.kind='gap';page.gapReason='OVERFLOW';}else throw new HistoryReadError('INVALID_RESULT');}}
    }
    if(!Array.isArray(changes)||changes.length>128)throw new HistoryReadError('INVALID_RESULT');
    const payload={leaseToken:job.leaseToken,pageId:randomId(),scopeDigest:job.scopeDigest,fromState:job.fromState,nextState:page.nextState,kind:page.kind,gapReason:page.gapReason,changes};
-   if(Buffer.byteLength(JSON.stringify({...proof(c),...payload}))>6291456){payload.changes=[];payload.kind='gap';payload.gapReason='OVERFLOW';}
+   if(Buffer.byteLength(JSON.stringify({...proof(c),...payload}))>2097152){payload.changes=[];payload.kind='gap';payload.gapReason='OVERFLOW';}
    const durable={generation:c.generation,payload};save(c,durable);
    const result=await complete(c,durable);return{...result,providerRead};
   }catch(e){
