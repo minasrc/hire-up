@@ -60,6 +60,7 @@ export function sourceSummary(source: SourceUpdateStatus) {
     if (source.status === 'reconnect_required') return 'Reconnect Telegram to resume updates.';
     if (source.status === 'off') return 'Updates paused: chat not selected.';
     if (source.status === 'paused') return 'Updates paused or cancelled.';
+    if (source.errorCode === 'CAPACITY_LIMIT' || source.nativeErrorCode === 'CAPACITY_LIMIT') return 'Storage limit reached. Review and release saved context to resume updates.';
     if (source.status === 'waiting' || source.errorCode || source.nativeStatus === 'waiting' || source.nativeErrorCode) return 'Telegram checks are delayed. Keep the connector running.';
     if (source.status === 'checking') return 'Checking saved messages.';
     if (nativeRepairPending(source)) return 'Updates are catching up.';

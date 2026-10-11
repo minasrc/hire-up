@@ -12,10 +12,7 @@ import { CJ_SUBJECTS, clientJobFixtureSql } from '../support/client-job-workflow
 import { withStaffTransaction } from '../../src/lib/staff-authorization.js';
 import { telegramConnectionAction, telegramConnectorOperation } from '../../src/lib/telegram-connection-operations.js';
 import { telegramHistoryAction, telegramHistoryStatus, telegramHistoryWorkerOperation } from '../../src/lib/telegram-history-operations.js';
-import { getTelegramDraft } from '../../src/lib/telegram-intake-operations.js';
-import { telegramExtractionAction, telegramExtractionWorkerOperation } from '../../src/lib/telegram-extraction-operations.js';
-import { telegramSourceUpdateWorkerOperation, telegramSourceUpdateStatus } from '../../src/lib/telegram-source-update-operations.js';
-import { createSourceUpdateWorker } from '../../services/telegram-connector/source-update-worker.mjs';
+import { telegramSourceUpdateStatus } from '../../src/lib/telegram-source-update-operations.js';
 import { createVault } from '../../services/telegram-connector/vault.mjs';
 import { telegramNativeWorkerOperation } from '../../src/lib/telegram-native-update-operations.js';
 import { createHistoryWorker } from '../../services/telegram-connector/history-worker.mjs';
@@ -64,7 +61,7 @@ test('native account state commits atomically with selected retained mutations',
         status: 'connected', profile: { telegramUserId: accountUserId, username: 'synthetic_owner', displayName: 'Synthetic Owner' } });
     const action = body => telegramHistoryAction(pool, owner, org, body);
     const status = () => telegramHistoryStatus(pool, owner, org, { q: 'Synthetic candidate' });
-    let loseHistoryAck = false; let historyReads = 0; const completions = [];
+    let loseHistoryAck = false; const completions = [];
     let clock = Date.now();
     const now = () => clock;
     const host = async (action, body) => {
@@ -96,7 +93,6 @@ test('native account state commits atomically with selected retained mutations',
                 offsetId: String(1001 - offset - records.length), offsetPeer: records.at(-1).peer, excludePinned: true }, done: false };
         },
         async history({ cursor }) {
-            historyReads++;
             if (cursor.afterMessageId != null) {
                 const records = incoming.filter(m => Number(m.messageId) > Number(cursor.afterMessageId) && (cursor.beforeMessageId == null || Number(m.messageId) < Number(cursor.beforeMessageId)) && (cursor.upperMessageId == null || Number(m.messageId) <= Number(cursor.upperMessageId))).sort((a,b) => Number(b.messageId)-Number(a.messageId)).slice(0,100);
                 return { records, nextCursor: records.length ? { ...cursor, beforeMessageId: records.at(-1).messageId, upperMessageId: cursor.upperMessageId ?? records[0].messageId } : cursor, done: !records.length };

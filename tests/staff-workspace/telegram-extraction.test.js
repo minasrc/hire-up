@@ -354,6 +354,10 @@ test('Telegram extraction protects recruiter edits, reviews evidence and approve
         // Presentation fixture only: real v2 leasing, attribution and dependency retention are database-tested.
         const originalSource = psql(db, `select source::text from app.telegram_extraction_jobs where id='${job.id}'`).trim();
         const contextSource = JSON.parse(originalSource);
+        // This batch normally has a primary CV. Remove it only from the temporary
+        // presentation snapshot so the background-only attachment gate is isolated.
+        assert.ok(contextSource.messages.some(message => message.attachments.length));
+        contextSource.messages = contextSource.messages.map(message => ({ ...message, attachments: [] }));
         contextSource.contextOnly = [{ messageId: '999999', kind: 'message', text: 'Background recruiter asks about client priorities.', sentAt: new Date().toISOString(), sender: { displayName: 'Background Recruiter', username: 'background_recruiter' }, attachments: [{ kind: 'document', filename: 'context-only.pdf', mimeType: 'application/pdf', sizeBytes: 123 }] }];
         psql(db, `update app.telegram_extraction_jobs set source='${JSON.stringify(contextSource).replaceAll("'", "''")}'::jsonb where id='${job.id}'`);
         await page.getByRole('button', { name: 'Review source messages', exact: true }).first().click();

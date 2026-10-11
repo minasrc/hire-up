@@ -63,11 +63,11 @@ test('v2 literal primary support covers every supported field and rejects contex
 });
 
 test('pinned separator boundaries reject multilingual letters/numerics and accept punctuation', () => {
-  for (const [quote, value] of [['東京語', '東京'], ['٣Alice', 'Alice'], ['Alice٣', 'Alice'], ['Alice²', 'Alice'], ['ⅣAlice', 'Alice'], ['Alice𐒠', 'Alice'], ['e\u0301', 'e'], ['Alice\u200d', 'Alice'], ['Alice\u0378', 'Alice']]) {
+  for (const [quote, value] of [['東京語', '東京'], ['٣Alice', 'Alice'], ['Alice٣', 'Alice'], ['Alice²', 'Alice'], ['ⅣAlice', 'Alice'], ['Alice𐒠', 'Alice'], ['𐒠Alice', 'Alice'], ['e\u0301', 'e'], ['Alice\u200d', 'Alice'], ['Alice\u0378', 'Alice']]) {
     const r = { subjects: [{ key: 's', identity: null, facts: [{ field: 'professionalSummary', value, evidence: [{ messageId: '10', quote }] }], attachments: [] }] };
     assert.throws(() => validateExtractionResult(r, { messages: [{ ...source.messages[0], text: quote }], contextOnly: [] }), `${value} in ${quote}`);
   }
-  for (const quote of ['「東京」', '東京、', '東京。', '،東京؛', '東京🙂', '\t東京\n', '東京\u00a0']) {
+  for (const quote of ['「東京」', '東京、', '東京。', '،東京؛', '東京🙂', '🙂東京🙂', '\t東京\n', '東京\u00a0']) {
     const r = { subjects: [{ key: 's', identity: null, facts: [{ field: 'professionalSummary', value: '東京', evidence: [{ messageId: '10', quote }] }], attachments: [] }] };
     assert.doesNotThrow(() => validateExtractionResult(r, { messages: [{ ...source.messages[0], text: quote }], contextOnly: [] }), quote);
   }

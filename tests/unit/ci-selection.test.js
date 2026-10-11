@@ -237,6 +237,10 @@ test('browser job consumes the quality build without rebuilding or falling back 
 test('conversation search and freshness retain separate workflow checks', () => {
     for (const path of ['src/app/staff/telegram-intake/context/page.tsx', 'src/app/api/staff/telegram-context/route.ts', 'tests/database/telegram-context.test.js', 'tests/staff-workspace/telegram-context.test.js']) assert.deepEqual(selected([path]), ['quality', 'telegram-context']);
     for (const path of ['tests/database/telegram-source-updates-runtime.test.js', 'tests/database/telegram-source-refresh-runtime.test.js', 'tests/database/telegram-native-account-runtime.test.js', 'tests/database/telegram-native-channel-runtime.test.js']) assert.deepEqual(selected([path]), ['quality', 'telegram-source-updates']);
+    assert.deepEqual(selected(['tests/telegram-connector/native-sdk.test.js']), ['quality', 'telegram-source-updates']);
+    assert.deepEqual(selected(['tests/evals/telegram-context/harness.test.mjs']), ['quality', 'telegram-extraction']);
+    assert.deepEqual(selected(['src/app/staff/candidates/[candidateId]/private-telegram-provenance.tsx']), ['quality', 'telegram-context']);
+    assert.ok(selected(['src/app/staff/candidates/[candidateId]/candidate-detail.tsx']).includes('telegram-context'));
     const suites = selected(['src/app/api/telegram-source-updates/worker/complete/route.ts']);
     for (const suite of ['telegram-context','telegram-source-updates','telegram-extraction','telegram-cv','telegram-retention']) assert.ok(suites.includes(suite));
     assert.deepEqual(selected(['supabase/migrations/20261011120000_telegram_context_search.sql']), JOBS);

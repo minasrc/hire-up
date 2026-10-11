@@ -36,8 +36,10 @@ export function literalPrimaryValue(quote, value) {
     const fold = v => v.replace(/[A-Z]/g, c => c.toLowerCase());
     const q = fold(quote); const v = fold(value); if (!v) return false;
     for (let at = q.indexOf(v); at !== -1; at = q.indexOf(v, at + v.length)) {
-        const before = Array.from(q.slice(0, at)).at(-1) ?? '';
-        const after = Array.from(q.slice(at + v.length))[0] ?? '';
+        const previousUnit = q.charCodeAt(at - 1);
+        const before = at === 0 ? '' : q.slice(at - (previousUnit >= 0xDC00 && previousUnit <= 0xDFFF ? 2 : 1), at);
+        const nextPoint = q.codePointAt(at + v.length);
+        const after = nextPoint === undefined ? '' : String.fromCodePoint(nextPoint);
         if (literalValueBoundary(before) && literalValueBoundary(after)) return true;
     }
     return false;

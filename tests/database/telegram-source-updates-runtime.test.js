@@ -15,7 +15,6 @@ import { telegramHistoryAction, telegramHistoryStatus, telegramHistoryWorkerOper
 import { getTelegramDraft } from '../../src/lib/telegram-intake-operations.js';
 import { telegramExtractionAction, telegramExtractionWorkerOperation } from '../../src/lib/telegram-extraction-operations.js';
 import { telegramSourceUpdateWorkerOperation, telegramSourceUpdateStatus } from '../../src/lib/telegram-source-update-operations.js';
-import { createSourceUpdateWorker } from '../../services/telegram-connector/source-update-worker.mjs';
 import { createVault } from '../../services/telegram-connector/vault.mjs';
 import { createHistoryWorker } from '../../services/telegram-connector/history-worker.mjs';
 

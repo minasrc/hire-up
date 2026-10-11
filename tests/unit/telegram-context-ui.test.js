@@ -106,3 +106,11 @@ test('compact source summaries prioritize paused and offline states over update 
     assert.match(sourceSummary({ ...source, nativeStatus: 'waiting', nativeErrorCode: 'FLOOD_WAIT' }), /delayed/);
     assert.equal(sourceSummary(source).includes('checkpoint'), false);
 });
+
+
+test('capacity delays explain the action needed while paused state stays authoritative', () => {
+    const source = { mode: 'native_updates_with_reconciliation', status: 'scheduled', nativeStatus: 'waiting', nativeErrorCode: 'CAPACITY_LIMIT' };
+    assert.match(sourceSummary(source), /Storage limit reached/);
+    assert.match(sourceSummary(source), /Review and release saved context/);
+    assert.match(sourceSummary({ ...source, status: 'off' }), /not selected/);
+});

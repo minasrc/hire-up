@@ -62,9 +62,12 @@ export function selectJobs(files, full = false, readFile = readRepoFile) {
             'src/app/staff/workspace-forms.tsx'].includes(file)) jobs = ['browser-tests', 'staff-workspace'];
         else if (/^src\/app\/staff\/candidates\/search\//.test(file)) jobs = ['profile-search', 'cv-search'];
         else if (/^src\/app\/staff\/candidates\/duplicates\//.test(file)) jobs = ['duplicate-review'];
+        else if (['src/app/staff/candidates/[candidateId]/private-telegram-provenance.tsx', 'src/app/staff/candidates/[candidateId]/telegram-provenance-model.ts'].includes(file)) jobs = ['telegram-context'];
+        else if (['src/app/staff/candidates/[candidateId]/candidate-detail.tsx', 'src/app/staff/candidates/[candidateId]/page.tsx'].includes(file)) jobs = ['staff-workspace', 'duplicate-review', 'profile-search', 'cv-analysis', 'telegram-context'];
         else if (/^src\/app\/staff\/candidates\//.test(file)) jobs = ['staff-workspace', 'duplicate-review', 'profile-search', 'cv-analysis'];
         else if (/^src\/app\/staff\/telegram-intake\/connect\//.test(file)) jobs = ['telegram-connection', 'worker-pairing'];
         else if (file === 'tests/telegram-connector/native-sdk.test.js') jobs = ['telegram-source-updates'];
+        else if (/^tests\/evals\/telegram-context\//.test(file)) jobs = ['telegram-extraction'];
         else if (/^src\/app\/staff\/telegram-intake\/context\//.test(file)) jobs = ['telegram-context'];
         else if (/^src\/app\/staff\/telegram-intake\/chats\//.test(file)) jobs = ['telegram-history', 'telegram-source-updates'];
         else if (/^src\/app\/staff\/telegram-intake\/cv\//.test(file)) jobs = ['telegram-cv', 'cv-analysis'];
