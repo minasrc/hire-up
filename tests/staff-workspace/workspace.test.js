@@ -2816,13 +2816,22 @@ test('staff workspace end-to-end in a real browser', async (t) => {
             assert.equal(await settings.evaluate(() => document.documentElement.scrollWidth > innerWidth), false);
             await settings.screenshot({ path: join(resultsDir, 'staff-time-zone-mobile-banner.png'), fullPage: true });
             await settings.getByLabel('Time zone', { exact: true }).fill('Europe/Madrid');
+            // Capture the real response before delivering it to the page: the
+            // accepted save immediately refreshes, which can discard its body.
+            let payload;
+            await settings.route('**/api/staff/preferences/time-zone', async route => {
+                if (route.request().method() !== 'POST') return route.continue();
+                const upstream = await route.fetch();
+                payload = await upstream.json();
+                await route.fulfill({ response: upstream });
+            });
             const saved = settings.waitForResponse(response => new URL(response.url()).pathname === '/api/staff/preferences/time-zone'
                 && response.request().method() === 'POST');
             await settings.getByRole('button', { name: 'Save time zone', exact: true }).click();
             const response = await saved;
             assert.equal(response.status(), 200);
             assert.equal(response.headers()['cache-control'], 'private, no-store');
-            const payload = await response.json();
+            await settings.unroute('**/api/staff/preferences/time-zone');
             assert.deepEqual(payload.result, { timeZone: 'Europe/Madrid', version: '1' });
             savedVersion = payload.result.version;
             assert.equal(saves.length, 1);
