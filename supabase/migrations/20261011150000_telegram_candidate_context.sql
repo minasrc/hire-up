@@ -17,6 +17,8 @@ create table app.telegram_candidate_context_refs (
  foreign key(organization_id,owner_user_id,chat_id) references app.telegram_history_chats(organization_id,owner_user_id,id) on delete cascade,
  foreign key(organization_id,owner_user_id,extraction_job_id) references app.telegram_extraction_jobs(organization_id,owner_user_id,id) on delete cascade
 );
+create index telegram_candidate_context_merged_parent_idx on app.candidates(organization_id,merged_into_id,id) where merged_into_id is not null;
+create index telegram_candidate_context_draft_idx on app.telegram_drafts(organization_id,owner_user_id,approved_candidate_id,id) where status='approved';
 create index telegram_candidate_context_source_idx on app.telegram_candidate_context_refs(organization_id,owner_user_id,candidate_source_id,id);
 do $$ declare t text; begin
  foreach t in array array['telegram_candidate_origins','telegram_candidate_context_refs'] loop
@@ -84,10 +86,10 @@ begin
  if not found then raise exception 'Candidate not found' using errcode='P0002'; end if;
  cid:=coalesce(app.resolve_candidate_redirect_v1(p_candidate),p_candidate);
  -- Return nothing about a different owner's private source, including its existence.
- with recursive chains as (
-  select d.id draft_id,c.id,c.merged_into_id,c.lifecycle,array[c.id] seen from app.telegram_drafts d join app.candidates c on c.id=d.approved_candidate_id where d.status='approved'
-  union all select q.draft_id,c.id,c.merged_into_id,c.lifecycle,q.seen||c.id from chains q join app.candidates c on c.id=q.merged_into_id where q.lifecycle='merged' and not c.id=any(q.seen) and cardinality(q.seen)<16
- ) select exists(select 1 from chains q where q.id=cid and not exists(select 1 from app.telegram_candidate_origins o join app.telegram_candidate_context_refs r on r.draft_id=o.draft_id where o.draft_id=q.draft_id)) into missing;
+ with recursive ancestors as (
+  select c.id,array[c.id] seen from app.candidates c where c.id=cid
+  union all select c.id,a.seen||c.id from ancestors a join app.candidates c on c.merged_into_id=a.id where c.lifecycle='merged' and not c.id=any(a.seen) and cardinality(a.seen)<16
+ ) select exists(select 1 from ancestors a join app.telegram_drafts d on d.approved_candidate_id=a.id where d.status='approved' and not exists(select 1 from app.telegram_candidate_origins o join app.telegram_candidate_context_refs r on r.draft_id=o.draft_id where o.draft_id=d.id)) into missing;
  if p_after is not null and not exists(select 1 from app.telegram_candidate_context_refs r join app.candidate_sources s on s.id=r.candidate_source_id where r.id=p_after and s.candidate_id=cid) then raise exception 'Invalid context cursor' using errcode='22023'; end if;
  with page as materialized (
   select r.*,(to_jsonb(j)->>'source_invalidated_at') is not null as source_changed,exists(select 1 from app.telegram_history_messages m where m.chat_id=r.chat_id and m.message_id=r.message_id and m.body->>'kind'<>'unavailable') available
@@ -125,6 +127,7 @@ set local row_security=off;
 insert into app.telegram_candidate_origins(organization_id,owner_user_id,draft_id,candidate_source_id)
 select d.organization_id,d.owner_user_id,d.id,(array_agg(s.id))[1]
 from app.telegram_drafts d join app.candidate_sources s on s.organization_id=d.organization_id and s.candidate_id=d.candidate_target_id
+join app.candidates c on c.organization_id=s.organization_id and c.id=s.candidate_id and c.lifecycle in('active','restricted')
 join app.organization_memberships m on m.organization_id=s.organization_id and m.id=s.created_by_membership_id and m.user_id=d.owner_user_id
 where d.status='approved' and s.context_summary='Added by staff' and s.received_at<=d.reviewed_at
 group by d.organization_id,d.owner_user_id,d.id having count(*)=1 on conflict(draft_id) do nothing;

@@ -43,6 +43,7 @@ test('candidate Telegram provenance survives approval, late results, merge and r
  const receipt=await finish(firstJob,[subject(bob,'bob@example.test',{firstName:'Bob',lastName:'Smith',primaryEmail:'bob@example.test'}),subject(alice,'alice@example.test',{firstName:'Alice',lastName:'Other',primaryEmail:'alice@example.test'},'other')]);
  const draft=receipt.draftIds[0],candidate=(await approve(draft)).candidateId;
  const lostDraft=randomUUID();await staff('select app.telegram_create_draft_v1($1,$2::jsonb,$3) result',[lostDraft,JSON.stringify({firstName:'Lost',lastName:'Origin',primaryEmail:'lost@example.test'}),'Prior source no longer retained']);const lostCandidate=(await approve(lostDraft)).candidateId;
+ const terminalDraft=randomUUID();await staff('select app.telegram_create_draft_v1($1,$2::jsonb,$3) result',[terminalDraft,JSON.stringify({firstName:'Terminal',lastName:'Origin',primaryEmail:'terminal@example.test'}),'Private terminal source']);const terminalCandidate=(await approve(terminalDraft)).candidateId;psql(db,`update app.candidates set lifecycle='deleting' where id='${terminalCandidate}';`);
  // Install over an already approved candidate: only its exact surviving refs backfill.
  psql(db,readFileSync(join(dir,'20261011150000_telegram_candidate_context.sql'),'utf8'));
  let canonicalTarget=candidate;
@@ -51,6 +52,9 @@ test('candidate Telegram provenance survives approval, late results, merge and r
  await t.test('a prior approved source with no exact surviving references stays explicitly unavailable',async()=>{
  assert.deepEqual(await read(lostCandidate),{sources:[],nextAfter:null,provenanceUnavailable:true});assert.deepEqual(await read(lostCandidate,null,other),{sources:[],nextAfter:null,provenanceUnavailable:false});
  const deletionRules=psql(db,"select distinct confdeltype from pg_constraint where contype='f' and conrelid in('app.telegram_candidate_origins'::regclass,'app.telegram_candidate_context_refs'::regclass);").trim();assert.equal(deletionRules,'c','No new reference foreign key blocks parent erasure');
+ });
+ await t.test('global migration backfill never recreates provenance for a terminal subject',async()=>{
+ assert.equal(psql(db,`select count(*) from app.telegram_candidate_origins where draft_id='${terminalDraft}';`).trim(),'0');assert.equal(psql(db,`select count(*) from app.telegram_candidate_context_refs where draft_id='${terminalDraft}';`).trim(),'0');await assert.rejects(read(terminalCandidate),{code:'P0002'});
  });
  await t.test('approval and late approved results capture identifiers before cleanup',async()=>{
  const approvedOther=(await approve(receipt.draftIds[1])).candidateId;assert.equal((await read(approvedOther)).sources[0].messageId,'2');
