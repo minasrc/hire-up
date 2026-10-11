@@ -6,7 +6,7 @@ import {
 import {
     getCandidateProfile,
     isMissingProfileFunctionError,
-    saveCandidateProfile,
+    saveCandidateProfileWithSnapshot,
 } from '@/lib/candidate-profile-operations';
 import { ClientJobContractError } from '@/lib/client-job-contracts';
 
@@ -85,7 +85,7 @@ export async function PATCH(
                 expectedVersion: 'A numeric record version is required.',
             });
         }
-        const result = await saveCandidateProfile(
+        const result = await saveCandidateProfileWithSnapshot(
             context.pool, context.identity, context.organizationId, {
                 candidateId,
                 expectedVersion: record.expectedVersion,

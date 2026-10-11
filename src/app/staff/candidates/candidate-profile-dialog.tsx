@@ -42,6 +42,15 @@ export interface CandidateProfileValues {
     professionalSummary: string | null;
 }
 
+export interface CandidateProfileSnapshot {
+    candidate: CandidateProfileValues & {
+        candidateId: string;
+        version: string;
+        ownerName: string | null;
+    };
+    identifiers: { kind: string; value: string; verification: string }[];
+}
+
 interface FormDraft {
     fullName: string;
     email: string;
@@ -127,7 +136,7 @@ export function CandidateProfileDialog({
     initial: CandidateProfileValues;
     candidateId?: string;
     expectedVersion?: string;
-    onSaved: (candidateId: string) => void;
+    onSaved: (candidateId: string, profile?: CandidateProfileSnapshot) => void;
 }) {
     const recovery = useStaffAuthRecovery();
     const [draft, setDraft] = useState<FormDraft>(() => draftFrom(initial));
@@ -243,7 +252,7 @@ export function CandidateProfileDialog({
             }
             window.dispatchEvent(new Event('staff-workspace-updated'));
             onOpenChange(false);
-            onSaved(payload.result.candidateId);
+            onSaved(payload.result.candidateId, payload.result.profile);
         } catch {
             setError('Could not save the candidate. Please try again.');
         } finally {
@@ -474,7 +483,7 @@ export function EditCandidateProfileButton({
     candidate: CandidateProfileValues;
     candidateId: string;
     version: string;
-    onSaved: () => void;
+    onSaved: (candidateId: string, profile?: CandidateProfileSnapshot) => void;
 }) {
     const [open, setOpen] = useState(false);
     return (

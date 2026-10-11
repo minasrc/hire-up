@@ -34,7 +34,7 @@ stubModule('@/lib/staff-api.server', {
 stubModule('@/lib/pipeline-operations', { addCandidateNote: 'fn' });
 stubModule('@/lib/candidate-profile-operations', {
     getCandidateProfile: 'fn',
-    saveCandidateProfile: 'fn',
+    saveCandidateProfileWithSnapshot: 'fn',
     isMissingProfileFunctionError: { reexport: realProfileOperations },
 });
 
@@ -99,9 +99,9 @@ const installBaseStubs = () => {
         }
         throw error;
     });
-    stubs.set('@/lib/candidate-profile-operations:saveCandidateProfile',
+    stubs.set('@/lib/candidate-profile-operations:saveCandidateProfileWithSnapshot',
         async (pool, identity, org, input) => {
-            calls.operations.push(['saveCandidateProfile', input]);
+            calls.operations.push(['saveCandidateProfileWithSnapshot', input]);
             return {
                 status: input.expectedVersion === null ? 'created' : 'updated',
                 candidateId: input.candidateId,
@@ -186,9 +186,9 @@ test('a stale edit returns 409 without discarding fields', async () => {
         ownerMembershipId: null,
         professionalSummary: 'COBOL.',
     };
-    stubs.set('@/lib/candidate-profile-operations:saveCandidateProfile',
+    stubs.set('@/lib/candidate-profile-operations:saveCandidateProfileWithSnapshot',
         async (pool, identity, org, input) => {
-            calls.operations.push(['saveCandidateProfile', input]);
+            calls.operations.push(['saveCandidateProfileWithSnapshot', input]);
             throw Object.assign(
                 new Error('Candidate changed; reload before saving'),
                 { code: '40001' });
@@ -224,6 +224,21 @@ test('PATCH rejects malformed JSON before any operation', async () => {
     assert.equal(calls.operations.length, 0);
 });
 
+test('PATCH returns the acknowledged profile snapshot without another authorized operation', async () => {
+    const profile = { candidate: { candidateId: CANDIDATE_ID, fullName: 'Canonical Name', version: '5' }, identifiers: [] };
+    stubs.set('@/lib/candidate-profile-operations:saveCandidateProfileWithSnapshot', async (_pool, _identity, _org, input) => {
+        calls.operations.push(['saveCandidateProfileWithSnapshot', input]);
+        return { candidateId: CANDIDATE_ID, status: 'updated', version: '5', profile };
+    });
+    const response = await candidateRoute.PATCH(jsonPatch(CANDIDATE_ID, {
+        fields: { fullName: 'Canonical Name' }, expectedVersion: '4', operationId: OP_ID,
+    }), params(CANDIDATE_ID));
+    assert.equal(response.status, 200);
+    assert.equal(response.headers.get('cache-control'), 'private, no-store');
+    assert.deepEqual((await response.json()).result.profile, profile);
+    assert.equal(calls.operations.length, 1);
+});
+
 test('PATCH requires a string expectedVersion', async () => {
     for (const expectedVersion of [undefined, null, 4]) {
         const response = await candidateRoute.PATCH(
@@ -239,9 +254,9 @@ test('PATCH requires a string expectedVersion', async () => {
 });
 
 test('a replayed PATCH operation id returns the stored result', async () => {
-    stubs.set('@/lib/candidate-profile-operations:saveCandidateProfile',
+    stubs.set('@/lib/candidate-profile-operations:saveCandidateProfileWithSnapshot',
         async (pool, identity, org, input) => {
-            calls.operations.push(['saveCandidateProfile', input]);
+            calls.operations.push(['saveCandidateProfileWithSnapshot', input]);
             return {
                 status: 'updated', candidateId: input.candidateId,
                 version: '1', replayed: true,
@@ -258,7 +273,7 @@ test('a replayed PATCH operation id returns the stored result', async () => {
 });
 
 test('capability denial returns 403 and never reaches the fallback', async () => {
-    stubs.set('@/lib/candidate-profile-operations:saveCandidateProfile',
+    stubs.set('@/lib/candidate-profile-operations:saveCandidateProfileWithSnapshot',
         async () => {
             throw new StaffAuthorizationError(
                 'FORBIDDEN', 'a required permission is not granted');
@@ -273,7 +288,7 @@ test('capability denial returns 403 and never reaches the fallback', async () =>
 });
 
 test('a missing profile function returns 503 instead of a stack', async () => {
-    stubs.set('@/lib/candidate-profile-operations:saveCandidateProfile',
+    stubs.set('@/lib/candidate-profile-operations:saveCandidateProfileWithSnapshot',
         async () => {
             throw Object.assign(
                 new Error(
@@ -290,7 +305,7 @@ test('a missing profile function returns 503 instead of a stack', async () => {
 });
 
 test('unrelated missing functions do not trigger the fallback response', async () => {
-    stubs.set('@/lib/candidate-profile-operations:saveCandidateProfile',
+    stubs.set('@/lib/candidate-profile-operations:saveCandidateProfileWithSnapshot',
         async () => {
             throw Object.assign(
                 new Error('function app.list_candidates_v1(text) does not exist'),

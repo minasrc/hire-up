@@ -37,6 +37,7 @@ import {
     getCandidateProfileOptions,
     listCandidateProfiles,
     saveCandidateProfile,
+    saveCandidateProfileWithSnapshot,
 } from '../../src/lib/candidate-profile-operations.js';
 import { submitPublicApplication } from '../../src/lib/intake-operations.js';
 
@@ -190,7 +191,7 @@ test('candidate profiles on PostgreSQL 17', async (t) => {
 
     await t.test('all seven fields edit, clear and read back in get and list', async () => {
         const created = await newCandidate({ fullName: 'Seven Fields' });
-        const updated = await admin(saveCandidateProfile, {
+        const updateInput = {
             candidateId: created.candidateId,
             expectedVersion: '1',
             fields: {
@@ -203,12 +204,17 @@ test('candidate profiles on PostgreSQL 17', async (t) => {
                 professionalSummary: 'Built pipelines.',
             },
             operationId: randomUUID(),
-        });
+        };
+        const updated = await admin(saveCandidateProfileWithSnapshot, updateInput);
         assert.equal(updated.status, 'updated');
         assert.equal(updated.version, '2');
 
         const profile = await admin(getCandidateProfile, {
             candidateId: created.candidateId });
+        assert.deepEqual(updated.profile, { candidate: profile.candidate, identifiers: profile.identifiers });
+        const replayed = await admin(saveCandidateProfileWithSnapshot, updateInput);
+        assert.equal(replayed.replayed, true);
+        assert.deepEqual(replayed.profile, updated.profile);
         assert.equal(profile.candidate.fullName, 'Seven Renamed');
         assert.equal(profile.candidate.email, 'seven@example.test');
         assert.equal(profile.candidate.professionalUrl, 'https://example.test/seven');
@@ -348,6 +354,25 @@ test('candidate profiles on PostgreSQL 17', async (t) => {
             select count(*) from app.recruitment_operation_receipts
             where organization_id = '${ORG_B}'
                 and operation_id = '${operationId}'`), '1');
+    });
+
+    await t.test('profile snapshot failure rolls back fields, audit and operation receipt', async () => {
+        const created = await newCandidate({ fullName: 'Before snapshot failure' });
+        const operationId = randomUUID();
+        psql(pg17, 'alter function app.get_candidate_profile_v1(uuid) rename to get_candidate_profile_snapshot_test;');
+        try {
+            await rejectCode(admin(saveCandidateProfileWithSnapshot, {
+                candidateId: created.candidateId, expectedVersion: '1',
+                fields: { fullName: 'Should roll back' }, operationId,
+            }), '42883', 'a missing snapshot read aborts the write');
+        } finally {
+            psql(pg17, 'alter function app.get_candidate_profile_snapshot_test(uuid) rename to get_candidate_profile_v1;');
+        }
+        const profile = await admin(getCandidateProfile, { candidateId: created.candidateId });
+        assert.equal(profile.candidate.fullName, 'Before snapshot failure');
+        assert.equal(profile.candidate.version, '1');
+        assert.equal(scalar(pg17, `select count(*) from app.recruitment_operation_receipts where operation_id = '${operationId}'`), '0');
+        assert.equal(scalar(pg17, `select count(*) from app.audit_events where target_id = '${created.candidateId}' and action = 'candidate.updated'`), '0');
     });
 
     await t.test('email conflict on edit raises 23505 and stale version 40001', async () => {
