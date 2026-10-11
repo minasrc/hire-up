@@ -20,6 +20,10 @@ export function messageExcerpt(text: string | null) {
     if (!text) return 'No retained message text.';
     return text.length > 600 ? `${text.slice(0, 600).replace(/[\uD800-\uDBFF]$/, '')}…` : text;
 }
+export function retainedMessageText(message: Pick<Message, 'kind' | 'text'>, fullText = false) {
+    if (message.kind === 'unavailable') return 'This retained source is unavailable. This does not confirm a Telegram deletion.';
+    return fullText ? message.text || 'No retained message text.' : messageExcerpt(message.text);
+}
 export function pendingFilterChanges(filters: SearchFilters, submitted: SearchFilters | null) {
     return submitted !== null && JSON.stringify(searchPayload(filters)) !== JSON.stringify(searchPayload(submitted));
 }

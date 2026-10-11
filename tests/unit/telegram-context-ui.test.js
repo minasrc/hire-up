@@ -3,7 +3,7 @@ import test from 'node:test';
 import { readFileSync } from 'node:fs';
 import ts from 'typescript';
 const compiled = ts.transpileModule(readFileSync(new URL('../../src/app/staff/telegram-intake/context/context-model.ts', import.meta.url), 'utf8'), { compilerOptions: { module: ts.ModuleKind.ESNext, target: ts.ScriptTarget.ES2022 } }).outputText;
-const { searchPayload, contextUrl, senderLabel, forwardedLabel, messageExcerpt, pendingFilterChanges, conversationDeepLink, sourceStatusLabel, nativeFeedLabel, nativeRepairPending } = await import(`data:text/javascript;base64,${Buffer.from(compiled).toString('base64')}`);
+const { searchPayload, contextUrl, senderLabel, forwardedLabel, messageExcerpt, pendingFilterChanges, conversationDeepLink, sourceStatusLabel, nativeFeedLabel, nativeRepairPending, retainedMessageText } = await import(`data:text/javascript;base64,${Buffer.from(compiled).toString('base64')}`);
 test('search retains quoted terms and inclusive dates in a POST payload', () => {
     assert.deepEqual(searchPayload({ query: '  "product designer" OR engineer ', chatId: '', sender: ' @ada ', from: '2026-10-01', to: '2026-10-11', attachmentsOnly: true }, 'cursor'), { action: 'search', query: '"product designer" OR engineer', chatId: null, sender: '@ada', from: '2026-10-01', to: '2026-10-11', attachmentsOnly: true, after: 'cursor' });
 });
@@ -77,4 +77,21 @@ test('native delays use safe text without exposing provider or database codes', 
     const label = nativeFeedLabel({ mode: 'native_updates_with_reconciliation', status: 'scheduled', nativeStatus: 'waiting', nativeErrorCode: 'INVALID_RESULT' });
     assert.match(label, /delayed/);
     assert.equal(label.includes('INVALID_RESULT'), false);
+});
+
+test('an unavailable retained source is not presented as a confirmed provider deletion', () => {
+    const unavailable = { kind: 'unavailable', text: '', sentAt: null, editedAt: null };
+    const display = retainedMessageText(unavailable, true);
+    assert.match(display, /source is unavailable/);
+    assert.match(display, /does not confirm a Telegram deletion/);
+    assert.equal(retainedMessageText(unavailable), display);
+    assert.equal(retainedMessageText({ kind: 'service', text: '' }, true), 'No retained message text.');
+});
+test('an edited source keeps literal original text in the viewer while result excerpts remain bounded', () => {
+    const text = 'Edited original <script>literal source</script>\n' + 'more source '.repeat(1000);
+    const source = { kind: 'message', text, editedAt: '2026-10-11T12:00:00Z' };
+    assert.equal(retainedMessageText(source, true), text);
+    assert.ok(retainedMessageText(source).length <= 601);
+    assert.equal(source.text, text);
+    assert.equal(source.editedAt, '2026-10-11T12:00:00Z');
 });

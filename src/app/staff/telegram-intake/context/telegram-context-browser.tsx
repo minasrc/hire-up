@@ -11,7 +11,7 @@ import { Dialog, DialogContent, DialogDescription, DialogTitle } from '@/compone
 import { StaffDate } from '../../staff-date';
 import { StaffAuthRecoveryPrompt } from '../../auth-recovery';
 import { staffAuthRecovery } from '@/lib/staff-auth-recovery';
-import { Chat, Message, SearchFilters, contextUrl, forwardedLabel, searchPayload, senderLabel, messageExcerpt, pendingFilterChanges, conversationDeepLink, SourceUpdateStatus, sourceStatusLabel, nativeFeedLabel, nativeRepairPending } from './context-model';
+import { Chat, Message, SearchFilters, contextUrl, forwardedLabel, searchPayload, senderLabel, retainedMessageText, pendingFilterChanges, conversationDeepLink, SourceUpdateStatus, sourceStatusLabel, nativeFeedLabel, nativeRepairPending } from './context-model';
 
 const endpoint = '/api/staff/telegram-context';
 const emptyFilters: SearchFilters = { query: '', chatId: '', sender: '', from: '', to: '', attachmentsOnly: false };
@@ -170,7 +170,7 @@ export function TelegramContextBrowser() {
             {!inContext ? <p className="break-words text-sm text-muted-foreground">{senderLabel(message.sender)}</p> : null}
             {message.sender?.displayName && message.sender.username ? <p className="break-words text-xs text-muted-foreground">@{message.sender.username.replace(/^@/, '')}</p> : null}
             {inContext && target?.anchor === message.messageId ? <p className="text-xs font-medium">Requested message</p> : null}
-            <blockquote className={`whitespace-pre-wrap break-words text-sm ${inContext ? '' : 'line-clamp-5'}`}>{message.kind === 'unavailable' ? 'This retained source is unavailable. This does not confirm a Telegram deletion.' : inContext ? message.text || 'No retained message text.' : messageExcerpt(message.text)}</blockquote>
+            <blockquote className={`whitespace-pre-wrap break-words text-sm ${inContext ? '' : 'line-clamp-5'}`}>{retainedMessageText(message, inContext)}</blockquote>
             {message.editedAt ? <p className="text-xs text-muted-foreground">Imported edit timestamp: <StaffDate value={message.editedAt} kind="timestamp" /></p> : null}
             {forwarded ? <p className="break-words text-xs text-muted-foreground">Forwarded from: {forwarded}</p> : null}
             {message.attachments.length ? <ul className="space-y-1 text-xs text-muted-foreground">{message.attachments.map((attachment, index) => <li className="break-words" key={`${index}:${attachment.id ?? 'attachment'}`}>{attachment.filename || attachment.kind} · {attachment.mimeType || attachment.kind}{attachment.sizeBytes !== null ? ` · ${attachment.sizeBytes.toLocaleString()} bytes` : ''} · Metadata only</li>)}</ul> : null}
