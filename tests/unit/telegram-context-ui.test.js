@@ -3,7 +3,7 @@ import test from 'node:test';
 import { readFileSync } from 'node:fs';
 import ts from 'typescript';
 const compiled = ts.transpileModule(readFileSync(new URL('../../src/app/staff/telegram-intake/context/context-model.ts', import.meta.url), 'utf8'), { compilerOptions: { module: ts.ModuleKind.ESNext, target: ts.ScriptTarget.ES2022 } }).outputText;
-const { searchPayload, contextUrl, senderLabel, forwardedLabel, messageExcerpt, pendingFilterChanges, conversationDeepLink, sourceStatusLabel, nativeFeedLabel, nativeRepairPending, retainedMessageText } = await import(`data:text/javascript;base64,${Buffer.from(compiled).toString('base64')}`);
+const { searchPayload, contextUrl, senderLabel, forwardedLabel, messageExcerpt, pendingFilterChanges, conversationDeepLink, sourceStatusLabel, nativeFeedLabel, nativeRepairPending, retainedMessageText, sourceSummary } = await import(`data:text/javascript;base64,${Buffer.from(compiled).toString('base64')}`);
 test('search retains quoted terms and inclusive dates in a POST payload', () => {
     assert.deepEqual(searchPayload({ query: '  "product designer" OR engineer ', chatId: '', sender: ' @ada ', from: '2026-10-01', to: '2026-10-11', attachmentsOnly: true }, 'cursor'), { action: 'search', query: '"product designer" OR engineer', chatId: null, sender: '@ada', from: '2026-10-01', to: '2026-10-11', attachmentsOnly: true, after: 'cursor' });
 });
@@ -94,4 +94,15 @@ test('an edited source keeps literal original text in the viewer while result ex
     assert.ok(retainedMessageText(source).length <= 601);
     assert.equal(source.text, text);
     assert.equal(source.editedAt, '2026-10-11T12:00:00Z');
+});
+
+test('compact source summaries prioritize paused and offline states over update availability', () => {
+    const source = { mode: 'native_updates_with_reconciliation', status: 'scheduled', nativeStatus: 'live' };
+    assert.equal(sourceSummary(source), 'Telegram updates checked.');
+    assert.match(sourceSummary({ ...source, status: 'worker_offline' }), /offline/);
+    assert.match(sourceSummary({ ...source, status: 'paused' }), /paused/);
+    assert.match(sourceSummary({ ...source, status: 'off' }), /not selected/);
+    assert.match(sourceSummary({ ...source, nativeStatus: 'repair_required' }), /catching up/);
+    assert.match(sourceSummary({ ...source, nativeStatus: 'waiting', nativeErrorCode: 'FLOOD_WAIT' }), /delayed/);
+    assert.equal(sourceSummary(source).includes('checkpoint'), false);
 });

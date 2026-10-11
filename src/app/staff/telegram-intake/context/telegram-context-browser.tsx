@@ -11,7 +11,7 @@ import { Dialog, DialogContent, DialogDescription, DialogTitle } from '@/compone
 import { StaffDate } from '../../staff-date';
 import { StaffAuthRecoveryPrompt } from '../../auth-recovery';
 import { staffAuthRecovery } from '@/lib/staff-auth-recovery';
-import { Chat, Message, SearchFilters, contextUrl, forwardedLabel, searchPayload, senderLabel, retainedMessageText, pendingFilterChanges, conversationDeepLink, SourceUpdateStatus, sourceStatusLabel, nativeFeedLabel, nativeRepairPending } from './context-model';
+import { Chat, Message, SearchFilters, contextUrl, forwardedLabel, searchPayload, senderLabel, retainedMessageText, pendingFilterChanges, conversationDeepLink, SourceUpdateStatus, sourceStatusLabel, nativeFeedLabel, nativeRepairPending, sourceSummary } from './context-model';
 
 const endpoint = '/api/staff/telegram-context';
 const emptyFilters: SearchFilters = { query: '', chatId: '', sender: '', from: '', to: '', attachmentsOnly: false };
@@ -98,18 +98,25 @@ export function TelegramContextBrowser() {
     function freshness(chatId: string) {
         const source = [...sourceRecords.sourceDialog, ...sourceRecords.source].find(row => row.chatId === chatId);
         if (!source) return <p className="text-xs text-muted-foreground">{sourceLoading ? 'Loading retained-message check status…' : 'Retained-message check status unavailable for this chat.'}</p>;
-        return <div className="space-y-1 text-xs text-muted-foreground">
-            <p>{sourceStatusLabel(source)}</p>
-            {nativeFeedLabel(source) ? <p>{nativeFeedLabel(source)}</p> : null}
-            {source.mode === 'native_updates_with_reconciliation' ? <>
-                <p>Last Telegram update feed read: {source.lastNativeAt ? <StaffDate value={source.lastNativeAt} kind="timestamp" /> : 'No committed provider checkpoint recorded'}. This records the provider read, not candidate extraction completion.</p>
-                {nativeRepairPending(source) ? <p className="font-medium">Retained-source repair gap pending. Paused or offline chats cannot finish repair until checks resume.</p> : null}
-                <p>Repair requested: {source.repairRequestedAt ? <StaffDate value={source.repairRequestedAt} kind="timestamp" /> : 'Not recorded'}.</p>
-                <p>Last completed retained-source repair: {source.repairCompletedAt ? <StaffDate value={source.repairCompletedAt} kind="timestamp" /> : 'No completed repair recorded'}.</p>
-            </> : null}
-            <p>Last batch checked: {source.lastCheckedAt ? <StaffDate value={source.lastCheckedAt} kind="timestamp" /> : 'Not checked yet'}.</p>
-            <p>Last full retained-ID sweep: {source.lastCycleAt ? <StaffDate value={source.lastCycleAt} kind="timestamp" /> : 'No completed sweep recorded'}.</p>
-            {source.needsReextraction ? <p className="font-medium">Retained source changed. Candidate re-extraction is pending; existing drafts may contain an earlier version.</p> : null}
+        return <div className="space-y-2 text-xs text-muted-foreground">
+            <p>{sourceSummary(source)}</p>
+            {nativeRepairPending(source) ? <p className="font-medium">Some saved messages may be out of date. History repair is pending.</p> : null}
+            {source.needsReextraction ? <p className="font-medium">Source changed. Candidate re-extraction is pending; drafts may contain an earlier version.</p> : null}
+            <details className="space-y-2">
+                <summary className="cursor-pointer rounded-sm text-foreground underline underline-offset-4 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">Update check details</summary>
+                <div className="space-y-1 border-l pl-3">
+                    <p>{sourceStatusLabel(source)}</p>
+                    {nativeFeedLabel(source) ? <p>{nativeFeedLabel(source)}</p> : null}
+                    {source.mode === 'native_updates_with_reconciliation' ? <>
+                        <p>Last Telegram updates read: {source.lastNativeAt ? <StaffDate value={source.lastNativeAt} kind="timestamp" /> : 'Not recorded'}. This does not confirm candidate extraction has finished or all history is current.</p>
+                        <p>History repair requested: {source.repairRequestedAt ? <StaffDate value={source.repairRequestedAt} kind="timestamp" /> : 'Not recorded'}.</p>
+                        <p>Last full history repair completed: {source.repairCompletedAt ? <StaffDate value={source.repairCompletedAt} kind="timestamp" /> : 'Not recorded'}.</p>
+                        {nativeRepairPending(source) ? <p>Paused or offline chats cannot finish repair until checks resume.</p> : null}
+                    </> : null}
+                    <p>Last saved-message batch checked: {source.lastCheckedAt ? <StaffDate value={source.lastCheckedAt} kind="timestamp" /> : 'Not checked yet'}.</p>
+                    <p>Last full saved-message check: {source.lastCycleAt ? <StaffDate value={source.lastCycleAt} kind="timestamp" /> : 'No completed check recorded'}.</p>
+                </div>
+            </details>
         </div>;
     }
     const loadChats = useCallback(async (after: string | null = null, query = '', cursors: (string | null)[] = [null]) => {

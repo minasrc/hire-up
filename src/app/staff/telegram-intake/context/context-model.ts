@@ -54,3 +54,15 @@ export function nativeFeedLabel(source: SourceUpdateStatus) {
     if (source.nativeStatus === 'live') return 'Telegram update feed checkpoint recorded. This does not confirm all retained history is current.';
     return 'Telegram update feed status is unavailable.';
 }
+
+export function sourceSummary(source: SourceUpdateStatus) {
+    if (source.status === 'worker_offline') return 'Connector offline. Saved messages remain searchable.';
+    if (source.status === 'reconnect_required') return 'Reconnect Telegram to resume updates.';
+    if (source.status === 'off') return 'Updates paused: chat not selected.';
+    if (source.status === 'paused') return 'Updates paused or cancelled.';
+    if (source.status === 'waiting' || source.errorCode || source.nativeStatus === 'waiting' || source.nativeErrorCode) return 'Telegram checks are delayed. Keep the connector running.';
+    if (source.status === 'checking') return 'Checking saved messages.';
+    if (nativeRepairPending(source)) return 'Updates are catching up.';
+    if (source.mode === 'native_updates_with_reconciliation' && source.nativeStatus === 'live') return 'Telegram updates checked.';
+    return 'Update checks scheduled.';
+}
