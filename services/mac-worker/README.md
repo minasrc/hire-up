@@ -6,6 +6,14 @@ loopback embedding service. Keep the terminal open and the Mac awake and online.
 Ctrl-C stops this launch's processes and preserves Telegram sessions and pending
 work. A normal stop does not log out of Telegram.
 
+This full launcher is optional when accepting Telegram import and original
+conversation keyword/phrase search. For that workflow, run the
+[standalone connector](../telegram-connector/README.md) with Node 22, its pinned
+Teleproto dependency, a paired credential and Telegram application API credentials.
+Search runs in the hosted application without an AI model, embedding service,
+Python or Docker. The setup below also prepares candidate extraction, CV analysis
+and semantic profile/CV search.
+
 ## Prepare once
 
 Use Node 22, Python 3.12, and a local Docker Engine/Desktop. From this checkout:
@@ -24,7 +32,12 @@ Reuse matching model assets read-only if already installed. Do not start the
 detached embedding service on the launcher's chosen port. An occupied port is
 refused; another service is never adopted or stopped.
 
-[Pair the Mac](../worker-pairing/README.md) to obtain its private credential file.
+After hosted deployment checks pass, the operator enables
+`TELEGRAM_INTAKE_ENABLED=1` for controlled staff-account acceptance with permitted
+test conversations. This global staff-app flag is required even for pairing;
+it does not restrict access to a test-account allowlist. Keep automatic per-chat
+extraction off during import/search acceptance and disable the flag if acceptance
+fails. [Pair the Mac](../worker-pairing/README.md) to obtain its private credential file.
 Keep that file and all other configuration outside the repository in private
 local storage. Configure the intended provider separately; an already configured
 local CLIProxyAPI endpoint is supported. The launcher does not install or sign
@@ -128,7 +141,13 @@ node --test tests/local/mac-worker-runtime.test.js
 ```
 
 This checkpoint adds local orchestration, not additional hosted capacity. The
-current CV-inclusive search limit is12,000 authorized ready passages. Continuous
-Telegram synchronization, login-at-startup integration and live-account acceptance
-remain separate work. The broad Telegram feature flag stays off until live
-acceptance; pairing and local dependency checks alone do not satisfy it.
+current CV-inclusive search limit is12,000 authorized ready passages. The connector
+implements new-message synchronization, native account/channel edit and deletion
+gap recovery, and eventual retained-ID repair. Its bounded lanes share provider
+requests with history and CV retrieval; sleeping Macs and Telegram waits delay
+freshness. Missing responses do not prove deletion, and purged source is not
+recreated. See the [connector's import and freshness limits](../telegram-connector/README.md#private-history-imports).
+Login-at-startup integration and permitted real-account/model acceptance remain
+separate work. Enabling the hosted flag for controlled acceptance does not mean
+broader rollout or live acceptance is complete; pairing and local dependency
+checks alone do not satisfy it.

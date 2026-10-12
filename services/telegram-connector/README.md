@@ -3,8 +3,18 @@
 This separately installed process connects Agora's private Telegram connection
 screen to Teleproto. It supports QR login, Telegram's optional two-step password,
 restart recovery, connection status, acknowledged logout, private chat discovery
-and resumable full available history for selected chats. This stage imports text
-and attachment metadata; it does not download CV/media bytes or extract drafts. The hosted application never imports this package.
+and resumable full available history for selected chats. History import stores
+text and attachment metadata; CV bytes require the separate recruiter-selected
+retrieval workflow below. This connector does not extract drafts. The hosted
+application never imports this package.
+
+This standalone connector is sufficient for selected-chat import, new-message
+sync and retained-source freshness. Original conversation keyword/phrase search
+runs in the hosted app at `/staff/telegram-intake/context`; it needs no AI model,
+embedding service, Python or Docker. The full [Mac worker launcher](../mac-worker/README.md)
+is optional for candidate extraction, CV analysis and semantic profile/CV search.
+Import/search setup needs Node 22, this directory's pinned Teleproto dependency,
+a paired worker credential and your Telegram application API credentials.
 
 The Mac sends outbound HTTPS requests to Agora and outbound connections to
 Telegram. It opens no listener or tunnel and needs no database/storage password.
@@ -14,10 +24,16 @@ state before using any saved session.
 
 ## Setup
 
-1. Deploy the connection migration/API/UI and set `TELEGRAM_INTAKE_ENABLED=1` in
-   the hosted application only after its synthetic checks pass.
-2. Obtain a recruiter-scoped worker ID and token through the existing private
-   worker registration API. A token is shown once; never put it in a URL, shell
+1. Confirm the hosted application and ordered migrations are compatible with
+   this connector. After deployment checks pass, the operator enables hosted
+   `TELEGRAM_INTAKE_ENABLED=1` for controlled staff-account acceptance with
+   permitted test conversations. The flag is required even for Mac pairing and
+   applies globally to the deployed staff app; it is not an account allowlist.
+   Keep automatic per-chat extraction off for import/search acceptance, and
+   disable the hosted flag if acceptance fails. Broader rollout requires passing
+   live acceptance; synthetic checks alone do not establish it.
+2. [Pair this Mac](../worker-pairing/README.md) to obtain a recruiter-scoped
+   credential file, or use an existing private worker registration. Never put a token in a URL, shell
    argument, shared document or commit.
 3. Supply your own Telegram application `apiId` and `apiHash` on this Mac. They
    are never sent to Agora. The CLI does not obtain these credentials for you.
@@ -25,6 +41,8 @@ state before using any saved session.
    `0600`, in a private directory. Its JSON keys are `server` (HTTPS origin),
    `workerId`, `token`, `apiId` (positive integer), `apiHash`, and optionally
    `stateDirectory` (absolute private directory on this Mac).
+   With a paired credential, use `credentialFile` instead of inline
+   `server`/`workerId`/`token`; see the paired configuration below.
 5. With Node 22 selected, run from this directory:
 
    ```sh
@@ -125,8 +143,20 @@ the next pass. The hosted checkpoint advances only after the entire pass succeed
 Downtime is recovered from that checkpoint, and reconnecting the same account
 rebinds automatic work while preserving explicit pauses. Deselecting or pausing
 a chat stops both import and sync. Resume continues from the saved position.
-Edits and deletions of previously imported messages are not tracked; inaccessible
-Telegram content cannot be recovered. Busy queues and flood waits delay polling.
+Edits and explicit deletions of retained messages are recovered through durable
+account update state (`getDifference`) and separate selected-channel update state
+(`getChannelDifference`). Initial baselines and provider gaps request bounded
+retained-ID repair. Update state commits together with retained source changes;
+encrypted acknowledgements survive restart and lost responses. Native recovery
+and repair share the provider request budget with history and CV work.
+
+Repair rotates selected chats and rereads four retained IDs per provider operation.
+It is eventual, not a prompt full-history sweep: a 200,000-message import can need
+at least roughly 84 hours, with sleeping Macs and Telegram waits extending delay.
+Explicit provider deletion or `MessageEmpty` marks source unavailable; omitted
+responses and access/network failures never prove deletion. Purged source is not
+recreated, and inaccessible Telegram content cannot be recovered. Busy queues and
+flood waits delay polling. See [source freshness and acceptance](../../docs/telegram-context-release.md#freshness).
 
 The server schedules selected chats fairly, enforces private storage quotas, and
 shows explicit pauses for quota, peer access and large-message problems. Flood
@@ -200,14 +230,23 @@ identities must match. Pairing does not start this connector or authenticate
 Telegram. See `../worker-pairing/README.md` for the hidden invitation prompt and
 restart-safe enrollment workflow.
 
-## Continuous sync rollout
+## Connector upgrade and live acceptance
 
-Update this Mac connector before deploying the continuous-sync migration. Older
-connectors do not understand the new bounded sync cursor. Apply
-`20261002230000_telegram_continuous_sync.sql` with the normal migration operator,
-then deploy the hosted application. Already imported selected chats start syncing
+Use this compatible Mac connector after the hosted application and ordered
+migrations have been deployed. Older connectors do not understand all current
+bounded sync/source-freshness work. Follow the
+[ordered release procedure](../../docs/telegram-context-release.md#deployment-and-validation);
+do not rerun already applied migrations. Restart a worker that entered legacy
+mode before its host was upgraded.
+Already imported selected chats start syncing
 on the next worker claim. No new credentials are required. Automatic extraction
 remains a per-chat choice; enable it to send new text and attachment suggestions
 through the existing private draft review pipeline. CV retrieval still requires
 the recruiter to select an attachment. Verify a new message and CV suggestion,
 then stop/restart the Mac and verify missed messages reach review once.
+For import and lexical conversation-search acceptance, use a permitted test chat,
+complete QR/2FA, import selected history, search retained original messages, and
+verify restart/resume, new messages, edits, explicit deletions and offline gap
+recovery. These live checks remain operator acceptance work; dependency checks
+and synthetic tests do not establish their completion. Keep automatic extraction
+off unless its processing and model acceptance are separately authorized.
