@@ -250,3 +250,24 @@ verify restart/resume, new messages, edits, explicit deletions and offline gap
 recovery. These live checks remain operator acceptance work; dependency checks
 and synthetic tests do not establish their completion. Keep automatic extraction
 off unless its processing and model acceptance are separately authorized.
+
+
+## Session recovery and durable checkpoints
+
+Temporary Telegram network failures and SDK operation timeouts close the current
+client and retry the encrypted session after 2, 4, 8, 16, then at most 30 seconds.
+The connector continues renewing its host claim during the wait. The connection
+remains authorized while synchronization catches up; the last successful sync
+still determines source freshness. Expired login challenges, revoked sessions,
+and terminal authentication failures retain the existing failure/logout fences.
+A late SDK connect result from an earlier attempt is closed and cannot overwrite
+a newer checkpoint.
+
+Identity keys, sessions, pending page/update acknowledgements and CV chunks share
+the same durable replacement protocol: create a private temporary file, write
+and fsync it, rename it over the prior record, then fsync the containing directory.
+New cache directories also flush their parent entry. Failures before rename keep
+the old record and remove the temporary file. A directory-flush failure after
+rename reports an error: the replacement may already be visible, so no caller
+may treat that write as acknowledged durable. A process killed before publication
+may leave a private temporary file; it is never used as the authoritative record.
