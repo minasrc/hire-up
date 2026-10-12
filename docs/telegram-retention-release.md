@@ -35,6 +35,16 @@ base64url token (43 characters). Store credentials through private deployment
 secret management; never put them in the repository, a public environment
 variable, a URL or a command argument.
 
+If the database uses a private certificate authority, set server-only
+`TELEGRAM_MAINTENANCE_DATABASE_CA_CERT` to its provider-issued PEM CA certificate
+(with actual newlines). Obtain it through the provider's authenticated settings
+or official certificate distribution (such as a pinned provider CLI release),
+and confirm its provenance before deployment. This explicitly enables TLS with
+certificate-chain and hostname verification; connection URL SSL parameters are
+ignored when this CA is set. Without this optional setting, the connection URL's
+existing TLS configuration applies. Use `sslmode=verify-full` for hosted
+connections; never disable verification to work around a trust-chain failure.
+
 Set these repository Actions secrets:
 
 - `TELEGRAM_MAINTENANCE_URL`: the production HTTPS URL ending exactly in

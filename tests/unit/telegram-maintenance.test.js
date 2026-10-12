@@ -1,11 +1,45 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { handleTelegramMaintenance, runTelegramMaintenance } from '../../src/lib/telegram-maintenance.js';
+import pg from 'pg';
+import { handleTelegramMaintenance, runTelegramMaintenance, telegramMaintenancePoolOptions } from '../../src/lib/telegram-maintenance.js';
 import { drainMaintenance, requestMaintenance, runMaintenanceCommand } from '../../scripts/run-telegram-maintenance.mjs';
 
 const secret = 'a'.repeat(43);
 const counts = { ownersProcessed: 1, batchesPurged: 2, messagesPurged: 40, bytesFreed: 5120, queriesExpired: 3, queryResultRowsDeleted: 100, analysesPurged: 0, remainingWork: false };
 const request = (headers = {}, path = '', method = 'GET') => new Request(`https://synthetic.invalid/api/telegram-maintenance${path}`, { method, headers });
+
+test('maintenance preserves existing database connection options without a custom CA', () => {
+    const connectionString = 'postgresql://maintenance:synthetic@db.example.test/app?sslmode=verify-full';
+    for (const ca of [undefined, '']) {
+        assert.deepEqual(telegramMaintenancePoolOptions(connectionString, ca), {
+            connectionString, max: 1, connectionTimeoutMillis: 5000, idleTimeoutMillis: 10000,
+        });
+    }
+});
+
+test('maintenance custom CA survives pg URL parsing and enforces certificate and hostname verification', () => {
+    const ca = '-----BEGIN CERTIFICATE-----\nsynthetic-test-ca\n-----END CERTIFICATE-----\n';
+    for (const sslParameters of [
+        'sslmode=verify-full', 'sslmode=no-verify', 'sslmode=disable&ssl=0',
+        'sslmode=require&uselibpqcompat=true',
+        'sslrootcert=/nonexistent/ca&sslcert=/nonexistent/cert&sslkey=/nonexistent/key',
+        'sslmode=disable&sslmode=no-verify&sslnegotiation=direct',
+    ]) {
+        const options = telegramMaintenancePoolOptions(`postgresql://maintenance:p%40ss@db.example.test:6543/app?${sslParameters}&application_name=maintenance`, ca);
+        // Exercise the driver's real parsing precedence; it must not read URL
+        // certificate paths or replace the explicit TLS configuration.
+        const parsed = new pg.Client(options).connectionParameters;
+        assert.deepEqual(parsed.ssl, { ca, rejectUnauthorized: true });
+        assert.equal(parsed.ssl.checkServerIdentity, undefined);
+        assert.equal(parsed.host, 'db.example.test');
+        assert.equal(parsed.port, 6543);
+        assert.equal(parsed.user, 'maintenance');
+        assert.equal(parsed.password, 'p@ss');
+        assert.equal(parsed.database, 'app');
+        assert.equal(parsed.application_name, 'maintenance');
+    }
+    assert.throws(() => telegramMaintenancePoolOptions('http://db.example.test/app', ca), /Invalid maintenance database URL/);
+});
 
 test('maintenance authenticates before opening a database pool and rejects browser and parameterized requests', async () => {
     let opened = 0;
