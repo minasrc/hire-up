@@ -123,6 +123,7 @@ export function createSupervisor({ control, store, api, connectorEntrypoint,
           if (registered?.workerId !== record.workerId || registered.state !== 'registered') throw new Error('REGISTRATION_CONFLICT');
           const child = await spawn(connectorEntrypoint, record, grantMessage());
           if (!valid() || token !== proof) { await terminate(child); return; }
+          if (childStopped(child)) throw new Error('CONNECTOR_START_FAILED');
           children.set(item.requestId, { child, record });
           output('CONNECTOR_STARTED');
           child.once('exit', () => {

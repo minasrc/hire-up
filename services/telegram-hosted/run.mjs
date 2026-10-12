@@ -1,6 +1,8 @@
 #!/usr/bin/env node
 import { isAbsolute, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { existsSync } from 'node:fs';
+import { join } from 'node:path';
 import { setTimeout as delay } from 'node:timers/promises';
 import { readPrivateJson, createServiceStore } from './store.mjs';
 import { createControlClient } from './http.mjs';
@@ -26,6 +28,7 @@ try {
   if (process.argv.includes('--unlock-stopped')) {
     unlockStoppedProcess(store.root); output('STOPPED_SERVICE_LOCK_REMOVED');
   } else {
+    if (existsSync(join(store.root, 'connector.lock'))) unlockStoppedProcess(store.root);
     release = acquireLock(store.root);
     supervisor = createSupervisor({ control, store, api,
       connectorEntrypoint: resolve(fileURLToPath(new URL('../telegram-connector/run.mjs', import.meta.url))), output });

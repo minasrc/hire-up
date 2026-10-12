@@ -7,7 +7,8 @@ import { join } from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { createServiceStore, readPrivateJson } from '../../services/telegram-hosted/store.mjs';
 import { createControlClient } from '../../services/telegram-hosted/http.mjs';
-import { createSupervisor } from '../../services/telegram-hosted/supervisor.mjs';
+import { createSupervisor, launchConnector, terminateChild } from '../../services/telegram-hosted/supervisor.mjs';
+import { once } from 'node:events';
 import { createSupervisionGuard } from '../../services/telegram-connector/supervision.mjs';
 
 const api = { apiId: 12345, apiHash: 'a'.repeat(32) };
@@ -95,7 +96,8 @@ function supervisorFixture() {
   };
   const supervisor = createSupervisor({ control, store: { prepare: () => prepared }, api,
     wall: () => now, monotonic: () => mono, spawn: async (_entry, _record, grant) => {
-      const child = new EventEmitter(); child.connected = true; child.send = () => {}; child.grant = grant;
+      const child = new EventEmitter(); child.exitCode = null; child.signalCode = null;
+      child.connected = true; child.send = () => {}; child.grant = grant;
       children.push(child); return child;
     }, terminate: async child => { child.terminated = true; child.emit('exit'); } });
   return { supervisor, children, calls, requests, prepared,
@@ -122,4 +124,28 @@ test('late successful renewal cannot resurrect old children or expired ownership
   const refreshing = f.supervisor.refresh(); f.advance(80000); f.supervisor.watch();
   resolve(); await refreshing; await f.supervisor.stop();
   assert.equal(f.supervisor.stopped, true); assert.equal(f.children[0].terminated, true);
+});
+test('real hosted child receives IPC, stops on lost parent and can be forcibly terminated', { timeout: 15000 }, async t => {
+  const { root } = fixture(t);
+  const entrypoint = join(root, 'synthetic-child.mjs');
+  const guardModule = new URL('../../services/telegram-connector/supervision.mjs', import.meta.url).href;
+  writeFileSync(entrypoint, `import {createSupervisionGuard} from ${JSON.stringify(guardModule)};
+    const guard=createSupervisionGuard({onLost:()=>process.exit(0)});
+    await guard.ready();
+    process.on('SIGTERM',()=>{});
+    process.send({ready:true});\n`, { mode: 0o600 });
+  const grant = { type: 'telegram-hosted-lease', leaseToken: randomUUID(), deadline: Date.now() + 74000 };
+  const record = { configPath: join(root, 'unused.json'), stateDirectory: root };
+  const first = await launchConnector(entrypoint, record, grant);
+  t.after(() => { if (first.exitCode === null && first.signalCode === null) first.kill('SIGKILL'); });
+  assert.equal((await once(first, 'message'))[0].ready, true);
+  const exited = once(first, 'exit'); first.disconnect(); await exited;
+  assert.equal(first.exitCode, 0);
+  const second = await launchConnector(entrypoint, record, { ...grant, deadline: Date.now() + 74000 });
+  t.after(() => { if (second.exitCode === null && second.signalCode === null) second.kill('SIGKILL'); });
+  assert.equal((await once(second, 'message'))[0].ready, true);
+  await terminateChild(second); assert.equal(second.signalCode, 'SIGKILL');
+  const immediate = join(root, 'immediate-exit.mjs'); writeFileSync(immediate, 'process.exit(1);', { mode: 0o600 });
+  const early = await launchConnector(immediate, record, { ...grant, deadline: Date.now() + 74000 }).catch(() => null);
+  if (early) { if (early.exitCode === null) await once(early, 'exit'); assert.equal(early.exitCode, 1); }
 });
