@@ -8,5 +8,5 @@ export const metadata = { title: 'Connect Telegram · Agora staff', robots: { in
 export default async function TelegramConnectionPage() {
     const gate = await requireStaffVerified();
     if (process.env.TELEGRAM_INTAKE_ENABLED !== '1') notFound();
-    return <TelegramConnectionBrowser workspaceId={gate.organizationId} />;
+    return <TelegramConnectionBrowser workspaceId={gate.organizationId} hostedEnabled={process.env.TELEGRAM_HOSTED_ENABLED === '1'} />;
 }

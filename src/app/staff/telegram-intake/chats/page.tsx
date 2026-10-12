@@ -8,5 +8,5 @@ export const metadata = { title: 'Telegram chats · Agora staff', robots: { inde
 export default async function TelegramHistoryPage() {
     await requireStaffVerified();
     if (process.env.TELEGRAM_INTAKE_ENABLED !== '1') notFound();
-    return <TelegramHistoryBrowser />;
+    return <TelegramHistoryBrowser hostedEnabled={process.env.TELEGRAM_HOSTED_ENABLED === '1'} />;
 }

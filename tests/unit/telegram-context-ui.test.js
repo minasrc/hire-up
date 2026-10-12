@@ -49,24 +49,24 @@ test('source freshness describes partial checks, offline and blocked states with
     assert.match(sourceStatusLabel({ status: 'reconnect_required' }), /Reconnect/);
     assert.match(sourceStatusLabel({ status: 'off' }), /not selected/);
     assert.match(sourceStatusLabel({ status: 'paused' }), /Paused or cancelled/);
-    assert.match(sourceStatusLabel({ status: 'checking' }), /partial sweep/);
+    assert.match(sourceStatusLabel({ status: 'checking' }), /out of date until checks finish/);
     const delayed = sourceStatusLabel({ status: 'waiting', errorCode: 'SECRET_DB_CODE' });
     assert.match(delayed, /delayed/);
     assert.equal(delayed.includes('SECRET_DB_CODE'), false);
     assert.match(sourceStatusLabel({ status: 'scheduled' }), /Selected/);
 });
 
-test('native checkpoint labels do not claim retained history or extraction is current', () => {
+test('update status explains saved messages may still need checking', () => {
     const source = { mode: 'native_updates_with_reconciliation', status: 'scheduled', nativeStatus: 'live' };
-    assert.match(nativeFeedLabel(source), /checkpoint recorded/);
-    assert.match(nativeFeedLabel(source), /does not confirm/);
+    assert.match(nativeFeedLabel(source), /updates checked/);
+    assert.match(nativeFeedLabel(source), /may still need checking/);
     for (const status of ['off', 'paused', 'worker_offline', 'reconnect_required']) assert.equal(nativeFeedLabel({ ...source, status }), null);
     assert.equal(nativeFeedLabel({ ...source, mode: 'retained_message_reconciliation' }), null);
 });
 test('initial, selection and provider repair gaps remain pending until a whole repair completes', () => {
     const source = { mode: 'native_updates_with_reconciliation', status: 'scheduled', nativeStatus: 'live', repairRequestedAt: '2026-10-11T10:00:00Z', repairCompletedAt: '2026-10-11T09:00:00Z', gapReason: 'PROVIDER_GAP' };
     assert.equal(nativeRepairPending(source), true);
-    assert.match(nativeFeedLabel(source), /repair is pending/);
+    assert.match(nativeFeedLabel(source), /catching up/);
     assert.equal(nativeRepairPending({ ...source, status: 'paused' }), true);
     assert.equal(nativeRepairPending({ ...source, repairCompletedAt: '2026-10-11T11:00:00Z' }), false);
     assert.equal(nativeRepairPending({ ...source, repairRequestedAt: null, repairCompletedAt: null, gapReason: 'SELECTION_GAP' }), false);
@@ -113,4 +113,14 @@ test('capacity delays explain the action needed while paused state stays authori
     assert.match(sourceSummary(source), /Storage limit reached/);
     assert.match(sourceSummary(source), /Review and release saved context/);
     assert.match(sourceSummary({ ...source, status: 'off' }), /not selected/);
+});
+
+
+test('search freshness guidance works without local device setup instructions', () => {
+    for (const status of ['worker_offline', 'waiting', 'checking', 'reconnect_required']) {
+        const source = { status, mode: 'native_updates_with_reconciliation', nativeStatus: 'waiting' };
+        for (const text of [sourceSummary(source), sourceStatusLabel(source), nativeFeedLabel(source)]) {
+            assert.equal(/Mac|Keep the connector running|checkpoint|update feed/i.test(text || ''), false);
+        }
+    }
 });

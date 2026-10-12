@@ -42,7 +42,7 @@ export async function encryptTelegramPassword(password, publicKeySpki, connectio
         const result = await cryptoApi.subtle.encrypt({ name: 'RSA-OAEP', label }, key, bytes);
         return btoa(String.fromCharCode(...new Uint8Array(result)));
     } catch {
-        throw new Error('Secure password delivery is unavailable. Refresh the status and check the Mac connector.');
+        throw new Error('Secure password delivery is unavailable. Refresh the connection status and try again.');
     } finally {
         bytes.fill(0);
     }

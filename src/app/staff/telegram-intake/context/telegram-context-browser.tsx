@@ -74,7 +74,7 @@ export function TelegramContextBrowser() {
         } catch (failure) {
             if (controller.signal.aborted && !(failure instanceof ContextError)) return null;
             if (failure instanceof ContextError) throw failure;
-            throw new Error('Unable to reach conversation search. Check your network connection and retry. Stored messages remain searchable when the Telegram connector is offline.');
+            throw new Error('Unable to reach conversation search. Check your network connection and retry. Saved messages remain searchable when Telegram sync is offline.');
         }
     }, [clearPrivate]);
     const loadSourceStatus = useCallback(async (chatIds: string[], key: 'source' | 'sourceDialog' = 'source') => {
@@ -108,13 +108,13 @@ export function TelegramContextBrowser() {
                     <p>{sourceStatusLabel(source)}</p>
                     {nativeFeedLabel(source) ? <p>{nativeFeedLabel(source)}</p> : null}
                     {source.mode === 'native_updates_with_reconciliation' ? <>
-                        <p>Last Telegram updates read: {source.lastNativeAt ? <StaffDate value={source.lastNativeAt} kind="timestamp" /> : 'Not recorded'}. This does not confirm candidate extraction has finished or all history is current.</p>
-                        <p>History repair requested: {source.repairRequestedAt ? <StaffDate value={source.repairRequestedAt} kind="timestamp" /> : 'Not recorded'}.</p>
-                        <p>Last full history repair completed: {source.repairCompletedAt ? <StaffDate value={source.repairCompletedAt} kind="timestamp" /> : 'Not recorded'}.</p>
+                        <p>Last update check: {source.lastNativeAt ? <StaffDate value={source.lastNativeAt} kind="timestamp" /> : 'Not recorded'}. Some saved messages may still be out of date.</p>
+                        <p>Catch-up requested: {source.repairRequestedAt ? <StaffDate value={source.repairRequestedAt} kind="timestamp" /> : 'Not recorded'}.</p>
+                        <p>Last catch-up completed: {source.repairCompletedAt ? <StaffDate value={source.repairCompletedAt} kind="timestamp" /> : 'Not recorded'}.</p>
                         {nativeRepairPending(source) ? <p>Paused or offline chats cannot finish repair until checks resume.</p> : null}
                     </> : null}
-                    <p>Last saved-message batch checked: {source.lastCheckedAt ? <StaffDate value={source.lastCheckedAt} kind="timestamp" /> : 'Not checked yet'}.</p>
-                    <p>Last full saved-message check: {source.lastCycleAt ? <StaffDate value={source.lastCycleAt} kind="timestamp" /> : 'No completed check recorded'}.</p>
+                    <p>Last message check: {source.lastCheckedAt ? <StaffDate value={source.lastCheckedAt} kind="timestamp" /> : 'Not checked yet'}.</p>
+                    <p>Last completed check: {source.lastCycleAt ? <StaffDate value={source.lastCycleAt} kind="timestamp" /> : 'No completed check recorded'}.</p>
                 </div>
             </details>
         </div>;
