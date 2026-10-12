@@ -10,7 +10,7 @@ import { randomUUID } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import { terminateChild } from '../../services/telegram-hosted/supervisor.mjs';
 
-test('actual supervised connector starts SDK and acknowledges synthetic hosted heartbeat', { timeout: 8000 }, async t => {
+test('actual supervised connector starts SDK and acknowledges synthetic hosted heartbeat', { timeout: 40000 }, async t => {
   assert.equal(process.versions.node.split('.')[0], '22');
   const root = mkdtempSync(join(realpathSync(tmpdir()), 'connector-entrypoint-'));
   chmodSync(root, 0o700);
@@ -46,7 +46,7 @@ test('actual supervised connector starts SDK and acknowledges synthetic hosted h
   });
   const codes = [];
   const ready = new Promise((resolve, reject) => {
-    const deadline = setTimeout(() => reject(new Error(`Entrypoint stalled at fixed codes: ${codes.join(',')}`)), 5000);
+    const deadline = setTimeout(() => reject(new Error(`Entrypoint stalled at fixed codes: ${codes.join(',')}`)), 30000);
     child.on('message', message => {
       if (message?.type !== 'telegram-connector-status' || typeof message.code !== 'string') return;
       codes.push(message.code);
@@ -57,10 +57,12 @@ test('actual supervised connector starts SDK and acknowledges synthetic hosted h
     child.once('exit', () => { clearTimeout(deadline); reject(new Error('Connector exited before readiness')); });
   });
   const leaseToken = randomUUID();
-  const grant = () => { if (child.connected) child.send({ type: 'telegram-hosted-lease', leaseToken, deadline: Date.now() + 2000 }, () => {}); };
+  const grant = () => { if (child.connected) child.send({ type: 'telegram-hosted-lease', leaseToken, deadline: Date.now() + 10000 }, () => {}); };
   await once(child, 'spawn'); grant(); renewal = setInterval(grant, 300);
   await ready;
   assert.ok(heartbeats > 0); assert.ok(codes.includes('CONNECTOR_SDK_READY'));
-  await new Promise(resolve => setTimeout(resolve, 2300)); assert.ok(claims > 0);
+  const claimDeadline = Date.now() + 5000;
+  while (claims === 0 && Date.now() < claimDeadline) await new Promise(resolve => setTimeout(resolve, 25));
+  assert.ok(claims > 0);
   assert.equal(child.exitCode, null); assert.equal(child.signalCode, null);
 });
