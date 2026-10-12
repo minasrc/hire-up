@@ -34,12 +34,12 @@ export function conversationDeepLink(chatId: string | null, anchor: string | nul
 }
 export type SourceUpdateStatus = { chatId: string; mode: string; needsReextraction: boolean; sourceChangeReason: string | null; cursor: string | null; lastCheckedAt: string | null; lastCycleAt: string | null; nextCheckAt: string | null; errorCode: string | null; status: string; nativeStatus?: 'baseline_pending' | 'waiting' | 'repair_required' | 'live'; lastNativeAt?: string | null; repairRequestedAt?: string | null; repairCompletedAt?: string | null; gapReason?: string | null; nativeErrorCode?: string | null };
 export function sourceStatusLabel(source: SourceUpdateStatus) {
-    if (source.status === 'worker_offline') return 'Connector offline; retained messages remain searchable.';
+    if (source.status === 'worker_offline') return 'Telegram sync is offline; saved messages remain searchable.';
     if (source.status === 'reconnect_required') return 'Reconnect Telegram to check retained messages.';
     if (source.status === 'off') return 'Chat not selected; retained-message checks are off.';
     if (source.status === 'paused') return 'Paused or cancelled; retained-message checks are stopped.';
-    if (source.status === 'checking') return 'Checking a batch of retained messages; this is a partial sweep.';
-    if (source.errorCode || source.status === 'waiting') return 'Retained-message checks are delayed. Keep the connector running; reconnect if Telegram requests sign-in.';
+    if (source.status === 'checking') return 'Checking saved messages. Some may be out of date until checks finish.';
+    if (source.errorCode || source.status === 'waiting') return 'Message checks are delayed by Telegram waits or a busy queue. Reconnect if Telegram asks you to sign in.';
     return 'Selected; retained-message check scheduled.';
 }
 
@@ -49,19 +49,19 @@ export function nativeRepairPending(source: SourceUpdateStatus) {
 }
 export function nativeFeedLabel(source: SourceUpdateStatus) {
     if (source.mode !== 'native_updates_with_reconciliation' || ['off', 'paused', 'worker_offline', 'reconnect_required'].includes(source.status)) return null;
-    if (nativeRepairPending(source)) return 'Telegram update feed has a gap. Retained-source repair is pending; imported history is not confirmed current.';
-    if (source.nativeStatus === 'waiting' || source.nativeErrorCode) return 'Telegram update polling is delayed. Keep the connector running; reconnect if Telegram requests sign-in.';
-    if (source.nativeStatus === 'live') return 'Telegram update feed checkpoint recorded. This does not confirm all retained history is current.';
-    return 'Telegram update feed status is unavailable.';
+    if (nativeRepairPending(source)) return 'Updates are catching up. Some saved messages may be out of date.';
+    if (source.nativeStatus === 'waiting' || source.nativeErrorCode) return 'Updates are delayed by Telegram waits or a busy queue. Reconnect if Telegram asks you to sign in.';
+    if (source.nativeStatus === 'live') return 'Telegram updates checked. Some saved messages may still need checking.';
+    return 'Telegram update status is unavailable.';
 }
 
 export function sourceSummary(source: SourceUpdateStatus) {
-    if (source.status === 'worker_offline') return 'Connector offline. Saved messages remain searchable.';
+    if (source.status === 'worker_offline') return 'Telegram sync is offline. Saved messages remain searchable.';
     if (source.status === 'reconnect_required') return 'Reconnect Telegram to resume updates.';
     if (source.status === 'off') return 'Updates paused: chat not selected.';
     if (source.status === 'paused') return 'Updates paused or cancelled.';
     if (source.errorCode === 'CAPACITY_LIMIT' || source.nativeErrorCode === 'CAPACITY_LIMIT') return 'Storage limit reached. Review and release saved context to resume updates.';
-    if (source.status === 'waiting' || source.errorCode || source.nativeStatus === 'waiting' || source.nativeErrorCode) return 'Telegram checks are delayed. Keep the connector running.';
+    if (source.status === 'waiting' || source.errorCode || source.nativeStatus === 'waiting' || source.nativeErrorCode) return 'Telegram checks are delayed. Reconnect if Telegram asks you to sign in.';
     if (source.status === 'checking') return 'Checking saved messages.';
     if (nativeRepairPending(source)) return 'Updates are catching up.';
     if (source.mode === 'native_updates_with_reconciliation' && source.nativeStatus === 'live') return 'Telegram updates checked.';

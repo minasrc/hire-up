@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { historyPollingDelay, importActions, importGuidance, importStatus, selectionPayload } from '../../src/app/staff/telegram-intake/chats/history-model.js';
+import { historyPollingDelay, importActions, importGuidance, importStatus, selectionPayload, syncStatus } from '../../src/app/staff/telegram-intake/chats/history-model.js';
 
 test('bulk selection only submits visible rows and their current versions', () => {
     const rows = [{ id: 'one', version: 2, title: 'Private title', peer: { id: '123' } }, { id: 'two', version: 5 }];
@@ -40,4 +40,14 @@ test('only ongoing discovery or imports require frequent visible polling', () =>
 
 test('completed selected histories offer an explicit sync pause', () => {
     assert.deepEqual(importActions({ selected: true, import: { status: 'completed' }, sync: { enabled: true } }).map(a => a.label), ['Pause sync', 'Deselect chat']);
+});
+
+
+test('hosted sync guidance retains offline recovery without local device setup', () => {
+    const status = syncStatus({ status: 'worker_offline' }, true);
+    assert.match(status, /service offline/);
+    assert.match(status, /resumes/);
+    assert.equal(status.includes('Mac'), false);
+    assert.match(syncStatus({ status: 'worker_offline' }), /Mac offline/);
+    assert.equal(importGuidance({ errorCode: 'PEER_CACHE_MISSING' }).includes('Mac'), false);
 });

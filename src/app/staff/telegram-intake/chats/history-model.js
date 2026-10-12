@@ -15,7 +15,7 @@ export function importGuidance(job) {
         FLOOD_WAIT: 'Telegram requested a wait. Imports will continue automatically after the wait ends.',
         TELEGRAM_UNAVAILABLE: 'Telegram is temporarily unavailable. Retrying automatically unless this import needs attention.',
         PEER_UNAVAILABLE: 'This chat is unavailable to your Telegram account. Check access in Telegram before resuming.',
-        PEER_CACHE_MISSING: 'The Mac needs to discover this chat again. Refresh the chat list, then resume.',
+        PEER_CACHE_MISSING: 'This chat needs to be discovered again. Refresh the chat list, then resume.',
         MESSAGE_TOO_LARGE: 'A message exceeds the import limit. Import is paused before that message; ask your administrator for help.',
     })[job.errorCode] || (job.errorCode ? 'Import needs attention. Refresh the status before trying again.' : '');
 }
@@ -48,7 +48,7 @@ export function byteLabel(bytes) {
     return `${Math.ceil(bytes / 1024)} KB`;
 }
 
-export function syncStatus(sync) {
+export function syncStatus(sync, hostedEnabled = false) {
     if (!sync) return '';
-    return ({ off: 'Sync off', waiting_for_history: 'Sync starts after history import', reconnect_required: 'Reconnect Telegram to sync', worker_offline: 'Mac offline · Sync resumes when it returns', up_to_date: 'Sync up to date', queued: 'Sync queued', syncing: 'Syncing new messages', waiting: 'Sync waiting', paused: 'Sync paused', failed: 'Sync needs attention', capacity_paused: 'Sync capacity reached' })[sync.status] || 'Sync needs attention';
+    return ({ off: 'Sync off', waiting_for_history: 'Sync starts after history import', reconnect_required: 'Reconnect Telegram to sync', worker_offline: hostedEnabled ? 'Telegram service offline · Sync resumes when it returns' : 'Mac offline · Sync resumes when it returns', up_to_date: 'Sync up to date', queued: 'Sync queued', syncing: 'Syncing new messages', waiting: 'Sync waiting', paused: 'Sync paused', failed: 'Sync needs attention', capacity_paused: 'Sync capacity reached' })[sync.status] || 'Sync needs attention';
 }
