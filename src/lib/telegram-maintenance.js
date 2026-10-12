@@ -1,21 +1,11 @@
+import { databaseTlsConnectionOptions } from './database-tls.server.js';
 import { createHash, timingSafeEqual } from 'node:crypto';
 
 const json = (body, status = 200) => Response.json(body, { status, headers: { 'cache-control': 'private, no-store' } });
 const validSecret = value => typeof value === 'string' && /^[A-Za-z0-9_-]{43,128}$/.test(value);
 
 export function telegramMaintenancePoolOptions(connectionString, caCertificate) {
-    const options = { connectionString, max: 1, connectionTimeoutMillis: 5000, idleTimeoutMillis: 10000 };
-    if (caCertificate === undefined || caCertificate === '') return options;
-    // pg parses URL SSL settings after explicit options. Remove them so they
-    // cannot replace the trusted CA or disable certificate/hostname checks.
-    const url = new URL(connectionString);
-    if (!['postgres:', 'postgresql:'].includes(url.protocol) || !url.hostname) {
-        throw new Error('Invalid maintenance database URL.');
-    }
-    for (const key of [...url.searchParams.keys()]) {
-        if (key.toLowerCase().startsWith('ssl') || key.toLowerCase() === 'uselibpqcompat') url.searchParams.delete(key);
-    }
-    return { ...options, connectionString: url.toString(), ssl: { ca: caCertificate, rejectUnauthorized: true } };
+    return { ...databaseTlsConnectionOptions(connectionString, caCertificate), max: 1, connectionTimeoutMillis: 5000, idleTimeoutMillis: 10000 };
 }
 
 export async function runTelegramMaintenance(pool) {

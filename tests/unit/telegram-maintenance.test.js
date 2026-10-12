@@ -38,7 +38,7 @@ test('maintenance custom CA survives pg URL parsing and enforces certificate and
         assert.equal(parsed.database, 'app');
         assert.equal(parsed.application_name, 'maintenance');
     }
-    assert.throws(() => telegramMaintenancePoolOptions('http://db.example.test/app', ca), /Invalid maintenance database URL/);
+    assert.throws(() => telegramMaintenancePoolOptions('http://db.example.test/app', ca), /Invalid database URL/);
 });
 
 test('maintenance authenticates before opening a database pool and rejects browser and parameterized requests', async () => {

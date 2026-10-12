@@ -1,3 +1,4 @@
+import { databaseTlsConnectionOptions } from '@/lib/database-tls.server';
 import pg from 'pg';
 import { cvAnalysisWorkerOperation, readCvAnalysisContent } from '@/lib/cv-analysis-operations';
 import { CV_ANALYSIS_PARSE_BODY_LIMIT } from '@/lib/cv-analysis-contracts';
@@ -14,7 +15,7 @@ export async function POST(request: Request, { params }: { params: Promise<{ act
     if (!/^Bearer [A-Za-z0-9_-]{64}$/.test(authorization)) return telegramJson({ error: 'unauthorized' }, 401);
     const connectionString = process.env.TELEGRAM_WORKER_DATABASE_URL;
     if (!connectionString) return telegramJson({ error: 'CV analysis worker not configured.' }, 503);
-    pool ??= new pg.Pool({ connectionString, max: 2, idleTimeoutMillis: 10000 });
+    pool ??= new pg.Pool({ ...databaseTlsConnectionOptions(connectionString, process.env.TELEGRAM_WORKER_DATABASE_CA_CERT), max: 2, idleTimeoutMillis: 10000, connectionTimeoutMillis: 5000 });
     try {
         const input = await readTelegramJson(request, action === 'complete' ? CV_ANALYSIS_PARSE_BODY_LIMIT : 16384);
         if (action === 'content') {

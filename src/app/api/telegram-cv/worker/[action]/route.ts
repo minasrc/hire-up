@@ -1,3 +1,4 @@
+import { databaseTlsConnectionOptions } from '@/lib/database-tls.server';
 import pg from 'pg';
 import { telegramCvWorkerOperation, uploadTelegramCv } from '@/lib/telegram-cv-operations';
 import { decodeCvUploadProof, TELEGRAM_CV_MAX_BYTES, TELEGRAM_CV_PROOF_HEADER } from '@/lib/telegram-cv-contracts';
@@ -29,7 +30,7 @@ export async function POST(request: Request, { params }: { params: Promise<{ act
     if (!/^Bearer [A-Za-z0-9_-]{64}$/.test(authorization)) return telegramJson({ error: 'unauthorized' }, 401);
     const connectionString = process.env.TELEGRAM_WORKER_DATABASE_URL;
     if (!connectionString) return telegramJson({ error: 'CV worker not configured.' }, 503);
-    pool ??= new pg.Pool({ connectionString, max: 2, idleTimeoutMillis: 10000 });
+    pool ??= new pg.Pool({ ...databaseTlsConnectionOptions(connectionString, process.env.TELEGRAM_WORKER_DATABASE_CA_CERT), max: 2, idleTimeoutMillis: 10000, connectionTimeoutMillis: 5000 });
     try {
         if (action !== 'upload') return telegramJson(await telegramCvWorkerOperation(pool, authorization.slice(7), action, await readTelegramJson(request, 16384)));
         if (request.headers.get('content-type')?.split(';')[0].trim().toLowerCase() !== 'application/octet-stream') return telegramJson({ error: 'Binary CV body required.' }, 400);
