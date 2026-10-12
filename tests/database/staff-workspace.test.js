@@ -229,6 +229,7 @@ test('staff workspace on PostgreSQL 17', async (t) => {
         const summary = await admin(getStaffWorkspace);
         t.diagnostic(`baseline summary: ${JSON.stringify(summary)}`);
         assert.deepEqual(summary.capabilities, {
+            telegram: process.env.TELEGRAM_INTAKE_ENABLED === '1',
             candidates: true,
             applications: true,
             clients: true,
@@ -402,6 +403,7 @@ test('staff workspace on PostgreSQL 17', async (t) => {
         const summary = await viewer(getStaffWorkspace);
         t.diagnostic(`viewer summary: ${JSON.stringify(summary)}`);
         assert.deepEqual(summary.capabilities, {
+            telegram: false,
             candidates: false,
             applications: false,
             clients: false,

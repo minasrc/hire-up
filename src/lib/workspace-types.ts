@@ -2,6 +2,7 @@ export type StaffTaskCategory = 'review' | 'interviews' | 'notes';
 
 export interface StaffWorkspaceCapabilities {
     candidates: boolean;
+    telegram?: boolean; // Feature enabled and both candidate API permissions granted.
     applications: boolean;
     clients: boolean;
     jobs: boolean;
