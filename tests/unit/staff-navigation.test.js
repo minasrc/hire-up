@@ -138,3 +138,17 @@ test('the matching section stays active on detail pages', () => {
     assert.ok(jobs?.current, 'Jobs must carry aria-current on a job detail page');
     assert.ok(overview && !overview.current, 'Overview must not be marked active');
 });
+
+test('Telegram navigation requires explicit authorization and stays active across its workflows', () => {
+    const { NavLinks } = loadShell();
+    const href = '/staff/telegram-intake/chats';
+    for (const capabilities of [null, 'denied', { candidates: true }, { telegram: false }]) {
+        assert.equal(renderAnchors(NavLinks, capabilities).some(anchor => anchor.href === href), false);
+    }
+    for (const pathname of ['/staff/telegram-intake', '/staff/telegram-intake/chats',
+        '/staff/telegram-intake/connect', '/staff/telegram-intake/context', '/staff/telegram-intake/extraction']) {
+        const telegram = renderAnchors(NavLinks, { telegram: true }, pathname).find(anchor => anchor.href === href);
+        assert.ok(telegram?.current, `Telegram must be active on ${pathname}`);
+    }
+    assert.equal(renderAnchors(NavLinks, { telegram: true }, '/staff/candidates').find(anchor => anchor.href === href)?.current, false);
+});

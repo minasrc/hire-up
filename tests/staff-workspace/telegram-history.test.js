@@ -147,8 +147,26 @@ test('Telegram history UI discovers, selects and resumes private full-history im
         return result.request().postDataJSON();
     }
     try {
-        await page.goto(`${baseURL}/staff/telegram-intake`);
-        await page.getByRole('link', { name: 'Telegram chats', exact: true }).click();
+        await page.goto(`${baseURL}/staff`);
+        const telegramNav = page.locator('aside').getByRole('link', { name: 'Telegram', exact: true });
+        await expect(telegramNav).toBeVisible();
+        await telegramNav.click();
+        await expect(page).toHaveURL(`${baseURL}/staff/telegram-intake/chats`);
+        await expect(telegramNav).toHaveAttribute('aria-current', 'page');
+        await page.getByRole('link', { name: 'Telegram connection', exact: true }).click();
+        await expect(page.getByRole('heading', { name: 'Connect Telegram', exact: true })).toBeVisible();
+        await expect(telegramNav).toHaveAttribute('aria-current', 'page');
+        await telegramNav.click();
+        await page.getByRole('link', { name: 'Search conversations', exact: true }).click();
+        await expect(page.getByRole('heading', { name: 'Search conversations', exact: true })).toBeVisible();
+        await expect(telegramNav).toHaveAttribute('aria-current', 'page');
+        await page.setViewportSize({ width: 390, height: 844 });
+        await page.getByRole('button', { name: 'Open navigation', exact: true }).click();
+        const mobileNavigation = page.getByRole('dialog', { name: 'Navigation', exact: true });
+        await mobileNavigation.getByRole('link', { name: 'Telegram', exact: true }).click();
+        await expect(mobileNavigation).toBeHidden();
+        await expect(page).toHaveURL(`${baseURL}/staff/telegram-intake/chats`);
+        await page.setViewportSize({ width: 1280, height: 720 });
         await expect(page.getByRole('heading', { name: 'Telegram chats', exact: true })).toBeVisible();
         await clickAction(page.getByRole('button', { name: 'Discover chats', exact: true }));
         await expect(page.getByText(/Discovering chats in the background/)).toBeVisible();

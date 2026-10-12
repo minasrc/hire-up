@@ -16,6 +16,7 @@ import {
     ChevronRight,
     LayoutDashboard,
     Menu,
+    Send,
     UserCog,
     Users,
 } from 'lucide-react';
@@ -48,6 +49,7 @@ const NAV_ITEMS = [
         icon: Users,
         capability: 'candidates',
     },
+    { href: '/staff/telegram-intake/chats', activePrefix: '/staff/telegram-intake', label: 'Telegram', icon: Send, capability: 'telegram' },
     { href: '/staff/jobs', label: 'Jobs', icon: BriefcaseBusiness, capability: 'jobs' },
     { href: '/staff/clients', label: 'Clients', icon: Building2, capability: 'clients' },
     { href: '/staff/members', label: 'Members', icon: UserCog, capability: 'members' },
@@ -60,11 +62,11 @@ const SECTION_LABELS: Record<string, string> = {
     clients: 'Clients',
     members: 'Members',
     settings: 'Account settings',
-    'telegram-intake': 'Telegram intake',
+    'telegram-intake': 'Telegram',
 };
 
 const TELEGRAM_PAGE_LABELS: Record<string, string> = {
-    connect: 'Connect Telegram', chats: 'Telegram chats', extraction: 'Candidate extraction',
+    connect: 'Connect Telegram', chats: 'Telegram chats', extraction: 'Candidate extraction', context: 'Telegram search',
 };
 
 function useSection(pathname: string) {
@@ -91,9 +93,10 @@ export function NavLinks({
                     || (capabilities !== null && capabilities !== 'denied' && capabilities[item.capability]),
             ).map((item) => {
                 const Icon = item.icon;
+                const activePrefix = 'activePrefix' in item ? item.activePrefix : item.href;
                 const active = 'exact' in item && item.exact
                     ? pathname === item.href
-                    : pathname === item.href || pathname.startsWith(`${item.href}/`);
+                    : pathname === activePrefix || pathname.startsWith(`${activePrefix}/`);
                 return (
                     <Link
                         key={item.href}

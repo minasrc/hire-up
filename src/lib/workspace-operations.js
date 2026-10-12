@@ -93,6 +93,21 @@ const run = (pool, verifiedIdentity, organizationId, permissions, sql, params) =
         },
     );
 
+// Keep the feature switch and exact API permissions in every workspace payload,
+// including the streamed overview and subsequent notification refreshes.
+async function telegramCapabilities(client, capabilities) {
+    if (!capabilities) return capabilities;
+    let telegram = false;
+    if (process.env.TELEGRAM_INTAKE_ENABLED === '1') {
+        const result = await client.query(
+            `select app.has_permission_v1('candidates.read')
+                and app.has_permission_v1('candidates.write') as allowed`,
+        );
+        telegram = result.rows[0]?.allowed === true;
+    }
+    return { ...capabilities, telegram };
+}
+
 export async function getStaffCapabilities(pool, verifiedIdentity, organizationId) {
     return withStaffActor(
         pool,
@@ -101,7 +116,7 @@ export async function getStaffCapabilities(pool, verifiedIdentity, organizationI
         async ({ client }) => {
             const result = await client.query(
                 'select app.get_staff_capabilities_v1() as result');
-            return result.rows[0]?.result ?? null;
+            return telegramCapabilities(client, result.rows[0]?.result ?? null);
         },
     );
 }
@@ -114,7 +129,12 @@ export async function getStaffWorkspace(pool, verifiedIdentity, organizationId) 
         async ({ client }) => {
             const result = await client.query(
                 'select app.get_staff_workspace_v1() as result');
-            return result.rows[0]?.result ?? null;
+            const payload = result.rows[0]?.result ?? null;
+            if (!payload) return null;
+            return {
+                ...payload,
+                capabilities: await telegramCapabilities(client, payload.capabilities),
+            };
         },
     );
 }
@@ -127,7 +147,12 @@ export async function getStaffNotifications(pool, verifiedIdentity, organization
         async ({ client }) => {
             const result = await client.query(
                 'select app.get_staff_notifications_v1() as result');
-            return result.rows[0]?.result ?? null;
+            const payload = result.rows[0]?.result ?? null;
+            if (!payload) return null;
+            return {
+                ...payload,
+                capabilities: await telegramCapabilities(client, payload.capabilities),
+            };
         },
     );
 }
