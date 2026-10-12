@@ -65,8 +65,10 @@ test('aggregate rejects failed, cancelled, skipped or missing selected groups an
 
 test('hourly maintenance retains bounded cleanup and manual execution', () => {
     const workflow = readFileSync(new URL('../../.github/workflows/telegram-maintenance.yml', import.meta.url), 'utf8');
+    const runner = readFileSync(new URL('../../.github/workflows/telegram-maintenance-run.yml', import.meta.url), 'utf8');
     assert.ok(workflow.includes("cron: '7 * * * *'"));
     assert.ok(workflow.includes('workflow_dispatch:'));
-    assert.ok(workflow.includes('timeout-minutes: 5'));
-    assert.ok(workflow.includes('run: node scripts/run-telegram-maintenance.mjs'));
+    assert.ok(workflow.includes('uses: ./.github/workflows/telegram-maintenance-run.yml'));
+    assert.ok(runner.includes('timeout-minutes: 5'));
+    assert.ok(runner.includes('run: node scripts/run-telegram-maintenance.mjs'));
 });
