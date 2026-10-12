@@ -44,7 +44,15 @@ or hosted storage credentials and opens no public listener.
 3. Provision a separate hosted database login: `NOINHERIT NOSUPERUSER NOCREATEDB
    NOCREATEROLE NOBYPASSRLS`, granted **only** `app_telegram_worker`. Store its URL
    as hosted `TELEGRAM_WORKER_DATABASE_URL`; never put it on the Mac. Do not reuse
-   a migration, owner, executor or staff database credential.
+   a migration, owner, executor or staff database credential. If the database
+   uses a private certificate authority, also set hosted server-only
+   `TELEGRAM_WORKER_DATABASE_CA_CERT` to its provider-issued PEM CA certificate
+   (with real newlines). All worker API pools use this CA with certificate and
+   hostname verification; URL SSL options cannot override it. Leave it unset
+   for existing database URL TLS configuration. Never disable TLS verification
+   to accommodate a private CA. Keep both settings out of browser bundles and
+   Mac worker configuration. Worker pools bound connection setup to five seconds
+   (pairing retains its two-second limit), so database outages fail promptly.
 4. As a verified recruiter, POST `/api/staff/telegram-intake/workers` with
    `{"name":"Demo Mac"}`. Save the returned token once into a private `0600`
    file outside source control. Record the worker ID for revocation with
