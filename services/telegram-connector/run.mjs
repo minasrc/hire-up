@@ -13,18 +13,26 @@ import { createCvWorker } from './cv-worker.mjs';
 import { createCvHostClient } from './cv-http.mjs';
 import { createConnectedWork } from './connected-work.mjs';
 import { connectorCredential } from './paired-credential.mjs';
+import { createSupervisionGuard } from './supervision.mjs';
 
 // Teleproto contains a few direct console calls outside its logger. This standalone
 // process deliberately emits only fixed operational codes via process.stderr.
 for (const method of ['log', 'info', 'warn', 'error', 'debug', 'trace', 'dir']) console[method] = () => {};
 const output = (code) => process.stderr.write(`${new Date().toISOString()} ${code}\n`);
-let release; let connector; let watchdog; let stopping = false;
+let release; let connector; let watchdog; let supervision; let forceStop; let stopping = false;
 const sleepController = new AbortController();
 const stop = () => { stopping = true; sleepController.abort(); void connector?.stop(); };
 process.on('unhandledRejection', () => { output('CONNECTOR_RUNTIME_FAILED'); process.exitCode = 1; stop(); });
 process.on('uncaughtException', () => { output('CONNECTOR_RUNTIME_FAILED'); process.exitCode = 1; stop(); });
 try {
   if (Number(process.versions.node.split('.')[0]) !== 22) throw new Error('NODE_22_REQUIRED');
+  if (process.env.TELEGRAM_CONNECTOR_SUPERVISED === '1') {
+    supervision = createSupervisionGuard({ onLost: () => {
+      output('SUPERVISION_LOST'); process.exitCode = 1; stop();
+      forceStop = setTimeout(() => process.exit(1), 5000);
+    } });
+    await supervision.ready();
+  }
   const configPath = process.env.TELEGRAM_CONNECTOR_CONFIG;
   const file = configPath ? JSON.parse(readPrivateFile(resolve(configPath))) : {};
   const config = {
@@ -51,7 +59,7 @@ try {
     watchdog = setInterval(() => { void connector.checkLease().catch(() => output('LEASE_CLOSED')); }, 1000);
     let failures = 0;
     output('CONNECTOR_STARTED');
-    while (!stopping && !connector.stopped) {
+    while (!stopping && !connector.stopped && (!supervision || supervision.check())) {
       try { await connector.tick(); failures = 0; }
       catch (error) {
         output(error.message === 'ACCESS_DENIED' ? 'ACCESS_DENIED' : 'HOST_UNAVAILABLE');
@@ -69,4 +77,6 @@ try {
   clearInterval(watchdog);
   await connector?.stop();
   release?.();
+  supervision?.close();
+  clearTimeout(forceStop);
 }
