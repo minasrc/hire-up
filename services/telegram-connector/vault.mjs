@@ -125,9 +125,13 @@ export function createVault({ root, server, workerId }) {
     },
     removeCvChunks(connectionId, accountId, jobId) {
       if (!idPattern.test(jobId)) throw new Error('INVALID_CV_CHUNK');
+      let parent;
       for (let index = 0; index < 8; index++) {
+        parent = dirname(historyFile(connectionId, accountId, `cv:${jobId}:chunk:${index}`));
+        if (existsSync(parent)) privateDirectory(parent);
         try { unlinkSync(historyFile(connectionId, accountId, `cv:${jobId}:chunk:${index}`)); } catch (error) { if (error.code !== 'ENOENT') throw error; }
       }
+      if (existsSync(parent)) { privateDirectory(parent); syncDirectory(parent); }
     },
     saveHistory(connectionId, accountId, key, record) {
       const json = JSON.stringify(record);
@@ -148,7 +152,10 @@ export function createVault({ root, server, workerId }) {
       return JSON.parse(Buffer.concat([decipher.update(Buffer.from(record.ciphertext, 'base64')), decipher.final()]).toString('utf8'));
     },
     removeHistoryRecord(connectionId, accountId, key) {
-      try { unlinkSync(historyFile(connectionId, accountId, key)); } catch (error) { if (error.code !== 'ENOENT') throw error; }
+      const path = historyFile(connectionId, accountId, key);
+      if (existsSync(dirname(path))) privateDirectory(dirname(path));
+      try { unlinkSync(path); } catch (error) { if (error.code !== 'ENOENT') throw error; }
+      if (existsSync(dirname(path))) syncDirectory(dirname(path));
     },
     removeHistory(connectionId) {
       if (!idPattern.test(connectionId)) throw new Error('INVALID_CONNECTION_ID');

@@ -21,7 +21,7 @@ export function createSourceUpdateWorker({ host, vault, now = Date.now, randomId
     if (busy || !active(c)) return {status:'stale'};
     const current = `${c.connectionId}:${c.accountUserId}:${c.generation}`;
     if (current!==scope) {scope=current;nextPoll=0;}
-    if (now()<nextPoll) return {status:'idle'};
+    if (now()<nextPoll && !c.wake) return {status:'idle'};
     busy=true; let job;
     try {
       const pending=load(c);
@@ -33,6 +33,7 @@ export function createSourceUpdateWorker({ host, vault, now = Date.now, randomId
           clear(c);nextPoll=now()+5000;return {status:'stale'};
         }
       }
+      if (c.plan?.source===false) return {status:'idle'};
       const response=await host('claim',proof(c)); requireActive(c);job=response.job;
       if (job===null) {nextPoll=now()+5000;return {status:'idle'};}
       if (!valid(job,c)) throw new Error('INVALID_SOURCE_RESPONSE');

@@ -72,7 +72,7 @@ export function createCvWorker({ host, upload, vault, now = Date.now }) {
       if (busy || !active(context)) return { status: 'stale' };
       const current = `${context.connectionId}:${context.accountUserId}:${context.generation}`;
       if (scope !== current) { scope = current; verified = ''; nextPoll = 0; }
-      if (now() < nextPoll) return { status: 'idle' };
+      if (now() < nextPoll && !context.wake) return { status: 'idle' };
       busy = true; let state;
       try {
         state = load(context);
@@ -80,6 +80,7 @@ export function createCvWorker({ host, upload, vault, now = Date.now }) {
         if (state?.pendingDefer) return await defer(context, state);
         // A committed upload receipt must be retried before claiming another job.
         if (state?.phase === 'upload') return await finish(context, state);
+        if (!state && context.plan?.cv === false) return { status: 'idle' };
         const response = await host('claim', proof(context), { signal: context.signal }); requireActive(context);
         const job = response.job;
         if (job === null) {

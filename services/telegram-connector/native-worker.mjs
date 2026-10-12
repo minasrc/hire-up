@@ -7,7 +7,7 @@ const pendingKey='pending-native-update';
 const pendingWireLimit=1572864;
 const stateValid=v=>v===null||(v&&['pts','qts','date','seq'].every(k=>Number.isSafeInteger(v[k])&&v[k]>=0&&v[k]<=2147483647));
 export function createNativeWorker({host,vault,now=Date.now,randomId=randomUUID}){
- let busy=false;let nextPoll=0;let scope='';let channelTurn=false;
+ let busy=false;let nextPoll=0;let scope='';let channelTurn=false;let nextAccount=0;let nextChannel=0;
  const proof=c=>({connectionId:c.connectionId,generation:c.generation,connectionLeaseToken:c.connectionLeaseToken,accountUserId:c.accountUserId});
  const active=c=>!c.signal?.aborted&&c.isActive()&&Date.parse(c.connectionLeaseExpiresAt)>now();
  const requireActive=c=>{if(!active(c))throw new HistoryReadError('CONNECTION_CHANGED');};
@@ -31,12 +31,15 @@ export function createNativeWorker({host,vault,now=Date.now,randomId=randomUUID}
    clear(c);return{status:'stale',providerRead:false};
   }
   if(result?.ok!==true||!['native_checked','repair_required'].includes(result.status))throw new Error('INVALID_NATIVE_RESPONSE');
+  const next = result.nextPollAt === undefined ? null : Date.parse(result.nextPollAt);
+  if(result.nextPollAt!==undefined&&(!Number.isFinite(next)||next>now()+65000))throw new Error('INVALID_NATIVE_RESPONSE');
+  if(c.plan&&p.payload.feedId&&next!==null)nextChannel=Math.max(now(),next);
   clear(c);return{status:result.status,providerRead:false};
  }
  return{async tick(c){
   if(busy||!active(c))return{status:'stale',providerRead:false};
-  const s=`${c.connectionId}:${c.accountUserId}:${c.generation}`;if(s!==scope){scope=s;nextPoll=0;}
-  if(now()<nextPoll)return{status:'idle',providerRead:false};
+  const s=`${c.connectionId}:${c.accountUserId}:${c.generation}`;if(s!==scope){scope=s;nextPoll=0;nextAccount=0;nextChannel=0;}
+  if(now()<nextPoll&&!load(c))return{status:'idle',providerRead:false};
   busy=true;let job;let providerRead=false;
   try{
    const pending=load(c);
@@ -45,8 +48,18 @@ export function createNativeWorker({host,vault,now=Date.now,randomId=randomUUID}
     if(pending.rejectionCode){await defer(c,pending.payload.leaseToken,pending.rejectionCode,undefined,pending.payload.feedId);clear(c);return{status:'deferred',providerRead:false};}
     return await complete(c,pending);
    }
-   let response=await host(channelTurn?'channelClaim':'claim',proof(c));requireActive(c);if(response.job===null){response=await host(channelTurn?'claim':'channelClaim',proof(c));requireActive(c);}channelTurn=!channelTurn;job=response.job;
-   if(job===null){nextPoll=now()+3000;return{status:'idle',providerRead:false};}
+   let accountDue=!c.plan||(c.plan.nativeAccount&&now()>=nextAccount);
+   let channelDue=!c.plan||(c.plan.nativeChannels&&now()>=nextChannel);
+   if(!accountDue&&!channelDue)return{status:'idle',providerRead:false};
+   let tryChannel=channelDue&&(!accountDue||channelTurn);
+   let response=await host(tryChannel?'channelClaim':'claim',proof(c));requireActive(c);
+   if(c.plan&&response.job===null){if(tryChannel)nextChannel=now()+60000;else nextAccount=now()+60000;}
+   if(response.job===null&&(tryChannel?accountDue:channelDue)){
+    response=await host(tryChannel?'claim':'channelClaim',proof(c));requireActive(c);
+    if(c.plan&&response.job===null){if(tryChannel)nextAccount=now()+60000;else nextChannel=now()+60000;}
+   }
+   channelTurn=!channelTurn;job=response.job;
+   if(job===null){nextPoll=now()+(c.plan?1000:3000);return{status:'idle',providerRead:false};}
    if(!valid(job,c))throw new Error('INVALID_NATIVE_RESPONSE');
    providerRead=true;
    const page=await c.telegram.native[job.kind]({peer:job.peer,readPeer:peer=>vault.loadHistory(c.connectionId,c.accountUserId,`peer:${peerKey(peer)}`),fromState:job.fromState,baseline:job.baseline,accountUserId:c.accountUserId,signal:c.signal});requireActive(c);
@@ -61,7 +74,7 @@ export function createNativeWorker({host,vault,now=Date.now,randomId=randomUUID}
    const payload={...(job.kind==='channel'?{feedId:job.id}:{}),leaseToken:job.leaseToken,pageId:randomId(),scopeDigest:job.scopeDigest,fromState:job.fromState,nextState:page.nextState,kind:page.kind,gapReason:page.gapReason,changes};
    if(Buffer.byteLength(JSON.stringify({...proof(c),...payload}))>pendingWireLimit){payload.changes=[];payload.kind='gap';payload.gapReason='OVERFLOW';}
    const durable={generation:c.generation,payload};save(c,durable);
-   const result=await complete(c,durable);return{...result,providerRead};
+   const result=await complete(c,durable);if(c.plan&&page.kind==='empty'){if(job.kind==='account')nextAccount=now()+60000;}return{...result,providerRead};
   }catch(e){
    if(!active(c)||e.code==='CONNECTION_CHANGED')return{status:'stale',providerRead};
    if(e.status===409){clear(c);return{status:'stale',providerRead};}

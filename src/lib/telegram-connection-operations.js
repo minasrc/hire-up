@@ -1,3 +1,4 @@
+import { assertUuid } from './candidate-profile-contracts.js';
 import { withStaffTransaction } from './staff-authorization.js';
 import { ClientJobContractError } from './client-job-contracts.js';
 import { validateConnectorPublicKey, validateTelegramConnectionAction, validateTelegramConnectionReport } from './telegram-connection-contracts.js';
@@ -19,12 +20,19 @@ export function telegramConnectionAction(pool, identity, org, input) {
 export async function telegramConnectorOperation(pool, token, action, input) {
     if (!/^[A-Za-z0-9_-]{64}$/.test(token ?? '')) { const error = new Error('Unauthorized'); error.code = '42501'; throw error; }
     let sql; let args;
-    if (action === 'heartbeat') {
+    if (action === 'heartbeat' || action === 'poll') {
         if (!input || Object.keys(input).some((key) => key !== 'publicKeySpki')) throw new ClientJobContractError({ input: 'Invalid heartbeat.' });
-        sql = 'select app.telegram_connection_heartbeat_v1($1,$2) as result'; args = [token, validateConnectorPublicKey(input.publicKeySpki)];
+        sql = action === 'poll' ? 'select app.telegram_connection_poll_v1($1,$2) as result' : 'select app.telegram_connection_heartbeat_v1($1,$2) as result'; args = [token, validateConnectorPublicKey(input.publicKeySpki)];
     } else if (action === 'claim') {
         if (!input || Object.keys(input).length) throw new ClientJobContractError({ input: 'Invalid claim.' });
         sql = 'select app.telegram_connection_claim_v1($1) as result'; args = [token];
+    } else if (action === 'cleanupClaim') {
+        if (!input || Object.keys(input).length) throw new ClientJobContractError({ input: 'Invalid cleanup claim.' });
+        sql = 'select app.telegram_chat_removal_cleanup_claim_v1($1) as result'; args = [token];
+    } else if (action === 'cleanupAck') {
+        if (!input || Object.keys(input).length !== 2 || Object.keys(input).some(key => !['removalId', 'cleanupToken'].includes(key))) throw new ClientJobContractError({ input: 'Invalid cleanup acknowledgement.' });
+        sql = 'select app.telegram_chat_removal_cleanup_ack_v1($1,$2,$3) as result';
+        args = [token, assertUuid(input.removalId, 'removalId'), assertUuid(input.cleanupToken, 'cleanupToken')];
     } else if (action === 'update') {
         const report = validateTelegramConnectionReport(input);
         sql = 'select app.telegram_connection_update_v1($1,$2,$3,$4,$5::jsonb) as result';

@@ -120,3 +120,47 @@ Runtime unit tests use temporary synthetic state and local child processes, with
 no Telegram calls. `npm run test:telegram-connection` includes real disposable
 PostgreSQL and browser coverage for hosted enrollment, QR/password handling,
 cancel/retry, offline service, owner isolation and acknowledged logout.
+
+## Polling and operating cost
+
+Apply the efficient-polling migration (`20261013110000`) and the chat-removal
+cleanup migration (`20261013120000`) before restarting the new service. Deploy
+the website/API before restarting the Mac. Legacy heartbeat, claim and list
+endpoints remain available during this rollout.
+
+The supervisor renews its lease and obtains all owner scheduling hints in one
+request every ten seconds. A connected idle child combines its heartbeat,
+connection lease renewal and work plan in one request each minute. Browser
+sign-in, password submission, disconnect and queue mutations change a bounded
+wake counter; the next supervisor snapshot wakes that owner immediately.
+Runnable hints also wake repeatedly, so a missed counter update cannot leave
+queued work asleep. Hints never grant access or claim jobs. Pending encrypted
+acknowledgements are processed even when the work plan says no new work exists.
+
+The pinned Telegram SDK disables raw event delivery when its automatic update
+manager is stopped. This version therefore uses explicit native differences
+with a sixty-second quiet-feed cooldown, rather than claiming push freshness.
+Account and channel lanes are independent; channels are served fairly using
+the authoritative server feed order. Scheduler/provider delays and many due
+channels add time. Missing updates, gaps and edits continue through the same
+fenced server cursor and repair protocol. Automatic SDK difference fetching
+remains disabled. This does not promise instantaneous edit/deletion detection.
+
+With fast responses and no queued work, supervisor control falls from 25,920
+to 8,640 requests/day. Ten enrolled idle children add 14,400 polls/day. A quiet
+account plus one quiet selected channel per owner adds approximately 57,600
+native claim/completion requests/day, including independent lane scheduling hints.
+This is approximately 80,640 requests/day, about a 90% reduction from the previous roughly 817,920 empty requests
+per day; it is a request estimate, not a bill estimate. More channels, source
+repair, imports, browser tabs, retries and retention cleanup add real work.
+Every request still validates current permissions and revocation. Worker
+last-seen timestamps are written at most every thirty seconds and expiry is
+extended only when less than twenty-nine days remain.
+
+Disconnected owners retain their processes and poll once a minute. Parking is
+not enabled: no server hint alone proves that an uncertain local authorization
+session is safe to stop. Removal cleanup aborts the current provider epoch,
+erases only the claimed chat's scratch and CV chunks, flushes deletions, and
+then acknowledges its bounded page. Other chats' pending work and authentication
+keys/sessions are preserved. Offline removal remains pending until those
+acknowledgements arrive.
