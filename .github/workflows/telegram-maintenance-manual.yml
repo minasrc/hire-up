@@ -1,0 +1,14 @@
+name: Telegram maintenance manual run
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  maintenance:
+    uses: ./.github/workflows/telegram-maintenance-run.yml
+    secrets:
+      TELEGRAM_MAINTENANCE_URL: ${{ secrets.TELEGRAM_MAINTENANCE_URL }}
+      TELEGRAM_MAINTENANCE_SECRET: ${{ secrets.TELEGRAM_MAINTENANCE_SECRET }}

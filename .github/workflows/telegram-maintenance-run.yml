@@ -1,0 +1,31 @@
+name: Telegram maintenance runner
+
+on:
+  workflow_call:
+    secrets:
+      TELEGRAM_MAINTENANCE_URL:
+        required: true
+      TELEGRAM_MAINTENANCE_SECRET:
+        required: true
+
+permissions:
+  contents: read
+
+concurrency:
+  group: telegram-source-maintenance
+  cancel-in-progress: false
+
+jobs:
+  maintenance:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+      - name: Purge released sources and expired search caches
+        run: node scripts/run-telegram-maintenance.mjs
+        env:
+          TELEGRAM_MAINTENANCE_URL: ${{ secrets.TELEGRAM_MAINTENANCE_URL }}
+          TELEGRAM_MAINTENANCE_SECRET: ${{ secrets.TELEGRAM_MAINTENANCE_SECRET }}

@@ -36,7 +36,7 @@ export function selectJobs(files, full = false, readFile = readRepoFile) {
     for (const file of files) {
         if (/\.md$/i.test(file)) continue;
         selected.add('quality');
-        if (file === '.github/workflows/ci.yml' || file === '.github/workflows/telegram-maintenance.yml'
+        if (file === '.github/workflows/ci.yml' || /^\.github\/workflows\/telegram-maintenance(?:-manual|-run)?\.yml$/.test(file)
             || ['scripts/ci-selection.mjs', 'scripts/ci-groups.mjs', 'scripts/run-ci-group.mjs',
                 'scripts/run-telegram-maintenance.mjs'].includes(file)
             || file.startsWith('tests/unit/')) continue;
