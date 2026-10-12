@@ -79,7 +79,7 @@ test('child fails closed on parent crash, suspend and backward clock movement', 
     assert.equal(f.guard.check(), false, scenario); assert.equal(f.lost(), 1);
   }
 });
-function supervisorFixture() {
+function supervisorFixture({ earlyExitFirst = false } = {}) {
   let now = 1000000, mono = 0, heartbeatError = false, delayed;
   const request = pending(), leaseToken = randomUUID(), children = [], requests = [request];
   const prepared = { requestId: request.requestId, workerId: randomUUID(), tokenSha256: 'b'.repeat(64), configPath: '/synthetic/private/config.json' };
@@ -96,7 +96,7 @@ function supervisorFixture() {
   };
   const supervisor = createSupervisor({ control, store: { prepare: () => prepared }, api,
     wall: () => now, monotonic: () => mono, spawn: async (_entry, _record, grant) => {
-      const child = new EventEmitter(); child.exitCode = null; child.signalCode = null;
+      const child = new EventEmitter(); child.exitCode = earlyExitFirst && !children.length ? 1 : null; child.signalCode = null;
       child.connected = true; child.send = () => {}; child.grant = grant;
       children.push(child); return child;
     }, terminate: async child => { child.terminated = true; child.emit('exit'); } });
@@ -117,6 +117,12 @@ test('lost renewal does not extend ownership; suspended parent stops all childre
   f.advance(50000); f.failHeartbeat(); await f.supervisor.refresh();
   f.advance(25000); f.supervisor.watch(); await f.supervisor.stop();
   assert.equal(f.children[0].terminated, true); assert.equal(f.supervisor.snapshot().leaseAcknowledged, false);
+});
+test('a child that exits during launch does not occupy its slot or suppress restart', async () => {
+  const f = supervisorFixture({ earlyExitFirst: true }); await f.supervisor.refresh(); await f.supervisor.reconcile();
+  assert.equal(f.supervisor.snapshot().runningConnectors, 0);
+  f.advance(3000); await f.supervisor.reconcile();
+  assert.equal(f.supervisor.snapshot().runningConnectors, 1); await f.supervisor.stop();
 });
 test('late successful renewal cannot resurrect old children or expired ownership', async () => {
   const f = supervisorFixture(); await f.supervisor.refresh(); await f.supervisor.reconcile();

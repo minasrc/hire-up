@@ -88,7 +88,8 @@ export function createSupervisor({ control, store, api, connectorEntrypoint,
       }
     } catch (error) {
       output(['ACCESS_DENIED', 'LEASE_CONFLICT'].includes(error.message) ? error.message : 'SERVICE_HOST_UNAVAILABLE');
-      if (lease && ['ACCESS_DENIED', 'LEASE_CONFLICT', 'INVALID_HOST_RESPONSE'].includes(error.message)) await stop();
+      if (['ACCESS_DENIED', 'INVALID_HOST_RESPONSE'].includes(error.message)
+        || (proof && error.message === 'LEASE_CONFLICT')) await stop();
     } finally { refreshing = false; }
   };
   const reconcile = async () => {
