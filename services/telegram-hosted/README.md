@@ -60,10 +60,17 @@ TELEGRAM_HOSTED_CONFIG=/absolute/private/hosted-service.json \
 
 For automatic restart on macOS, use a user LaunchAgent with an absolute Node 22
 binary and script path, the configuration path environment variable,
-`KeepAlive=true`, and a throttle interval. Keep logs in the private service
-directory. The entry point emits fixed codes, consumes no child output, and
+`KeepAlive=true`, and a throttle interval. Use `ProcessType=Interactive`: browser
+sign-in and lease renewals require timely responses, and this service does not
+use XPC transactions for adaptive scheduling. `Background` can heavily throttle
+SDK loading and I/O, making sign-in time out. Keep logs in the private service
+directory. The entry point accepts only fixed child status codes over IPC,
+discards raw child output, and
 automatically removes only a verified stopped supervisor PID lock. It never
 replaces local identities, sessions, or uncertain registration credentials.
+`CONNECTOR_SPAWNED` records process creation; `CONNECTOR_STARTED` records completed
+startup and `CONNECTOR_HEARTBEAT_ACKNOWLEDGED` confirms website access. These
+codes do not mean a user has authorized Telegram or that an import has completed.
 
 ## Isolation and recovery
 

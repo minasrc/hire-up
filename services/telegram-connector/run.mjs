@@ -18,7 +18,14 @@ import { createSupervisionGuard } from './supervision.mjs';
 // Teleproto contains a few direct console calls outside its logger. This standalone
 // process deliberately emits only fixed operational codes via process.stderr.
 for (const method of ['log', 'info', 'warn', 'error', 'debug', 'trace', 'dir']) console[method] = () => {};
-const output = (code) => process.stderr.write(`${new Date().toISOString()} ${code}\n`);
+const output = (code) => {
+  process.stderr.write(`${new Date().toISOString()} ${code}\n`);
+  // Only fixed operational codes travel to the supervisor. Never forward SDK
+  // output, error messages, account details, credentials or login challenges.
+  if (process.env.TELEGRAM_CONNECTOR_SUPERVISED === '1' && process.connected) {
+    process.send({ type: 'telegram-connector-status', code }, () => {});
+  }
+};
 let release; let connector; let watchdog; let supervision; let forceStop; let stopping = false;
 const sleepController = new AbortController();
 const stop = () => { stopping = true; sleepController.abort(); void connector?.stop(); };
@@ -32,6 +39,7 @@ try {
       forceStop = setTimeout(() => process.exit(1), 5000);
     } });
     await supervision.ready();
+    output('CONNECTOR_INITIALIZING');
   }
   const configPath = process.env.TELEGRAM_CONNECTOR_CONFIG;
   const file = configPath ? JSON.parse(readPrivateFile(resolve(configPath))) : {};
@@ -45,16 +53,30 @@ try {
     unlockStoppedProcess(config.root); output('STOPPED_PROCESS_LOCK_REMOVED');
   } else {
     if (!Number.isSafeInteger(config.apiId) || config.apiId < 1 || !/^[a-f0-9]{32}$/i.test(config.apiHash ?? '')) throw new Error('INVALID_TELEGRAM_CONFIG');
-    const host = createHostClient(config);
+    const connectionHost = createHostClient(config);
+    let heartbeatAcknowledged = false;
+    const host = async (action, body) => {
+      const result = await connectionHost(action, body);
+      if (action === 'heartbeat' && !heartbeatAcknowledged) {
+        heartbeatAcknowledged = true;
+        output('CONNECTOR_HEARTBEAT_ACKNOWLEDGED');
+      }
+      return result;
+    };
     release = acquireLock(config.root);
     const vault = createVault(config);
+    output('CONNECTOR_VAULT_READY');
     const { createTelegramFactory } = await import('./telegram-adapter.mjs');
+    output('CONNECTOR_ADAPTER_READY');
     const history = createHistoryWorker({ host: createHostClient({ ...config, service: 'history' }), vault });
     const reconcile = createSourceUpdateWorker({ host: createHostClient({ ...config, service: 'source-updates' }), vault });
     const native = createNativeWorker({ host: createHostClient({ ...config, service: 'native' }), vault });
     const updates = createSourceWork({ native, reconcile });
     const cv = createCvWorker({ ...createCvHostClient(config), vault });
-    connector = createConnector({ host, vault, createTelegram: await createTelegramFactory(config), onConnectedTick: createConnectedWork({ history, cv, updates }) });
+    output('CONNECTOR_WORKERS_READY');
+    const createTelegram = await createTelegramFactory(config);
+    output('CONNECTOR_SDK_READY');
+    connector = createConnector({ host, vault, createTelegram, onConnectedTick: createConnectedWork({ history, cv, updates }) });
     process.once('SIGINT', stop); process.once('SIGTERM', stop);
     watchdog = setInterval(() => { void connector.checkLease().catch(() => output('LEASE_CLOSED')); }, 1000);
     let failures = 0;
