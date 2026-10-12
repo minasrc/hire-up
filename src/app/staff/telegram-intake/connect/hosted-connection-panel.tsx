@@ -5,7 +5,7 @@ import Link from 'next/link';
 import { Cloud, RefreshCw } from 'lucide-react';
 import { Button } from '@/components/staff-ui/button';
 import { Card } from '@/components/staff-ui/card';
-import { hostedStatus, prepareHostedConnection } from './hosted-connection-model';
+import { hostedStatus, prepareHostedConnection, hostedRequestError, hostedEmergencyLogout } from './hosted-connection-model';
 
 type Status = { serviceOnline: boolean; state: string; workerId: string | null; workerOnline: boolean; errorCode: string | null };
 const endpoint = '/api/staff/telegram-hosted';
@@ -52,9 +52,7 @@ export function HostedConnectionPanel({ connection, loaded, disabled, attemptRef
         signal.throwIfAborted();
         if (!response.ok) {
             if ([401, 403, 404, 428].includes(response.status)) onDenied();
-            throw new Error([401, 403, 428].includes(response.status)
-                ? 'Your workspace access needs verification. Sign in again to continue.'
-                : 'The Telegram service is temporarily unavailable. Retry shortly.');
+            throw new Error(hostedRequestError(response.status, await response.json().catch(() => null)));
         }
         return hostedStatus(await response.json());
     }, [onDenied]);
@@ -75,7 +73,7 @@ export function HostedConnectionPanel({ connection, loaded, disabled, attemptRef
             statusRead.current = controller;
             try {
                 const result = await request(controller.signal);
-                if (!stopped && !controller.signal.aborted && version === cycle) { setStatus(result); if (!actionError.current) setError(''); }
+                if (!stopped && !controller.signal.aborted && version === cycle) { setStatus(result); if (!actionError.current || (result.state === 'ready' && result.serviceOnline && result.workerOnline)) { actionError.current = false; setError(''); } }
             } catch (failure) {
                 if (!stopped && !controller.signal.aborted && version === cycle) {
                     setStatus(null);
@@ -120,6 +118,7 @@ export function HostedConnectionPanel({ connection, loaded, disabled, attemptRef
         {!status && !error ? <p role="status">Checking Telegram service…</p> : null}
         {status && (!status.serviceOnline || status.state === 'unavailable') ? <p role="status">The Telegram service is temporarily offline or unavailable. Your imported history remains available.</p> : null}
         {status?.serviceOnline && status.state !== 'unavailable' ? <p role="status">{busy ? phase === 'starting' ? 'Starting Telegram sign-in…' : 'Preparing your Telegram connection…' : status.workerOnline && status.state === 'ready' ? 'Telegram service available.' : active ? 'Your Telegram connection is waiting for the service. Your imported history remains available.' : status.state === 'pending' ? 'Telegram setup is pending. Click Connect Telegram to continue when you are ready.' : 'Telegram service available. Click Connect Telegram to begin.'}</p> : null}
+        {hostedEmergencyLogout(connection, status) ? <p role="status" className="text-sm text-muted-foreground">To revoke access immediately, open Telegram on your phone → Settings → Devices and terminate this session. Imported history stays in your private workspace.</p> : null}
         {blocked ? <p role="status">This account has an existing connection. Disconnect it below and wait for logout confirmation before starting a hosted connection.</p> : null}
         {!active ? <Button onClick={() => void connect()} disabled={disabled || busy || !loaded || Boolean(blocked) || !status?.serviceOnline || status.state === 'unavailable'}>{busy ? 'Preparing…' : connection ? 'Connect again' : 'Connect Telegram'}</Button> : null}
         {phase === 'preparing' ? <Button variant="outline" onClick={() => { attemptRef.current?.abort(); actionError.current = true; setError('Setup cancelled. Click Connect Telegram when you are ready.'); }}>Cancel setup</Button> : null}

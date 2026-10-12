@@ -46,3 +46,12 @@ export async function prepareHostedConnection({ prepare, read, wait, start, onSt
         status = hostedStatus(await read(signal));
     }
 }
+
+export function hostedRequestError(status, body) {
+    if (status === 429 && body?.code === 'HOSTED_CAPACITY') return 'The deployment registration limit for hosted Telegram connections has been reached. Your imported history remains available. Ask your workspace administrator for more connection capacity.';
+    return [401, 403, 428].includes(status) ? 'Your workspace access needs verification. Sign in again to continue.' : 'The Telegram service is temporarily unavailable. Retry shortly.';
+}
+
+export function hostedEmergencyLogout(connection, status) {
+    return Boolean(connection && (connection.status === 'disconnecting' || (connection.status !== 'disconnected' && (!status?.serviceOnline || !status?.workerOnline))));
+}

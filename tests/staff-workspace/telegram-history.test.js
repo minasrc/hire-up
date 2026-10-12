@@ -258,10 +258,11 @@ test('Telegram history UI discovers, selects and resumes private full-history im
         await completePage(job, [], job.cursor, true);
         await refresh();
         await expect(page.getByText('4 messages stored', { exact: true })).toBeVisible();
+        await expect(page.getByRole('link', { name: 'View conversation', exact: true })).toHaveAttribute('href', /\/staff\/telegram-intake\/context\?chatId=[0-9a-f-]+$/);
         await expect(page.getByText(/Last synced:/)).toBeVisible();
         await clickAction(page.getByRole('button', { name: 'Pause sync', exact: true }));
         await expect(page.getByText('Sync paused', { exact: true })).toBeVisible();
-        await clickAction(page.getByRole('button', { name: 'Resume import', exact: true }));
+        await clickAction(page.getByRole('button', { name: 'Resume sync', exact: true }));
         job = (await historyWorker('claim')).job;
         await completePage(job, [], job.cursor, true);
         await refresh();
@@ -278,6 +279,7 @@ test('Telegram history UI discovers, selects and resumes private full-history im
         await refresh();
         await expect(page.getByRole('heading', { name: 'Connect Telegram to import chats' })).toBeVisible();
         await expect(page.getByText('4 messages stored', { exact: true })).toBeVisible();
+        await expect(page.getByRole('link', { name: 'View conversation', exact: true })).toHaveAttribute('href', /\/staff\/telegram-intake\/context\?chatId=[0-9a-f-]+$/);
         await expect(page.getByRole('button', { name: 'Deselect chat', exact: true })).toBeDisabled();
         accountUserId = '987654321';
         await connectAccount();

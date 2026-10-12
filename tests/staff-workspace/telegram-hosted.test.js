@@ -149,6 +149,7 @@ test('Hosted Telegram browser starts on demand, cancels setup and protects QR/pa
         await worker('heartbeat', { publicKeySpki });
         await page.getByRole('button', { name: 'Retry service status', exact: true }).click();
         await expect(page.getByText('Telegram service available.', { exact: true })).toBeVisible();
+        await expect(page.getByText('Setup cancelled. Click Connect Telegram when you are ready.', { exact: true })).toHaveCount(0);
         assert.equal(starts, 0, 'A ready status after cancellation cannot restart sign-in');
         await page.getByRole('button', { name: 'Connect Telegram', exact: true }).click();
         await expect(page.getByRole('heading', { name: 'Preparing Telegram sign-in', exact: true })).toBeVisible();
@@ -179,6 +180,7 @@ test('Hosted Telegram browser starts on demand, cancels setup and protects QR/pa
         await expect(page.getByRole('link', { name: 'Choose chats to import', exact: true })).toHaveAttribute('href', '/staff/telegram-intake/chats');
         await page.getByRole('button', { name: 'Disconnect Telegram', exact: true }).click();
         await expect(page.getByRole('heading', { name: 'Waiting for Telegram to disconnect', exact: true })).toBeVisible();
+        await expect(page.getByText(/To revoke access immediately, open Telegram on your phone/)).toBeVisible();
         task = (await worker('claim')).connection;
         await update({ status: 'disconnecting', errorCode: 'LOGOUT_FAILED' });
         await expect(page.getByText(/Telegram has not confirmed logout/)).toBeVisible();
