@@ -16,14 +16,21 @@ export function launchConnector(entrypoint, record, grant) {
       TELEGRAM_CONNECTOR_CONFIG: record.configPath, TELEGRAM_CONNECTOR_SUPERVISED: '1' },
     stdio: ['ignore', 'ignore', 'ignore', 'ipc'],
   });
-  child.on('error', () => {});
-  if (child.connected) child.send(grant, () => {});
-  return child;
+  return new Promise((resolve, reject) => {
+    child.on('error', () => reject(new Error('CONNECTOR_START_FAILED')));
+    child.once('spawn', () => {
+      if (!child.connected) { child.kill('SIGTERM'); reject(new Error('CONNECTOR_START_FAILED')); return; }
+      child.send(grant, error => {
+        if (error) { child.kill('SIGTERM'); reject(new Error('CONNECTOR_START_FAILED')); }
+        else resolve(child);
+      });
+    });
+  });
 }
 const childStopped = child => child.exitCode !== null || child.signalCode !== null;
 export function terminateChild(child) {
   return new Promise(resolve => {
-    if (childStopped(child)) { resolve(); return; }
+    if (childStopped(child) || !child.pid) { resolve(); return; }
     let killTimer;
     child.once('exit', () => { clearTimeout(killTimer); resolve(); });
     child.kill('SIGTERM');
@@ -114,7 +121,8 @@ export function createSupervisor({ control, store, api, connectorEntrypoint,
             requestId: item.requestId, workerId: record.workerId, tokenSha256: record.tokenSha256 });
           if (!valid() || token !== proof) return;
           if (registered?.workerId !== record.workerId || registered.state !== 'registered') throw new Error('REGISTRATION_CONFLICT');
-          const child = spawn(connectorEntrypoint, record, grantMessage());
+          const child = await spawn(connectorEntrypoint, record, grantMessage());
+          if (!valid() || token !== proof) { await terminate(child); return; }
           children.set(item.requestId, { child, record });
           output('CONNECTOR_STARTED');
           child.once('exit', () => {
