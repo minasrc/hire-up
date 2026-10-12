@@ -52,15 +52,20 @@ Set these repository Actions secrets:
 - `TELEGRAM_MAINTENANCE_SECRET`: the same private maintenance token.
 
 The `Telegram source maintenance` workflow runs hourly, at minute 7, on the default
-branch and supports manual dispatch. It needs no npm install, model service,
+branch and supports manual dispatch. The separate `Telegram maintenance manual
+run` workflow has no schedule and can run while the hourly workflow is disabled.
+Both use the same bounded runner and concurrency lock, preventing overlapping
+manual and scheduled cleanup. They need no npm install, model service,
 Telegram session or personal Mac. Each request processes bounded work; each
 scheduled run makes at most eight requests and stops early when no work can
 progress. The endpoint remains available when the Telegram feature is disabled.
 It rejects browser-origin requests, invalid credentials and owner/limit query
 parameters, and returns aggregate counts only. Redirects are never followed.
 
-Before enabling intake, manually dispatch the workflow and confirm an
-authenticated successful response. An unconfigured workflow now fails and
+Before enabling intake or activating the hourly schedule, explicitly approve and
+dispatch `Telegram maintenance manual run` on the default branch and confirm an
+authenticated successful response. Keep the hourly workflow disabled until this
+test passes, then enable it and verify a scheduled run. An unconfigured workflow now fails and
 reports that no request was sent; a green run requires actual cleanup requests.
 The run summary records bounded request counts and aggregate cleanup totals,
 and identifies pending work without exposing conversation text or credentials.

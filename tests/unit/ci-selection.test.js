@@ -202,8 +202,27 @@ test('Telegram page coverage includes its consumers; shared intake still covers 
     }
 });
 
+test('manual maintenance stays independent of hourly activation and shares the execution lock', () => {
+    const scheduled = readFileSync(new URL('../../.github/workflows/telegram-maintenance.yml', import.meta.url), 'utf8');
+    const manual = readFileSync(new URL('../../.github/workflows/telegram-maintenance-manual.yml', import.meta.url), 'utf8');
+    const runner = readFileSync(new URL('../../.github/workflows/telegram-maintenance-run.yml', import.meta.url), 'utf8');
+    assert.match(manual, /^on:\n  workflow_dispatch:\n/m);
+    assert.match(runner, /^on:\n  workflow_call:\n/m);
+    for (const workflow of [manual, runner]) {
+        assert.doesNotMatch(workflow, /^  (schedule|push|pull_request|workflow_run|repository_dispatch):/m);
+    }
+    for (const workflow of [manual, scheduled]) {
+        assert.match(workflow, /uses: \.\/\.github\/workflows\/telegram-maintenance-run\.yml/);
+        assert.doesNotMatch(workflow, /^concurrency:/m);
+        assert.doesNotMatch(workflow, /secrets: inherit/);
+    }
+    assert.match(runner, /^concurrency:\n  group: telegram-source-maintenance\n  cancel-in-progress: false/m);
+    assert.match(runner, /run: node scripts\/run-telegram-maintenance\.mjs/);
+});
+
 test('maintenance and group policy changes avoid expensive application checks', () => {
-    for (const file of ['.github/workflows/telegram-maintenance.yml', 'scripts/run-telegram-maintenance.mjs',
+    for (const file of ['.github/workflows/telegram-maintenance.yml', '.github/workflows/telegram-maintenance-manual.yml',
+        '.github/workflows/telegram-maintenance-run.yml', 'scripts/run-telegram-maintenance.mjs',
         'scripts/ci-groups.mjs', 'scripts/run-ci-group.mjs']) {
         assert.deepEqual(selected([file]), ['quality']);
         assert.equal(selectJobs([file]).appChecks, false);
