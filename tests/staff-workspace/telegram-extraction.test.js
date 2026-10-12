@@ -387,7 +387,7 @@ test('Telegram extraction protects recruiter edits, reviews evidence and approve
         assert.deepEqual(pageErrors, []);
         mkdirSync(join(root, 'test-results'), { recursive: true });
         await page.evaluate(() => window.scrollTo(0, 0));
-        await expect(page.getByRole('navigation', { name: 'Breadcrumb', exact: true })).toContainText('Telegram intake');
+        await expect(page.getByRole('navigation', { name: 'Breadcrumb', exact: true })).toContainText('Telegram');
         await expect(page.getByRole('navigation', { name: 'Breadcrumb', exact: true })).toContainText('Candidate extraction');
         await page.screenshot({ path: join(root, 'test-results/staff-workspace-telegram-extraction.png'), fullPage: true });
         await page.setViewportSize({ width: 390, height: 844 });
