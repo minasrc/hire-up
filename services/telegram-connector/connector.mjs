@@ -10,6 +10,7 @@ export function createConnector({ host, vault, createTelegram, now = Date.now, o
   let nextHeartbeat = 0; let nextClaim = 0; let nextKeepalive = 0; let pendingReport = null; let busy = false;
   let connectedProfile = null; let clientAbort = new AbortController();
   let seenCiphertext = null; let nextLogout = 0; let logoutFailures = 0;
+  let nextTelegramRetry = 0; let telegramFailures = 0;
   const close = async () => { clientAbort.abort(); connectedProfile = null; const previous = client; client = null; if (previous) await previous.close().catch(() => {}); };
   const active = (version) => !stopped && version === epoch && task && Date.parse(task.leaseExpiresAt) > now();
   async function operation(fn, version) {
@@ -163,14 +164,24 @@ export function createConnector({ host, vault, createTelegram, now = Date.now, o
             epoch++; await close();
             if (!incoming && task) { const record = vault.load(task.id); if (record?.state === 'logged_out') vault.remove(task.id); }
             pendingReport = null; saved = null; seenCiphertext = null; nextLogout = 0; logoutFailures = 0;
+            nextTelegramRetry = 0; telegramFailures = 0;
           }
           task = incoming;
           nextClaim = now() + (task?.status === 'connected' ? 20000 : 5000);
         }
-        await work();
+        if (now() >= nextTelegramRetry) { await work(); telegramFailures = 0; nextTelegramRetry = 0; }
       } catch (error) {
         if (error.status === 401 || error.status === 403) { stopped = true; epoch++; await close(); throw new Error('ACCESS_DENIED'); }
         if (error.status === 409 || error.message === 'STALE_TASK') { epoch++; await close(); task = null; pendingReport = null; nextClaim = 0; return; }
+        if (error.message === 'TELEGRAM_UNAVAILABLE' && task && active(epoch)) {
+          // Network failures do not revoke authorization. Fence late SDK results
+          // before reopening the durable session, while host claims keep renewing.
+          epoch++; await close();
+          seenCiphertext = null;
+          telegramFailures = Math.min(telegramFailures + 1, 5);
+          nextTelegramRetry = now() + Math.min(30000, 1000 * 2 ** telegramFailures);
+          return;
+        }
         if (errors.has(error.message) && task && active(epoch)) {
           const code = error.message;
           epoch++; await close();
