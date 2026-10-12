@@ -7,7 +7,7 @@ import { join } from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { createServiceStore, readPrivateJson } from '../../services/telegram-hosted/store.mjs';
 import { createControlClient } from '../../services/telegram-hosted/http.mjs';
-import { createSupervisor, launchConnector, terminateChild } from '../../services/telegram-hosted/supervisor.mjs';
+import { createSupervisor, connectorStatusCode, launchConnector, terminateChild } from '../../services/telegram-hosted/supervisor.mjs';
 import { once } from 'node:events';
 import { createSupervisionGuard } from '../../services/telegram-connector/supervision.mjs';
 
@@ -79,7 +79,7 @@ test('child fails closed on parent crash, suspend and backward clock movement', 
     assert.equal(f.guard.check(), false, scenario); assert.equal(f.lost(), 1);
   }
 });
-function supervisorFixture({ earlyExitFirst = false } = {}) {
+function supervisorFixture({ earlyExitFirst = false, output = () => {} } = {}) {
   let now = 1000000, mono = 0, heartbeatError = false, delayed;
   const request = pending(), leaseToken = randomUUID(), children = [], requests = [request];
   const prepared = { requestId: request.requestId, workerId: randomUUID(), tokenSha256: 'b'.repeat(64), configPath: '/synthetic/private/config.json' };
@@ -94,7 +94,7 @@ function supervisorFixture({ earlyExitFirst = false } = {}) {
     if (action === 'list') return { requests, nextAfter: null };
     if (action === 'register') return { workerId: input.workerId, state: 'registered' };
   };
-  const supervisor = createSupervisor({ control, store: { prepare: () => prepared }, api,
+  const supervisor = createSupervisor({ control, store: { prepare: () => prepared }, api, output,
     wall: () => now, monotonic: () => mono, spawn: async (_entry, _record, grant) => {
       const child = new EventEmitter(); child.exitCode = earlyExitFirst && !children.length ? 1 : null; child.signalCode = null;
       child.connected = true; child.send = () => {}; child.grant = grant;
@@ -154,4 +154,42 @@ test('real hosted child receives IPC, stops on lost parent and can be forcibly t
   const immediate = join(root, 'immediate-exit.mjs'); writeFileSync(immediate, 'process.exit(1);', { mode: 0o600 });
   const early = await launchConnector(immediate, record, { ...grant, deadline: Date.now() + 74000 }).catch(() => null);
   if (early) { if (early.exitCode === null) await once(early, 'exit'); assert.equal(early.exitCode, 1); }
+});
+
+
+test('child status accepts only exact fixed code messages and never logs arbitrary payloads', async () => {
+  const secret = 'synthetic-private-token';
+  for (const value of [null, [], { type: 'telegram-connector-status', code: secret },
+    { type: 'telegram-connector-status', code: 'CONNECTOR_STARTED', token: secret },
+    { type: 'other', code: 'CONNECTOR_STARTED' }]) assert.equal(connectorStatusCode(value), null);
+  assert.equal(connectorStatusCode({ type: 'telegram-connector-status', code: 'CONNECTOR_INITIALIZING' }), 'CONNECTOR_INITIALIZING');
+  const logs = []; const f = supervisorFixture({ output: code => logs.push(code) }); await f.supervisor.refresh(); await f.supervisor.reconcile();
+  f.children[0].emit('message', { type: 'telegram-connector-status', code: 'CONNECTOR_STARTED', token: secret });
+  f.children[0].emit('message', { type: 'telegram-connector-status', code: secret });
+  assert.deepEqual(logs, ['CONNECTOR_SPAWNED']);
+  f.children[0].emit('message', { type: 'telegram-connector-status', code: 'CONNECTOR_INITIALIZING' });
+  assert.deepEqual(logs, ['CONNECTOR_SPAWNED', 'CONNECTOR_INITIALIZING']);
+  f.children[0].send = (_grant, callback) => callback(new Error(secret));
+  await f.supervisor.refresh(); await new Promise(resolve => setImmediate(resolve));
+  assert.equal(f.children[0].terminated, true);
+  await f.supervisor.stop();
+});
+
+test('real IPC guard stays alive through repeated renewals beyond its first deadline', async t => {
+  const { root } = fixture(t);
+  const entry = join(root, 'synthetic-child.mjs');
+  const moduleUrl = new URL('../../services/telegram-connector/supervision.mjs', import.meta.url).href;
+  writeFileSync(entry, `import { createSupervisionGuard } from ${JSON.stringify(moduleUrl)};
+    const guard = createSupervisionGuard({ onLost: () => process.exit(7) });
+    await guard.ready(); process.send({type:'telegram-connector-status',code:'CONNECTOR_STARTED'});
+    setInterval(() => {}, 100);`, { mode: 0o600 });
+  const leaseToken = randomUUID();
+  const grant = () => ({ type: 'telegram-hosted-lease', leaseToken, deadline: Date.now() + 1000 });
+  const child = await launchConnector(entry, { stateDirectory: root, configPath: '/synthetic/config' }, grant());
+  t.after(() => terminateChild(child));
+  const renewal = setInterval(() => { if (child.connected) child.send(grant(), () => {}); }, 250);
+  t.after(() => clearInterval(renewal));
+  await new Promise(resolve => setTimeout(resolve, 1800));
+  assert.equal(child.exitCode, null); assert.equal(child.signalCode, null);
+  clearInterval(renewal); await terminateChild(child);
 });

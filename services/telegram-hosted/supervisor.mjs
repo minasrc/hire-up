@@ -7,6 +7,18 @@ import { existsSync } from 'node:fs';
 import { join } from 'node:path';
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+export const CONNECTOR_STATUS_CODES = Object.freeze(['CONNECTOR_INITIALIZING', 'CONNECTOR_VAULT_READY', 'CONNECTOR_ADAPTER_READY', 'CONNECTOR_WORKERS_READY', 'CONNECTOR_SDK_READY', 'CONNECTOR_HEARTBEAT_ACKNOWLEDGED', 'CONNECTOR_STARTED', 'CONNECTOR_START_FAILED',
+  'CONNECTOR_RUNTIME_FAILED', 'SUPERVISION_LOST', 'ACCESS_DENIED', 'HOST_UNAVAILABLE', 'LEASE_CLOSED',
+  'PAIRED_CREDENTIAL_CONFLICT', 'NODE_22_REQUIRED', 'CONNECTOR_ALREADY_LOCKED', 'CONNECTOR_STILL_RUNNING',
+  'INVALID_LOCK', 'CANNOT_VERIFY_LOCK', 'UNSAFE_LOCAL_FILE', 'UNSAFE_LOCAL_DIRECTORY', 'INVALID_SERVER',
+  'INVALID_WORKER_TOKEN', 'INVALID_WORKER_ID', 'INVALID_TELEGRAM_CONFIG']);
+export function connectorStatusCode(message) {
+  if (!message || typeof message !== 'object' || Array.isArray(message)
+    || Object.keys(message).length !== 2 || !Object.hasOwn(message, 'type') || !Object.hasOwn(message, 'code')
+    || message.type !== 'telegram-connector-status' || typeof message.code !== 'string'
+    || !CONNECTOR_STATUS_CODES.includes(message.code)) return null;
+  return message.code;
+}
 export function launchConnector(entrypoint, record, grant) {
   // A crashed child can leave its PID lock. Never unlock a live process.
   if (existsSync(join(record.stateDirectory, 'connector.lock'))) unlockStoppedProcess(record.stateDirectory);
@@ -60,7 +72,7 @@ export function createSupervisor({ control, store, api, connectorEntrypoint,
     return shutdown;
   };
   const watch = () => {
-    if (lease && !valid()) { output('SERVICE_LEASE_LOST'); void stop(); }
+    if (!closed && lease && !valid()) { output('SERVICE_LEASE_LOST'); void stop(); }
   };
   const refresh = async () => {
     if (closed || refreshing) return;
@@ -84,7 +96,14 @@ export function createSupervisor({ control, store, api, connectorEntrypoint,
       lease = next;
       if (!valid()) { await stop(); return; }
       for (const { child } of children.values()) {
-        if (child.connected) child.send(grantMessage(), () => {});
+        const fail = async () => {
+          output('CONNECTOR_IPC_FAILED');
+          await terminate(child);
+          for (const [id, entry] of children) if (entry.child === child) children.delete(id);
+        };
+        if (!child.connected) { void fail(); continue; }
+        try { child.send(grantMessage(), error => { if (error) void fail(); }); }
+        catch { void fail(); }
       }
     } catch (error) {
       output(['ACCESS_DENIED', 'LEASE_CONFLICT'].includes(error.message) ? error.message : 'SERVICE_HOST_UNAVAILABLE');
@@ -126,7 +145,11 @@ export function createSupervisor({ control, store, api, connectorEntrypoint,
           if (!valid() || token !== proof) { await terminate(child); return; }
           if (childStopped(child)) throw new Error('CONNECTOR_START_FAILED');
           children.set(item.requestId, { child, record });
-          output('CONNECTOR_STARTED');
+          output('CONNECTOR_SPAWNED');
+          child.on('message', message => {
+            const code = connectorStatusCode(message);
+            if (code && children.get(item.requestId)?.child === child) output(code);
+          });
           child.once('exit', () => {
             if (children.get(item.requestId)?.child !== child) return;
             children.delete(item.requestId);

@@ -67,6 +67,7 @@ export function selectJobs(files, full = false, readFile = readRepoFile) {
         else if (/^src\/app\/staff\/candidates\//.test(file)) jobs = ['staff-workspace', 'duplicate-review', 'profile-search', 'cv-analysis'];
         else if (/^src\/app\/staff\/telegram-intake\/connect\//.test(file)) jobs = ['telegram-connection', 'worker-pairing'];
         else if (file === 'tests/telegram-connector/native-sdk.test.js') jobs = ['telegram-source-updates'];
+        else if (file === 'tests/telegram-connector/hosted-entrypoint.test.js') jobs = ['telegram-connection'];
         else if (/^tests\/evals\/telegram-context\//.test(file)) jobs = ['telegram-extraction'];
         else if (/^src\/app\/staff\/telegram-intake\/context\//.test(file)) jobs = ['telegram-context'];
         else if (/^src\/app\/staff\/telegram-intake\/chats\//.test(file)) jobs = ['telegram-history', 'telegram-source-updates'];
