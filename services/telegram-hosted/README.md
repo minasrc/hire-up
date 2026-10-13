@@ -104,8 +104,10 @@ This deployment supports ten active owner enrollments. Stopped/revoked
 registrations keep their slot until an explicit retirement with logout proof
 or owner confirmation of external revocation. Historical identities remain
 private audit records; uncertain credentials are never silently replaced.
-Public workspace signup and independent workspace selection are separate work;
-this service currently uses the existing authorized workspace membership gate.
+Outside users can use invitation-only independent workspaces after the
+[workspace release](../../docs/staff-workspace-release.md) is enabled. Workspace
+membership and each owner's Telegram session remain separate; the ten active
+enrollment limit is shared across this service. Public signup is not enabled.
 
 ## Moving to persistent hosting
 
