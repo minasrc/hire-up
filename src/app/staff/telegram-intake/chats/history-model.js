@@ -54,10 +54,19 @@ export function connectionGuidance(snapshot) {
     return { description: 'Connect Telegram above to discover chats. Your existing private history remains available; reconnect the same account to resume its imports.', empty: 'Connect Telegram, then discover your chats. Choose chats to import their messages.' };
 }
 
-export function historyPollingDelay(snapshot) {
+export function historyPollingDelay(snapshot, elapsedMs = Infinity) {
     // The inline connection controller immediately refreshes history on status changes.
     // History itself only needs frequent polling while discovery/imports are running.
+    if (snapshot?.discovery?.status === 'active' && elapsedMs < 10000) return 1000;
     return snapshot?.discovery?.status === 'active' || snapshot?.chats?.some(chat => activeStatuses.has(chat.import?.status)) ? 3000 : 15000;
+}
+
+export function chatDisplayTitle(chat, accountUserId) {
+    if (accountUserId && chat.peer?.kind === 'user' && chat.peer.id === accountUserId) return 'Saved messages';
+    if (chat.title && chat.title !== 'Unavailable chat') return chat.title;
+    if (chat.username) return `@${chat.username}`;
+    const kind = ({ user: 'contact', chat: 'group', channel: 'channel' })[chat.peer?.kind] || 'chat';
+    return `Unnamed ${kind} (${chat.peer?.id ?? 'unknown'})`;
 }
 
 export function byteLabel(bytes) {
@@ -68,4 +77,19 @@ export function byteLabel(bytes) {
 export function syncStatus(sync, hostedEnabled = false) {
     if (!sync) return '';
     return ({ off: 'Sync off', waiting_for_history: 'Sync starts after history import', reconnect_required: 'Reconnect Telegram to sync', worker_offline: hostedEnabled ? 'Telegram service offline · Sync resumes when it returns' : 'Mac offline · Sync resumes when it returns', up_to_date: 'Sync up to date', queued: 'Sync queued', syncing: 'Syncing new messages', waiting: 'Sync waiting', paused: 'Sync paused', failed: 'Sync needs attention', capacity_paused: 'Sync capacity reached' })[sync.status] || 'Sync needs attention';
+}
+
+export function discoveryPresentation(snapshot) {
+    const hasChats = (snapshot?.totals?.chats ?? 0) > 0;
+    const active = snapshot?.discovery?.status === 'active';
+    const completed = snapshot?.discovery?.status === 'completed';
+    return {
+        hasChats,
+        button: active ? 'Discovering chats…' : hasChats || completed ? 'Refresh chat list' : 'Discover chats',
+        connectionButton: hasChats ? 'Choose chats to import' : null,
+        description: active ? 'Looking for your Telegram chats. Chats appear here as discovery progresses; you can choose which ones to import.'
+            : hasChats ? 'Choose a chat below or mark several chats to import their messages.'
+                : completed ? 'No chats were found for this account. Check that this is the Telegram account you intended to connect, then refresh the chat list.'
+                    : 'Your Telegram account is connected. Discover your chats first, then choose which conversations to import.',
+    };
 }

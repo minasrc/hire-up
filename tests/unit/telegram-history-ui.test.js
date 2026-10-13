@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { connectionGuidance, historyPollingDelay, importActions, importGuidance, importStatus, selectionPayload, syncStatus } from '../../src/app/staff/telegram-intake/chats/history-model.js';
+import { chatDisplayTitle, connectionGuidance, discoveryPresentation, historyPollingDelay, importActions, importGuidance, importStatus, selectionPayload, syncStatus } from '../../src/app/staff/telegram-intake/chats/history-model.js';
 
 test('bulk selection only submits visible rows and their current versions', () => {
     const rows = [{ id: 'one', version: 2, title: 'Private title', peer: { id: '123' } }, { id: 'two', version: 5 }];
@@ -33,9 +33,19 @@ test('history actions pause active work and resume saved cursors without restart
 });
 
 test('only ongoing discovery or imports require frequent visible polling', () => {
+    assert.equal(historyPollingDelay({ discovery: { status: 'active' }, chats: [] }, 0), 1000);
+    assert.equal(historyPollingDelay({ discovery: { status: 'active' }, chats: [] }, 10000), 3000);
     assert.equal(historyPollingDelay({ discovery: { status: 'active' }, chats: [] }), 3000);
     assert.equal(historyPollingDelay({ discovery: { status: 'completed' }, chats: [{ import: { status: 'waiting' } }] }), 3000);
     assert.equal(historyPollingDelay({ discovery: { status: 'completed' }, chats: [{ import: { status: 'paused' } }] }), 15000);
+});
+
+test('missing chat names use available identity without asserting inaccessible or deleted history', () => {
+    assert.equal(chatDisplayTitle({ title: 'Unavailable chat', peer: { kind: 'user', id: '123' } }, '123'), 'Saved messages');
+    assert.equal(chatDisplayTitle({ title: 'Unavailable chat', username: 'known_contact', peer: { kind: 'user', id: '123' } }), '@known_contact');
+    assert.equal(chatDisplayTitle({ title: 'Unavailable chat', peer: { kind: 'channel', id: '123' } }), 'Unnamed channel (123)');
+    assert.equal(chatDisplayTitle({ title: 'Unavailable chat', peer: { kind: 'user', id: '123' } }), 'Unnamed contact (123)');
+    assert.equal(chatDisplayTitle({ title: 'Recruiting', peer: { kind: 'chat', id: '123' } }), 'Recruiting');
 });
 
 test('completed selected histories offer an explicit sync pause', () => {
@@ -75,4 +85,22 @@ test('pending sign-in guidance identifies the remaining approval step without pe
         assert.equal(historyPollingDelay({ connection }), 15000);
     }
     assert.equal(connectionGuidance({ canImport: true, connection: { status: 'connected' } }), null);
+});
+
+
+test('first discovery guides connected users before exposing chat selection', () => {
+    const initial = discoveryPresentation({ account: { id: 'synthetic' }, totals: { chats: 0 }, discovery: { status: 'idle' } });
+    assert.equal(initial.hasChats, false);
+    assert.equal(initial.button, 'Discover chats');
+    assert.equal(initial.connectionButton, null);
+    assert.match(initial.description, /Discover your chats first/);
+    const active = discoveryPresentation({ totals: { chats: 0 }, discovery: { status: 'active' } });
+    assert.equal(active.button, 'Discovering chats…');
+    assert.match(active.description, /as discovery progresses/);
+    const empty = discoveryPresentation({ totals: { chats: 0 }, discovery: { status: 'completed' } });
+    assert.equal(empty.button, 'Refresh chat list');
+    assert.match(empty.description, /No chats were found for this account/);
+    const found = discoveryPresentation({ totals: { chats: 2 }, discovery: { status: 'active' } });
+    assert.equal(found.hasChats, true);
+    assert.equal(found.connectionButton, 'Choose chats to import');
 });

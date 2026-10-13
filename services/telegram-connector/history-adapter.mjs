@@ -5,7 +5,7 @@ export class HistoryReadError extends Error {
 const positive = /^[1-9][0-9]{0,29}$/;
 export function peerLocator(value) {
   if (!value) return null;
-  const kind = value.userId != null || value.className === 'User' ? 'user' : value.chatId != null || ['Chat', 'ChatForbidden', 'ChatEmpty'].includes(value.className) ? 'chat' : value.channelId != null || ['Channel', 'ChannelForbidden'].includes(value.className) ? 'channel' : null;
+  const kind = value.userId != null || ['User', 'UserEmpty'].includes(value.className) ? 'user' : value.chatId != null || ['Chat', 'ChatForbidden', 'ChatEmpty'].includes(value.className) ? 'chat' : value.channelId != null || ['Channel', 'ChannelForbidden'].includes(value.className) ? 'channel' : null;
   const id = String(value.userId ?? value.chatId ?? value.channelId ?? value.id ?? '');
   return kind && positive.test(id) ? { kind, id } : null;
 }
@@ -90,7 +90,16 @@ export function createHistoryAdapter({ client, Api }) {
     async dialogs({ cursor, limit, readPeer, cachePeer, signal }) {
       const response = await invoke(new Api.messages.GetDialogs({ folderId: cursor.folder, offsetDate: cursor.offsetDate, offsetId: Number(cursor.offsetId), offsetPeer: cursor.offsetPeer ? inputPeer(cursor.offsetPeer, readPeer) : new Api.InputPeerEmpty(), excludePinned: cursor.excludePinned, limit, hash: 0n }), signal);
       if (!Array.isArray(response.dialogs) || !Array.isArray(response.messages)) throw new HistoryReadError('TELEGRAM_UNAVAILABLE');
-      const entities = entitiesOf(response, cachePeer, new Set(response.dialogs.map((dialog) => peerLocator(dialog.peer)).filter(Boolean).map(peerKey)));
+      // Reuse the peers just persisted for this page. Vault reads decrypt the
+      // entire file, so rereading once per dialog adds avoidable disk/crypto work.
+      const pagePeers = new Map();
+      const entities = entitiesOf(response, (peer, value) => { cachePeer(peer, value); pagePeers.set(peerKey(peer), value); }, new Set(response.dialogs.map((dialog) => peerLocator(dialog.peer)).filter(Boolean).map(peerKey)));
+      const pageReadPeer = (peer) => pagePeers.get(peerKey(peer)) ?? readPeer(peer);
+      const messages = new Map();
+      for (const message of response.messages) {
+        const peer = peerLocator(message.peerId);
+        if (peer) messages.set(`${peerKey(peer)}:${String(message.id)}`, message);
+      }
       if (!response.dialogs.length) return { records: [], nextCursor: cursor, done: true };
       const records = []; const seen = new Set();
       let boundary = null;
@@ -99,10 +108,10 @@ export function createHistoryAdapter({ client, Api }) {
         const peer = peerLocator(dialog.peer);
         if (!peer) throw new HistoryReadError('PEER_UNAVAILABLE');
         const entity = entities.get(peerKey(peer));
-        const lastMessage = response.messages.find((message) => message.id === dialog.topMessage && peerKey(peerLocator(message.peerId) ?? {}) === peerKey(peer));
+        const lastMessage = messages.get(`${peerKey(peer)}:${String(dialog.topMessage)}`);
         try {
-          inputPeer(peer, readPeer);
-          boundary = { folder: cursor.folder, offsetDate: lastMessage?.date ?? 0, offsetId: String(dialog.topMessage ?? 0), offsetPeer: peer, excludePinned: true };
+          inputPeer(peer, pageReadPeer);
+          if (!dialog.pinned) boundary = { folder: cursor.folder, offsetDate: lastMessage?.date ?? 0, offsetId: String(dialog.topMessage ?? 0), offsetPeer: peer, excludePinned: true };
         } catch (error) { if (!['PEER_UNAVAILABLE', 'PEER_CACHE_MISSING'].includes(error.code)) throw error; }
         // Public inaccessible peers still appear for review. A following page
         // may repeat rows after the last resolvable boundary; server dedup is safe.
@@ -110,6 +119,9 @@ export function createHistoryAdapter({ client, Api }) {
         seen.add(peerKey(peer));
         records.push({ peer, title: display(entity) || 'Unavailable chat', username: text(entity?.username, 32, true), lastMessageAt: iso(lastMessage?.date, true) });
       }
+      // Pinned rows are outside date ordering. Start the unpinned scan without
+      // their offsets, otherwise an old pinned message can skip newer dialogs.
+      if (!boundary && !cursor.excludePinned && response.dialogs.some(dialog => dialog.pinned)) boundary = { folder: cursor.folder, offsetDate: 0, offsetId: '0', offsetPeer: null, excludePinned: true };
       if (!boundary || JSON.stringify(boundary) === JSON.stringify(cursor)) throw new HistoryReadError('PEER_UNAVAILABLE');
       return { records, nextCursor: boundary, done: false };
     },

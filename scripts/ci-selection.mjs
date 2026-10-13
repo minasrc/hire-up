@@ -114,7 +114,7 @@ function testJobs(file) {
         [/^(candidate-merge|duplicate-review)\./, ['duplicate-review']],
         [/^telegram-intake\./, ['telegram-intake']],
         [/^telegram-(?:connection|hosted(?:-wake)?)\./, ['telegram-connection']],
-        [/^telegram-history/, ['telegram-history']],
+        [/^telegram-(?:history|chat-order)/, ['telegram-history']],
         [/^telegram-(?:context|candidate-context)/, ['telegram-context']],
         [/^telegram-(?:source-(?:updates|refresh)|native-(?:account|channel))/, ['telegram-source-updates']],
         [/^telegram-extraction/, ['telegram-extraction']],

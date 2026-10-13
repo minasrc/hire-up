@@ -158,7 +158,7 @@ test('Telegram browser connects with QR and encrypted 2FA, waits for logout ackn
         await expect(page.getByRole('heading', { name: 'Telegram connected', exact: true })).toBeVisible();
         await expect(page.getByText('@synthetic_recruiter', { exact: true })).toBeVisible();
         await expect(page.getByRole('button', { name: 'Discover chats', exact: true })).toBeEnabled();
-        await expect(page.getByRole('button', { name: 'Choose chats to import', exact: true })).toBeEnabled();
+        await expect(page.getByRole('button', { name: 'Choose chats to import', exact: true })).toHaveCount(0);
         await page.getByRole('button', { name: 'Disconnect Telegram', exact: true }).click();
         await expect(page.getByRole('heading', { name: 'Waiting for Telegram to disconnect' })).toBeVisible();
         await expect(page.getByRole('heading', { name: 'Telegram disconnected', exact: true })).toHaveCount(0);

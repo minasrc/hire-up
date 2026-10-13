@@ -21,7 +21,7 @@ export function createSourceUpdateWorker({ host, vault, now = Date.now, randomId
     if (busy || !active(c)) return {status:'stale'};
     const current = `${c.connectionId}:${c.accountUserId}:${c.generation}`;
     if (current!==scope) {scope=current;nextPoll=0;}
-    if (now()<nextPoll && !c.wake) return {status:'idle'};
+    if (now()<nextPoll && !c.wake) return {status:'idle',idleReason:'local_wait',providerRead:false};
     busy=true; let job;
     try {
       const pending=load(c);
@@ -33,9 +33,9 @@ export function createSourceUpdateWorker({ host, vault, now = Date.now, randomId
           clear(c);nextPoll=now()+5000;return {status:'stale'};
         }
       }
-      if (c.plan?.source===false) return {status:'idle'};
+      if (c.plan?.source===false) return {status:'idle',idleReason:'plan',providerRead:false};
       const response=await host('claim',proof(c)); requireActive(c);job=response.job;
-      if (job===null) {nextPoll=now()+5000;return {status:'idle'};}
+      if (job===null) {nextPoll=now()+5000;return {status:'idle',idleReason:'empty',providerRead:false};}
       if (!valid(job,c)) throw new Error('INVALID_SOURCE_RESPONSE');
       const records=await c.telegram.reconcile({peer:job.peer,messageIds:job.messageIds,accountUserId:c.accountUserId,signal:c.signal,
         readPeer:peer=>vault.loadHistory(c.connectionId,c.accountUserId,`peer:${peerKey(peer)}`),

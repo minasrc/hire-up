@@ -174,7 +174,16 @@ test('Telegram history UI discovers, selects and resumes private full-history im
         await expect(page).toHaveURL(`${baseURL}/staff/telegram-intake/chats`);
         await page.setViewportSize({ width: 1280, height: 720 });
         await expect(page.getByRole('heading', { name: 'Telegram', exact: true })).toBeVisible();
-        await clickAction(page.getByRole('button', { name: 'Discover chats', exact: true }));
+        await expect(page.getByRole('navigation', { name: 'Chat views' })).toHaveCount(0);
+        await expect(page.getByLabel('Search chats', { exact: true })).toHaveCount(0);
+        await expect(page.getByRole('button', { name: 'Import marked chats', exact: true })).toHaveCount(0);
+        const discoveryButtons = page.getByRole('button', { name: 'Discover chats', exact: true });
+        await expect(discoveryButtons).toHaveCount(1);
+        await expect(page.getByRole('button', { name: 'Choose chats to import', exact: true })).toHaveCount(0);
+        assert.equal((await getChats()).discovery.status, 'idle');
+        await clickAction(discoveryButtons);
+        await expect(page.getByRole('button', { name: 'Discovering chats…', exact: true })).toBeDisabled();
+        await expect(page.getByRole('navigation', { name: 'Chat views' })).toHaveCount(0);
         await expect(page.getByText(/Discovering chats in the background/)).toBeVisible();
         const dialogs = Array.from({ length: 55 }, (_, index) => ({
             peer: { kind: 'user', id: String(1000 + index) }, title: `Synthetic chat ${String(index + 1).padStart(2, '0')}`, username: null, lastMessageAt: null,
@@ -191,10 +200,28 @@ test('Telegram history UI discovers, selects and resumes private full-history im
         await refresh();
         await expect(page.getByText(/55 chats found · 0 selected/)).toBeVisible();
         await expect(page.locator('tbody tr')).toHaveCount(50);
+        await page.getByRole('button', { name: 'Choose chats to import', exact: true }).click();
+        await expect(page.getByRole('heading', { name: '3. Choose chats to import', exact: true })).toBeFocused();
         await page.getByRole('button', { name: 'Next', exact: true }).click();
         await expect(page.locator('tbody tr')).toHaveCount(5);
         await page.getByRole('button', { name: 'Previous', exact: true }).click();
         await expect(page.locator('tbody tr')).toHaveCount(50);
+        const historyRead = '**/api/staff/telegram-history?*';
+        let rejectedCursor = false;
+        const rejectStaleCursor = async route => {
+            if (!rejectedCursor && route.request().method() === 'GET' && new URL(route.request().url()).searchParams.has('after')) {
+                rejectedCursor = true;
+                await route.fulfill({ status: 400, contentType: 'application/json', body: JSON.stringify({ error: 'Operation rejected.', code: '22023' }) });
+            } else await route.continue();
+        };
+        await page.route(historyRead, rejectStaleCursor);
+        const resetRead = page.waitForResponse(response => response.request().method() === 'GET' && new URL(response.url()).pathname === '/api/staff/telegram-history' && !new URL(response.url()).searchParams.has('after') && response.status() === 200);
+        await page.getByRole('button', { name: 'Next', exact: true }).click();
+        await expect(page.getByText('The chat list changed. Showing its first page.', { exact: true })).toBeVisible();
+        await resetRead;
+        await expect(page.locator('tbody tr')).toHaveCount(50);
+        assert.equal(rejectedCursor, true, 'A scoped cursor rejection must recover with an authorized first-page read');
+        await page.unroute(historyRead, rejectStaleCursor);
         await page.getByLabel('Mark all chats on this page', { exact: true }).check();
         const selected = await clickAction(page.getByRole('button', { name: 'Import marked chats', exact: true }));
         assert.equal(selected.action, 'selectMany');
