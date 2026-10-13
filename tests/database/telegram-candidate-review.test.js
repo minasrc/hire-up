@@ -7,6 +7,7 @@ import { POSTGRES_17_IMAGE, assertLocalTestEnvironment, psql, startPostgresConta
 import { AUTHZ_ID, installStaffFixture, staffPoolOptions } from '../support/staff-authorization.js';
 import { CJ_SUBJECTS, clientJobFixtureSql } from '../support/client-job-workflows.js';
 import { createTelegramDraft, listTelegramDrafts, getTelegramDraft, decideTelegramDraft, updateTelegramDraft, refreshTelegramReview, registerTelegramWorker, matchTelegramReview, telegramReviewMatches } from '../../src/lib/telegram-intake-operations.js';
+import { withStaffTransaction } from '../../src/lib/staff-authorization.js';
 import { saveCandidateProfile, getCandidateProfile } from '../../src/lib/candidate-profile-operations.js';
 import { telegramHistoryAction, telegramHistoryStatus, telegramOnboardingComplete } from '../../src/lib/telegram-history-operations.js';
 import { normalizeTelegramDraftFields } from '../../src/lib/telegram-intake-contracts.js';
@@ -36,6 +37,14 @@ test('Telegram proposals create candidates without CVs, update exact matches, fe
     assert.equal(profile.candidate.headline, 'Engineer');
     const existingId = randomUUID();
     await saveCandidateProfile(...args, { candidateId: existingId, expectedVersion: null, operationId: randomUUID(), fields: { fullName: 'Existing Person', email: 'existing.flow@example.test', headline: 'Original', location: 'Madrid' } });
+    const foreignCandidate = randomUUID();
+    psql(db, `insert into app.candidates(id,organization_id,full_name,identity_state,lifecycle) values('${foreignCandidate}','${AUTHZ_ID.ORG_A}','Other workspace candidate','established','active');`);
+    const rankedRows = await withStaffTransaction(pool, owner, org, ['candidates.read'], async ({ client }) =>
+        (await client.query('select app.candidate_ranked_directory_rows_v1($1::uuid[]) as rows', [[existingId, foreignCandidate]])).rows[0].rows);
+    assert.equal(rankedRows.length, 1, 'ranked directory hydration never includes another workspace');
+    assert.equal(rankedRows[0].candidateId, existingId);
+    assert.equal(rankedRows[0].email, 'existing.flow@example.test');
+    assert.equal(rankedRows[0].headline, 'Original');
     const update = await createTelegramDraft(...args, { fields: { firstName: 'Existing', lastName: 'Person', primaryEmail: 'existing.flow@example.test', headline: 'Updated' } });
     let review = await getTelegramDraft(...args, update.id);
     assert.equal(review.existingCandidate.id, existingId);

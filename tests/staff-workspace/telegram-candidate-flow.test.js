@@ -198,8 +198,30 @@ test('Candidate intake has a compact chat picker and approve/edit/reject review 
     await page.setViewportSize({ width: 390, height: 844 });
     await page.screenshot({ path: join(root,'test-results/candidate-flow-mobile.png'), fullPage: true });
     assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth), true, 'mobile has no horizontal overflow');
+    let meaningQuery;
+    const meaningRequests = [];
+    const semanticId = randomUUID();
+    await page.route('**/api/staff/profile-search*', route => {
+        meaningRequests.push(route.request().url());
+        if (route.request().method() === 'POST') { meaningQuery = route.request().postDataJSON(); return route.fulfill({ json: { queryId: semanticId, status: 'queued' } }); }
+        if (new URL(route.request().url()).searchParams.has('queryId')) return route.fulfill({ json: { status: 'completed', workerAvailable: true, results: [{ sourceType: 'candidate', sourceId: savedAlice.candidateId, directoryRow: { candidateId: savedAlice.candidateId, fullName: 'Alice Candidate', email: 'alice@example.test', headline: 'Accepted update', ownerName: null, applicationCount: 0, hasCv: false, createdAt: new Date().toISOString() } }], nextAfter: null } });
+        return route.fulfill({ json: { workerAvailable: true, cvAvailable: false } });
+    });
     await page.goto(`${baseURL}/staff/candidates/search`);
-    await expect(page.getByRole('heading', { name: 'Search candidates', exact: true })).toBeVisible();
-    assert.equal(await page.locator('#profile-search-scope').inputValue(), 'approved');
+    await expect(page).toHaveURL(`${baseURL}/staff/candidates`);
+    await expect(page.getByRole('heading', { name: 'Candidates', exact: true })).toBeVisible();
+    const unifiedSearch = page.getByRole('textbox', { name: 'Search candidates', exact: true });
+    await unifiedSearch.fill('alice@example.test');
+    await expect(page.getByRole('table').getByRole('link', { name: 'Alice Candidate', exact: true })).toBeVisible();
+    assert.equal(meaningQuery, undefined, 'email lookup does not enqueue a meaning search');
+    await expect(page).toHaveURL(/q=alice%40example.test/);
+    await unifiedSearch.fill('Remote Ethereum engineer');
+    try { await expect.poll(() => meaningQuery?.query).toBe('Remote Ethereum engineer'); } catch (error) { t.diagnostic(JSON.stringify({ requests: meaningRequests, url: page.url(), input: await unifiedSearch.inputValue(), body: (await page.locator('body').innerText()).slice(-2200) })); throw error; }
+    assert.equal(meaningQuery.scope, 'approved', 'unified search ranks candidate profiles');
+    await expect(page.getByRole('table').getByRole('link', { name: 'Alice Candidate', exact: true })).toBeVisible();
+    await expect(page.getByRole('table').getByText('alice@example.test', { exact: true })).toBeVisible();
+    await expect(page.getByText('1 match · Best matches first', { exact: true })).toBeVisible();
+    assert.equal(new URL(page.url()).pathname, '/staff/candidates');
+    await page.screenshot({ path: join(root, 'test-results/candidate-unified-search.png'), fullPage: true });
     assert.deepEqual(clientErrors, []);
 });

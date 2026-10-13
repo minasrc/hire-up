@@ -1,6 +1,6 @@
 # Telegram candidate intake
 
-Telegram is an intake source. The main flow is Connect → Choose chats → Review proposals. Approved information is saved to the candidate database; candidate search defaults to approved profiles, independently of Telegram.
+Telegram is an intake source. The main flow is Connect → Choose chats → Review proposals. Approved information is saved to the candidate database. The candidate directory has one search box and table: direct name/email matches use the directory lookup; when there is no direct match, descriptive queries rank saved profiles (including accessible retained CV text). The old separate search page redirects to the directory.
 
 - First-time visitors see a compact Connect → Choose chats → Review guide. Starting an import records onboarding completion for that recruiter and workspace. Later Telegram visits open proposals; Manage chats remains available. Removing chats or disconnecting does not restart onboarding. Existing imports are recognized automatically.
 - Overview To-do includes pending candidate proposal links and a count, derived from the private review inbox. Resolved proposals disappear on the next overview visit.
@@ -13,7 +13,7 @@ Telegram is an intake source. The main flow is Connect → Choose chats → Revi
 
 ## Release
 
-Apply `20261013180000_telegram_candidate_review.sql` , `20261014100000_telegram_onboarding.sql`, and `20261014110000_telegram_review_archive.sql` before deploying these application changes. Keep the existing Telegram connector, extraction worker, semantic worker/local embedding service, and maintenance worker running. This change does not replace the embedding model or deploy any services.
+Apply `20261013180000_telegram_candidate_review.sql`, `20261014100000_telegram_onboarding.sql`, `20261014110000_telegram_review_archive.sql`, and `20261014120000_candidate_ranked_directory.sql` before deploying these application changes. Keep the existing Telegram connector, extraction worker, semantic worker/local embedding service, and maintenance worker running. This change does not replace the embedding model or deploy any services.
 
 ## Focused verification
 
@@ -34,3 +34,7 @@ The review page uses an inline candidate list and detail pane with independent s
 ## CV policy
 
 The candidate table allows a null current document; the older upload workflow requires a CV. Telegram profile creation and enrichment intentionally allow no CV. Recommended policy: keep intake searchable without a CV, then require a CV at client submission when that process needs one. This change does not add a new submission requirement.
+
+## Unified search locally
+
+The current interactive demo has a semantic worker using the pinned MiniLM model on `127.0.0.1:8827`. This is separate from the older E5 service on 8817. Its private worker configuration is in ignored `.runtime/unified-search/semantic.json`; its demo credential expires when the disposable demo is stopped. For another workspace or a new demo run, follow `services/semantic-worker/README.md` to configure the current workspace worker credential and the matching local model. Search never presents unavailable inference as an empty successful result.

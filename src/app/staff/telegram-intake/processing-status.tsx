@@ -34,10 +34,10 @@ export function ProcessingStatus({ reviewLink = true, starting = false }: { revi
         return () => { stopped = true; clearTimeout(timer); controller?.abort(); document.removeEventListener('visibilitychange', visibility); };
     }, []);
     const working = starting || importing || !counts || counts.queued + counts.leased + counts.waiting > 0;
-    return <div role="status" aria-label="Telegram activity" className="flex min-h-9 flex-wrap items-center gap-2 rounded-lg bg-muted/50 px-3 py-2" aria-live="polite">
+    return <div role="status" aria-label="Telegram activity" className="flex min-h-9 flex-wrap items-center gap-2 rounded-lg bg-card px-3 py-2" aria-live="polite">
         {working ? <LoaderCircle className="h-3.5 w-3.5 shrink-0 text-primary motion-safe:animate-spin" /> : <CheckCircle2 className="h-3.5 w-3.5 shrink-0 text-primary" />}
         <span className="text-xs text-muted-foreground">{starting ? 'Starting…' : unavailable ? 'Reconnecting…' : working ? 'Finding candidates…' : counts?.failed ? 'Some chats need attention' : counts?.needsReview ? 'Proposals ready' : 'Watching for updates'}</span>
-        <div role={working ? 'progressbar' : undefined} aria-label={working ? 'Processing Telegram information' : undefined} className="h-1.5 min-w-24 max-w-sm flex-1 overflow-hidden rounded-full bg-foreground/10"><div className={`h-full rounded-full ${working ? 'w-1/3 bg-primary motion-safe:animate-pulse' : 'w-full bg-primary/30'}`} /></div>
+        <div role={working ? 'progressbar' : undefined} aria-label={working ? 'Processing Telegram information' : undefined} className="h-1.5 min-w-24 max-w-sm flex-1 overflow-hidden rounded-full bg-secondary"><div className={`h-full rounded-full ${working ? 'w-1/3 bg-attention motion-safe:animate-pulse' : 'w-full bg-attention/60'}`} /></div>
         {reviewLink ? <Button asChild variant="ghost" size="sm" className="ml-auto h-6 px-2 text-xs"><Link href="/staff/telegram-intake">Review proposals</Link></Button> : null}
     </div>;
 }
