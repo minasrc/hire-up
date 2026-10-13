@@ -7,7 +7,7 @@ import { createTelegramDraft, registerTelegramWorker } from '../src/lib/telegram
 
 export const telegramDemoSamples = [
     { chat: 'Engineering community', name: 'Alex Rivera', text: 'I am Alex Rivera. My email is alex@example.test. I am a Senior Solidity engineer in Barcelona. I have five years of Ethereum experience and I am open to remote roles.' },
-    { chat: 'Talent network', name: 'Maya Chen', text: 'I am Maya Chen. My email is maya@example.test. I moved to Lisbon. I am now a Senior backend engineer and lead a backend team. I am interested in remote opportunities.' },
+    { chat: 'Talent network', name: 'Maya Chen', text: 'I am Maya Chen. My email is maya@example.test. I moved to Lisbon. I am now a Staff backend engineer and lead a platform team working with Go and Python. I am interested in remote opportunities. My salary expectation is EUR 95,000 per year.' },
     { chat: 'Web3 jobs', name: 'Jordan Blake', text: 'I am Jordan Blake, a Rust and blockchain engineer in Berlin. My email is jordan@example.test. I have four years building smart contracts and am looking for a full-time engineering role.' },
     { chat: 'Product designers', name: 'Casey Morgan', text: 'I am Casey Morgan, a Senior product designer in Valencia. My email is casey@example.test. I design SaaS products in Figma and am available for contract work.' },
     { chat: 'Remote work', name: 'Morgan Lee', text: 'I am Morgan Lee, a Python backend engineer based in Porto. My email is morgan@example.test. I have six years of experience and am seeking fully remote roles.' },
@@ -30,8 +30,8 @@ export async function seedTelegramDemo(db, password, { liveExtraction = false } 
             professionalSummary: 'Five years building Ethereum applications. Open to remote roles.',
         } });
         update = await createTelegramDraft(...args, { sourceTitle: 'Talent network', fields: {
-            firstName: 'Maya', lastName: 'Chen', primaryEmail: 'maya@example.test', headline: 'Senior backend engineer', location: 'Lisbon',
-            professionalSummary: 'Now leads a backend team and is interested in remote opportunities.',
+            firstName: 'Maya', lastName: 'Chen', primaryEmail: 'maya@example.test', headline: 'Staff backend engineer', location: 'Lisbon', compensationPreference: 'EUR 95,000 per year',
+            professionalSummary: 'Leads a platform team using Go and Python. Interested in remote opportunities.',
         } });
         await createTelegramDraft(...args, { sourceTitle: 'Engineering community', fields: {
             firstName: 'Sam', lastName: 'Taylor', headline: 'Product designer', professionalSummary: 'Available for contract work.',
