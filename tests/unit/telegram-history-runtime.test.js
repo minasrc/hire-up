@@ -283,3 +283,18 @@ test('incremental SDK reads preserve an exclusive checkpoint and a frozen upper 
     await assert.rejects(f.adapter.history({ ...f.common, peer: { kind: 'chat', id: '5' }, cursor: { beforeMessageId: null, upperMessageId: '14', afterMessageId: '10' } }), { code: 'PEER_UNAVAILABLE' });
   }
 });
+
+test('pinned-only discovery pages retain rows and restart chronological pagination without skipping dialogs', async () => {
+  const f = sdkFixture();
+  const cursor = { folder: 0, offsetDate: 0, offsetId: '0', offsetPeer: null, excludePinned: false };
+  f.queue.push({ users: [], chats: [{ className: 'Chat', id: 5n, title: 'Old pinned group' }], dialogs: [{ className: 'Dialog', peer: { chatId: 5n }, topMessage: 1, pinned: true }], messages: [{ id: 1, peerId: { chatId: 5n }, date: 1 }] });
+  const pinned = await f.adapter.dialogs({ ...f.common, cursor });
+  assert.equal(pinned.records[0].title, 'Old pinned group');
+  assert.deepEqual(pinned.nextCursor, { ...cursor, excludePinned: true });
+  f.queue.push({ users: [], chats: [{ className: 'Chat', id: 6n, title: 'Recent group' }], dialogs: [{ className: 'Dialog', peer: { chatId: 6n }, topMessage: 20 }], messages: [{ id: 20, peerId: { chatId: 6n }, date: 200 }] });
+  const unpinned = await f.adapter.dialogs({ ...f.common, cursor: pinned.nextCursor });
+  assert.equal(f.calls[1].request.offsetDate, 0);
+  assert.equal(f.calls[1].request.excludePinned, true);
+  assert.equal(unpinned.records[0].title, 'Recent group');
+  assert.equal(unpinned.nextCursor.offsetId, '20');
+});
