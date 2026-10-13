@@ -17,6 +17,8 @@ function staffLayout(loadStaffCapabilities) {
     const exports = {};
     const imports = {
         'react/jsx-runtime': jsxRuntime,
+        '@/lib/staff-workspace-context.server': { multiWorkspaceEnabled: () => true },
+        './workspace-boundary': { WorkspaceBoundary: ({ children }) => jsx('div', { 'data-workspace-boundary': 'true', children }) },
         react: { Suspense: ({ children }) => children },
         './staff-shell-summary': { StaffShellSummarySeed: () => null },
         '@/lib/workspace.server': {
@@ -49,9 +51,14 @@ function staffLayout(loadStaffCapabilities) {
     });
     exports.default.seed = async () => {
         const tree = await exports.default({ children: null });
-        const shell = tree.props.children.props.children.find(
-            (child) => child?.props?.summaryContent,
-        );
+        function findShell(node) {
+            if (Array.isArray(node)) return node.map(findShell).find(Boolean);
+            if (!node || typeof node !== 'object') return null;
+            if (node.props?.summaryContent) return node;
+            return findShell(node.props?.children);
+        }
+        const shell = findShell(tree);
+        assert.ok(shell, 'Workspace boundary and session provider must retain the streamed shell seed');
         return shell.props.summaryContent.props.children.type();
     };
     return exports.default;
@@ -89,6 +96,8 @@ test('verified members get the shell with the lightweight capabilities', async (
     assert.match(html, /data-capabilities="present"/);
     assert.match(html, /data-session="true"/);
     assert.match(html, /data-scope="organization-a:user-a"/);
+    assert.match(html, /data-workspace-boundary="true"/);
+    assert.match(html, /name="staff-workspace-id" content="organization-a"/);
     assert.match(html, /data-user-id="user-a"/);
     assert.match(html, /data-time-zone="Europe\/Madrid"/);
     assert.match(html, /data-time-zone-version="4"/);

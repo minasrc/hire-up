@@ -1,12 +1,16 @@
-"use client";
+'use client';
 
-import { useRef, useState } from 'react';
+import { staffWorkspaceFetch } from '@/lib/staff-workspace-fetch';
+
+import { useRef, useState, useSyncExternalStore } from 'react';
+
+const clientReady = { subscribe: () => () => {}, snapshot: () => true, serverSnapshot: () => false };
 
 type MfaError = { message: string; returnToStaff?: boolean };
 type MfaResult = { error?: MfaError; backupCodes?: string[] };
 
 async function postCode(url: string, code: string, backup = false): Promise<MfaResult> {
-    const response = await fetch(url, {
+    const response = await staffWorkspaceFetch(url, {
         method: 'POST', headers: { 'content-type': 'application/json' },
         body: JSON.stringify(backup ? { code, method: 'backup' } : { code }),
     });
@@ -41,6 +45,7 @@ function CodeForm({ onSubmit, label, backup = false, onComplete }: {
     backup?: boolean;
     onComplete?: (result: MfaResult) => void;
 }) {
+    const hydrated = useSyncExternalStore(clientReady.subscribe, clientReady.snapshot, clientReady.serverSnapshot);
     const [code, setCode] = useState('');
     const [error, setError] = useState<MfaError | null>(null);
     const [busy, setBusy] = useState(false);
@@ -78,7 +83,7 @@ function CodeForm({ onSubmit, label, backup = false, onComplete }: {
             <label className="text-sm" htmlFor={backup ? 'backup-code' : 'authenticator-code'}>
                 {backup ? 'Backup code' : 'Authenticator code'}
             </label>
-            <input id={backup ? 'backup-code' : 'authenticator-code'}
+            <input id={backup ? 'backup-code' : 'authenticator-code'} disabled={!hydrated || busy}
                 inputMode={backup ? 'text' : 'numeric'} autoComplete={backup ? 'off' : 'one-time-code'}
                 spellCheck={false} autoCapitalize="none" maxLength={backup ? 64 : 6}
                 value={code} onChange={(event) => setCode(backup ? event.target.value : event.target.value.replace(/\D/g, ''))}
@@ -88,7 +93,7 @@ function CodeForm({ onSubmit, label, backup = false, onComplete }: {
                 <p>{error.message}</p>
                 {error.returnToStaff && <a href="/staff" className="mt-2 inline-block text-foreground underline">Continue to staff</a>}
             </div>}
-            <button type="submit" disabled={busy || !valid}
+            <button type="submit" disabled={!hydrated || busy || !valid}
                 className="rounded-md bg-foreground px-5 py-2.5 text-sm font-medium text-background transition-opacity hover:opacity-80 disabled:opacity-40">
                 {busy ? 'Checking…' : label}
             </button>

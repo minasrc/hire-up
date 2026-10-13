@@ -17,6 +17,7 @@ const exports = {};
 runInNewContext(compiled, {
     exports,
     require: name => {
+        if (name === '@/lib/staff-workspace-fetch') return { staffWorkspaceFetch: (...args) => fetch(...args), refreshStaffWorkspace: router => router.refresh(), staffWorkspaceUrl: href => href };
         if (name === 'react') return React;
         if (name === 'react/jsx-runtime') return jsxRuntime;
         if (name === '@/lib/staff-dates') return { staffTimeZone };
