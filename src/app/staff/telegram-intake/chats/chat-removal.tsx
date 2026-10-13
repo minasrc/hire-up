@@ -185,16 +185,16 @@ export function ChatRemoval({ chatId, title, state = 'none', receipt, disabled, 
                 <DialogDescription>
                     {title || 'Untitled chat'}. {mode === 'reimport'
                         ? 'Import this chat’s available history again and resume ongoing sync.'
-                        : 'Review what will be removed from your private workspace.'}
+                        : 'Remove this chat’s saved import.'}
                 </DialogDescription>
                 {busy ? <p role="status">{preview ? 'Submitting your request…' : 'Loading removal details…'}</p> : null}
                 {error ? <p role="alert" className="text-sm">{error}</p> : null}
                 {preview ? <div className="space-y-3 text-sm">
                     {mode === 'request' ? <>
-                        <p>{preview.messages.toLocaleString()} imported messages and {preview.unapprovedDrafts.toLocaleString()} unapproved drafts will be removed, together with their copied source context and private analysis.</p>
-                        <p>{preview.approvedCandidates.toLocaleString()} approved candidate profiles, reviewed CV text and documents are kept and managed separately. Messages in Telegram stay unchanged.</p>
-                        <p>Imports and sync stop immediately. Removal completes after server, connector and private file cleanup are confirmed. You can request a fresh import after removal completes.</p>
-                    </> : <p>A fresh import requires the same account to be connected. New history and private drafts will use your workspace storage again.</p>}
+                        <ul className="space-y-2"><li>Remove: {preview.messages.toLocaleString()} saved messages and source copies.</li><li>Discard: {preview.unapprovedDrafts.toLocaleString()} related unreviewed proposals, including shared proposals and their draft CVs and analysis.</li><li>Keep: saved candidates, their CVs, and messages in Telegram.</li><li>Stop: imports and updates for this chat.</li></ul>
+
+                        <p className="text-xs text-muted-foreground">Cleanup runs in the background. You can import again afterwards.</p>
+                    </> : <p>Reconnect the same account to import again.</p>}
                     {removalPending(preview.state)
                         ? <p role="status">Removal is already in progress. Close this dialog to view its status.</p>
                         : <label className="flex items-start gap-2">
@@ -203,7 +203,7 @@ export function ChatRemoval({ chatId, title, state = 'none', receipt, disabled, 
                                 className="mt-1 h-4 w-4 accent-primary" />
                             <span>{mode === 'reimport'
                                 ? 'I want to import this chat again and resume sync.'
-                                : 'I understand that this removes imported history and unapproved drafts from my workspace.'}</span>
+                                : 'Remove saved messages and related unreviewed proposals.'}</span>
                         </label>}
                     <Button disabled={confirmDisabled} onClick={() => void confirm()}>
                         {mode === 'reimport' ? 'Confirm fresh import' : 'Confirm removal'}

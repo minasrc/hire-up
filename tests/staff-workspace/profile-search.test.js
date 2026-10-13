@@ -191,7 +191,7 @@ test('Profile search separates keyword lookup, private scopes and asynchronous r
         assert.equal(new URL(page.url()).searchParams.get('queryId'), cancelled.queryId);
         assert.equal(new URL(page.url()).searchParams.has('query'), false);
         assert.ok(!page.url().includes('Solidity'));
-        await expect(page.getByText('Waiting for the Mac search worker', { exact: true })).toBeVisible();
+        await expect(page.getByText('Waiting for search service', { exact: true })).toBeVisible();
         const leased = (await worker('claim')).job; assert.equal(leased.kind, 'query');
         const cancelledResponse = page.waitForResponse(response => response.url() === endpoint && response.request().postDataJSON()?.action === 'cancel');
         await page.getByRole('button', { name: 'Cancel search', exact: true }).click(); assert.equal((await cancelledResponse).status(), 200);

@@ -15,7 +15,6 @@ import { CvAnalysisReview } from './cv-analysis/cv-analysis-review';
 import { mergeAnalysisDraft } from './cv-analysis/analysis-model';
 import { CvRetrieval } from './cv/cv-retrieval';
 import { classifyCvDraftRefresh } from './cv/cv-model';
-import { DraftSuggestions } from './extraction/draft-suggestions';
 import { draftName, editableFields, errorFields, fieldLabels, reviewLabels, fieldsForSave, viewLabels } from './intake-model';
 import type { IntakeDraft, IntakeResult, IntakeView, MissingField } from './intake-model';
 import { StaffDate } from '../staff-date';
@@ -130,6 +129,7 @@ function DraftEditor({ id, onUpdate, onNotice, onDone, onReviewState }: { id: st
     const [matchQuery, setMatchQuery] = useState('');
     const [matches, setMatches] = useState<{ id: string; name: string; email: string | null }[] | null>(null);
     const [editing, setEditing] = useState(false);
+    const [fieldReviews, setFieldReviews] = useState<Record<string, { choice: 'approve' | 'reject'; proposed: string }>>({});
     const [closedEdits, setClosedEdits] = useState<Record<string, string> | null>(null);
     const [candidateId, setCandidateId] = useState<string | null>(null);
     const [file, setFile] = useState<File | null>(null);
@@ -141,21 +141,35 @@ function DraftEditor({ id, onUpdate, onNotice, onDone, onReviewState }: { id: st
         const controller = new AbortController();
         request(url, { signal: controller.signal }).then(row => {
             if (controller.signal.aborted) return;
-            setDraft(row); setFields(editableFields(reviewFields(row))); setErrors({}); setMessage(''); setConflict(false); setCandidateId(row.candidateId ?? null);
+            setFieldReviews({}); setDraft(row); setFields(editableFields(reviewFields(row))); setErrors({}); setMessage(''); setConflict(false); setCandidateId(row.candidateId ?? null);
         }).catch(error => { if (!controller.signal.aborted) setMessage(error.message); })
             .finally(() => { if (!controller.signal.aborted) setLoading(false); });
         return () => controller.abort();
     }, [url, reload]);
 
     const dirty = draft && JSON.stringify(fields) !== JSON.stringify(editableFields(reviewFields(draft)));
+    const originalFields = draft ? editableFields(reviewFields(draft)) : {};
+    const beforeFields = draft?.existingCandidate ? editableFields(draft.existingCandidate.fields) : {};
+    const proposedValue = (key: string) => fieldReviews[key]?.choice === 'reject' && fields[key] === beforeFields[key] ? originalFields[key] ?? '' : fields[key] ?? '';
+    const changedKeys = draft?.existingCandidate ? Object.keys(fieldLabels).filter(key => key !== 'cv' && proposedValue(key) !== (beforeFields[key] ?? '')) : [];
+    const unreviewedChanges = changedKeys.filter(key => !fieldReviews[key] || fieldReviews[key].proposed !== proposedValue(key));
+    function reviewChange(key: string, choice: 'approve' | 'reject') {
+        const proposed = proposedValue(key);
+        setFieldReviews(current => ({ ...current, [key]: { choice, proposed } }));
+        setFields(current => ({ ...current, [key]: choice === 'reject' ? beforeFields[key] ?? '' : proposed }));
+    }
+    function editField(key: string, value: string) {
+        setFields(current => ({ ...current, [key]: value }));
+        setFieldReviews(current => { const next = { ...current }; delete next[key]; return next; });
+    }
     const terminal = draft?.status === 'approved' || draft?.status === 'discarded';
-    useEffect(() => { onReviewState(Boolean(dirty), busy); return () => onReviewState(false, false); }, [dirty, busy, onReviewState]);
+    useEffect(() => { onReviewState(Boolean(dirty) || Object.keys(fieldReviews).length > 0, busy); return () => onReviewState(false, false); }, [dirty, fieldReviews, busy, onReviewState]);
 
     function refreshDraft() {
         if (draft?.existingCandidate && conflict) {
             setBusy(true);
             request(`${url}/refresh`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ expectedVersion: draft.version }) })
-                .then(row => { accept(row); setConflict(false); setMessage('Profile refreshed. Review the changes again.'); })
+                .then(row => { accept(row); setFieldReviews({}); setConflict(false); setMessage('Profile refreshed. Review the changes again.'); })
                 .catch(fail).finally(() => setBusy(false));
         } else { setLoading(true); setReload(value => value + 1); }
     }
@@ -176,7 +190,7 @@ function DraftEditor({ id, onUpdate, onNotice, onDone, onReviewState }: { id: st
                     onUpdate({ ...draft!, status: 'duplicate' });
                 }
                 setConflict(true);
-                setMessage(error.result?.status === 'duplicate' ? 'An existing candidate matches this draft. Review that profile before continuing.' : 'This draft changed since you opened it. Your edits are preserved. Refresh the draft to load the latest version.');
+                setMessage(error.result?.status === 'duplicate' ? 'An existing candidate matches this draft. Review that profile before continuing.' : 'Proposal changed. Refresh to review it again. Your edits are preserved.');
                 return;
             }
         }
@@ -232,6 +246,10 @@ function DraftEditor({ id, onUpdate, onNotice, onDone, onReviewState }: { id: st
 
     async function run(action: 'save' | 'approve' | 'discard' | 'snooze' | 'reopen') {
         if (!draft || busy || conflict) return;
+        if (action === 'approve' && draft.existingCandidate) {
+            if (unreviewedChanges.length) { setMessage('Review each change first.'); return; }
+            if (!changedKeys.some(key => fieldReviews[key]?.choice === 'approve')) action = 'discard';
+        }
         setBusy(true); setMessage('');
         try {
             let current = draft;
@@ -280,24 +298,25 @@ function DraftEditor({ id, onUpdate, onNotice, onDone, onReviewState }: { id: st
     return <div className="flex min-h-full flex-col gap-4 p-5" aria-busy={busy}>
         <div className="flex items-start justify-between gap-3"><div><h2 className="font-semibold">{terminal ? draft.status === 'approved' ? 'Approved candidate' : 'Rejected proposal' : [fields.firstName, fields.lastName].filter(Boolean).join(' ') || draftName(draft)}</h2><p className="mt-1 text-xs text-muted-foreground">{fields.primaryEmail || draft.sourceTitle}</p></div><Badge variant="secondary">{draft.existingCandidate ? 'Profile update' : 'New candidate'}</Badge></div>
         {message ? <div role={conflict || Object.keys(errors).length ? 'alert' : 'status'} className="space-y-3 rounded-lg border border-border bg-muted/30 p-3 text-sm"><p>{message}</p>{conflict ? <Button variant="outline" size="sm" onClick={refreshDraft}>Refresh draft{dirty ? ' (replace my edits)' : ''}</Button> : null}</div> : null}
-        {closedEdits ? <div className="space-y-2"><Label htmlFor="closed-draft-edits">Your unsaved changes</Label><Textarea id="closed-draft-edits" readOnly rows={6} value={Object.entries(closedEdits).map(([key, value]) => `${fieldLabels[key] ?? key}: ${value || '(cleared)'}`).join('\n')} /><p className="text-xs text-muted-foreground">These values are available to copy in this open review only. They were not added to the closed draft or candidate profile.</p></div> : null}
+        {closedEdits ? <div className="space-y-2"><Label htmlFor="closed-draft-edits">Your unsaved changes</Label><Textarea id="closed-draft-edits" readOnly rows={6} value={Object.entries(closedEdits).map(([key, value]) => `${fieldLabels[key] ?? key}: ${value || '(cleared)'}`).join('\n')} /><p className="text-xs text-muted-foreground">Unsaved. Copy these before leaving.</p></div> : null}
         {candidateId ? <Link className="text-sm font-medium underline underline-offset-4" href={`/staff/candidates/${encodeURIComponent(candidateId)}`}>Open {draft.status === 'duplicate' ? 'existing' : 'approved'} candidate</Link> : null}
         {Object.keys(errors).length ? <div role="alert" className="rounded-lg border border-border p-3 text-sm"><p className="font-medium">Resolve these issues before approval:</p><ul className="mt-2 list-disc space-y-1 pl-5">{Object.entries(errors).map(([key, error]) => <li key={key}><a className="underline underline-offset-4" href={`#intake-${key}`}>{reviewLabels[key] ?? key}: {error}</a></li>)}</ul></div> : null}
 
         <details className="rounded-lg bg-muted/50 px-3 py-2"><summary className="cursor-pointer text-xs text-muted-foreground">Review options</summary><div className="mt-3 space-y-3">        {!terminal ? <details className="rounded-lg border p-3"><summary className="cursor-pointer text-sm">{draft.existingCandidate ? 'Choose a different candidate' : 'Already in the database?'}</summary><form onSubmit={findCandidates} className="mt-3 flex gap-2"><Label htmlFor="match-candidate" className="sr-only">Find existing candidate</Label><Input id="match-candidate" value={matchQuery} maxLength={100} onChange={event => setMatchQuery(event.target.value)} placeholder="Name or email…" /><Button type="submit" variant="outline" disabled={busy || !matchQuery.trim()}><Search /><span className="sr-only">Find candidate</span></Button></form>{dirty ? <p className="mt-2 text-xs text-muted-foreground">Save your edits before choosing another profile.</p> : null}{matches?.length === 0 ? <p className="mt-3 text-sm text-muted-foreground">No matching candidates.</p> : null}<div className="mt-2 divide-y">{matches?.map(item => <button key={item.id} type="button" disabled={busy || Boolean(dirty) || conflict} onClick={() => void chooseCandidate(item.id)} className="block w-full rounded p-3 text-left text-sm hover:bg-muted disabled:opacity-50"><span className="font-medium">{item.name}</span><span className="block text-xs text-muted-foreground">{item.email}</span></button>)}</div></details> : null}
-        <details className="rounded-lg border p-3"><summary className="cursor-pointer text-sm">Review individual suggestions</summary><div className="mt-3"><DraftSuggestions draft={draft} dirty={Boolean(dirty)} busy={busy} conflict={conflict} onUpdate={row => { accept(row); setErrors(current => { const next = { ...current }; delete next.proposals; return next; }); setMessage(''); }} onBusyChange={setBusy} onConflict={() => fail(new IntakeError('Draft changed', 409, {}))} /></div></details>
+
 </div></details>
         {!terminal && !editing ? <dl className="grid gap-3 sm:grid-cols-2">{Object.entries(fieldLabels).filter(([key]) => key !== 'cv').map(([key, label]) => {
-            const value = fields[key]; const before = draft.existingCandidate ? editableFields(draft.existingCandidate.fields)[key] : null;
+            const value = proposedValue(key); const before = draft.existingCandidate ? beforeFields[key] : null;
             const changed = draft.existingCandidate && value !== before;
+            const decision = fieldReviews[key]?.proposed === value ? fieldReviews[key].choice : null;
             if ((!value || ['firstName', 'lastName', 'primaryEmail'].includes(key)) && !changed) return null;
-            return <div key={key} className={changed ? 'rounded-xl border border-border bg-muted/70 p-3 sm:col-span-2' : key === 'professionalSummary' ? 'sm:col-span-2' : ''}><dt className="text-xs text-muted-foreground">{label}{changed ? <span className="ml-2 font-medium text-primary">Changed</span> : null}</dt><dd className="mt-1 whitespace-pre-wrap break-words text-sm">{changed ? <><span className="text-muted-foreground line-through">{before || 'Not set'}</span><ArrowRight className="mx-2 inline h-3 w-3" /></> : null}{value || 'Removed'}</dd></div>;
+            return <div key={key} className={changed ? 'rounded-xl border border-border bg-muted/70 p-3 sm:col-span-2' : key === 'professionalSummary' ? 'sm:col-span-2' : ''}><dt className="text-xs text-muted-foreground">{label}{changed && decision ? <span className="ml-2 font-medium text-foreground">{decision === 'approve' ? 'Approved' : 'Rejected'}</span> : null}</dt><dd className="mt-1 whitespace-pre-wrap break-words text-sm">{changed ? <><span className="text-muted-foreground line-through">{before || 'Not set'}</span><ArrowRight className="mx-2 inline h-3 w-3" /></> : null}{value || 'Removed'}</dd>{changed ? <div className="mt-2 flex gap-2"><Button size="sm" variant={decision === 'approve' ? 'secondary' : 'ghost'} aria-label={`Approve ${label} change`} aria-pressed={decision === 'approve'} disabled={busy || conflict} onClick={() => reviewChange(key, 'approve')}><Check className="h-3.5 w-3.5" />Approve</Button><Button size="sm" variant={decision === 'reject' ? 'secondary' : 'ghost'} aria-label={`Reject ${label} change`} aria-pressed={decision === 'reject'} disabled={busy || conflict} onClick={() => reviewChange(key, 'reject')}><X className="h-3.5 w-3.5" />Reject</Button></div> : null}</div>;
         })}</dl> : null}
         {!terminal && editing ? <form className="space-y-5" onSubmit={event => { event.preventDefault(); void run('save'); }} noValidate>
             <fieldset disabled={busy || terminal || conflict} className="grid gap-4 sm:grid-cols-2">
                 {Object.entries(fieldLabels).filter(([key]) => key !== 'cv').map(([key, label]) => <div key={key} className={['professionalSummary', 'secondaryEmails', 'compensationPreference'].includes(key) ? 'space-y-2 sm:col-span-2' : 'space-y-2'}>
                     <Label htmlFor={`intake-${key}`}>{label}</Label>
-                    {['professionalSummary', 'secondaryEmails'].includes(key) ? <Textarea id={`intake-${key}`} value={fields[key] ?? ''} rows={key === 'professionalSummary' ? 4 : 2} onChange={event => setFields(current => ({ ...current, [key]: event.target.value }))} aria-invalid={Boolean(errors[key])} aria-describedby={errors[key] ? `intake-error-${key}` : key === 'secondaryEmails' ? 'secondary-emails-help' : undefined} /> : <Input id={`intake-${key}`} value={fields[key] ?? ''} type={key === 'primaryEmail' ? 'email' : key === 'professionalUrl' ? 'url' : 'text'} onChange={event => setFields(current => ({ ...current, [key]: event.target.value }))} aria-invalid={Boolean(errors[key])} aria-describedby={errors[key] ? `intake-error-${key}` : undefined} />}
+                    {['professionalSummary', 'secondaryEmails'].includes(key) ? <Textarea id={`intake-${key}`} value={fields[key] ?? ''} rows={key === 'professionalSummary' ? 4 : 2} onChange={event => editField(key, event.target.value)} aria-invalid={Boolean(errors[key])} aria-describedby={errors[key] ? `intake-error-${key}` : key === 'secondaryEmails' ? 'secondary-emails-help' : undefined} /> : <Input id={`intake-${key}`} value={fields[key] ?? ''} type={key === 'primaryEmail' ? 'email' : key === 'professionalUrl' ? 'url' : 'text'} onChange={event => editField(key, event.target.value)} aria-invalid={Boolean(errors[key])} aria-describedby={errors[key] ? `intake-error-${key}` : undefined} />}
                     {key === 'secondaryEmails' ? <p id="secondary-emails-help" className="text-xs text-muted-foreground">One address per line, or separated by commas.</p> : null}
                     {errors[key] ? <p id={`intake-error-${key}`} className="text-xs font-medium">{errors[key]}</p> : null}
                 </div>)}
@@ -312,11 +331,12 @@ function DraftEditor({ id, onUpdate, onNotice, onDone, onReviewState }: { id: st
             <CvAnalysisReview key={`${draft.id}:${draft.documentRevision}:${terminal}`} draft={draft} dirty={Boolean(dirty)} busy={busy} conflict={conflict} onDraft={refreshAnalysisDraft} onBusyChange={setBusy} onConflict={() => fail(new IntakeError('Draft changed', 409, {}))} />
             <CvRetrieval draft={draft} busy={busy} conflict={conflict} onDraft={refreshRetrievedDraft} />
         </details>
-        {!terminal ? <details className="rounded-lg bg-muted/40 p-3"><summary className="cursor-pointer text-sm font-medium">View source ({draft.evidenceCount ?? draft.evidence?.length ?? 0})</summary><p className="mt-3 text-xs text-muted-foreground">Source messages are for intake review only and are not added to the candidate profile.</p>{draft.evidenceTruncated ? <p className="mt-2 text-xs text-muted-foreground">Showing the latest 100 source quotes. Earlier quotes remain private; pending suggestions include their own evidence.</p> : null}<div className="mt-4 space-y-4">{draft.evidence?.length ? draft.evidence.map(item => <article key={item.id} className="border-t border-border pt-3"><p className="text-xs text-muted-foreground">{item.senderName || 'Unknown sender'} · {dateLabel(item.sentAt)}</p><p className="mt-2 whitespace-pre-wrap break-words text-sm">{item.text}</p></article>) : <p className="text-sm text-muted-foreground">No source evidence attached.</p>}</div></details> : null}
+        {!terminal ? <details className="rounded-lg bg-muted/40 p-3"><summary className="cursor-pointer text-sm font-medium">View source ({draft.evidenceCount ?? draft.evidence?.length ?? 0})</summary>{draft.evidenceTruncated ? <p className="mt-2 text-xs text-muted-foreground">Showing the latest 100 source quotes. Earlier quotes remain private; pending suggestions include their own evidence.</p> : null}<div className="mt-4 space-y-4">{draft.evidence?.length ? draft.evidence.map(item => <article key={item.id} className="border-t border-border pt-3"><p className="text-xs text-muted-foreground">{item.senderName || 'Unknown sender'} · {dateLabel(item.sentAt)}</p><p className="mt-2 whitespace-pre-wrap break-words text-sm">{item.text}</p></article>) : <p className="text-sm text-muted-foreground">No source evidence attached.</p>}</div></details> : null}
         {!terminal ? <div className="sticky bottom-0 z-10 -mx-5 -mb-5 mt-auto flex flex-wrap items-center gap-2 border-t bg-card p-4 shadow-sm">
-            <Button disabled={busy || conflict || draft.status === 'snoozed'} onClick={() => void run('approve')}><Check />{busy ? 'Saving…' : editing ? 'Save and approve' : 'Approve'}</Button>
+            <Button disabled={busy || conflict || draft.status === 'snoozed' || Boolean(draft.existingCandidate && (editing || unreviewedChanges.length))} onClick={() => void run('approve')}><Check />{busy ? 'Saving…' : draft.existingCandidate ? 'Save updates' : editing ? 'Save and approve' : 'Approve'}</Button>
+            {draft.existingCandidate && unreviewedChanges.length ? <span className="text-xs text-muted-foreground">{unreviewedChanges.length} to review</span> : null}
             <Button variant="outline" disabled={busy || conflict} onClick={() => setEditing(value => !value)}><Pencil />{editing ? 'Preview' : 'Edit'}</Button>
-            <Button variant="ghost" disabled={busy || conflict} onClick={() => void run('discard')}><X />Reject</Button>
+            <Button variant="ghost" disabled={busy || conflict} onClick={() => void run('discard')}><X />{draft.existingCandidate ? 'Reject all' : 'Reject'}</Button>
             {draft.status === 'snoozed' ? <Button variant="outline" disabled={busy || conflict} onClick={() => void run('reopen')}>Reopen</Button> : null}
         </div> : null}
     </div>;

@@ -78,9 +78,6 @@ export function CandidatesBrowser({
     return (
         <div className="flex flex-col gap-6">
             <div className="flex flex-col gap-1.5">
-                <p className="text-[11px] font-semibold tracking-[0.08em] text-accent-foreground uppercase">
-                    Workspace
-                </p>
                 <h1 className="text-[26px] leading-8 font-medium text-foreground">Candidates</h1>
             </div>
 
@@ -138,7 +135,7 @@ export function CandidatesBrowser({
                     <p className="text-sm font-medium text-foreground">No candidates found</p>
                     <p className="max-w-sm text-sm text-muted-foreground">
                         {!query
-                            ? 'Candidates appear here after submissions are imported from the applications page.'
+                            ? 'Add a candidate or import from Telegram.'
                             : 'Try clearing the search.'}
                     </p>
                 </div>

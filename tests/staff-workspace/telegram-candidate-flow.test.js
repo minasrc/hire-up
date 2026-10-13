@@ -87,8 +87,8 @@ test('Candidate intake has a compact chat picker and approve/edit/reject review 
     const clientErrors = [];
     page.on('pageerror', error => clientErrors.push(error.message));
     const draftsURL = `${baseURL}/api/staff/telegram-intake/drafts`;
-    const createDraft = async (name, headline) => {
-        const response = await context.request.post(draftsURL, { data: { fields: { firstName: name, lastName: 'Candidate', headline }, sourceTitle: 'Synthetic Telegram' } });
+    const createDraft = async (name, headline, extra = {}) => {
+        const response = await context.request.post(draftsURL, { data: { fields: { firstName: name, lastName: 'Candidate', headline, ...(name === 'Alice' ? { primaryEmail: 'alice@example.test' } : {}), ...extra }, sourceTitle: 'Synthetic Telegram' } });
         if (response.status() !== 201) throw new Error(`Draft creation failed: ${await response.text()}\n${output.join('')}`);
         return (await response.json()).result;
     };
@@ -128,6 +128,19 @@ test('Candidate intake has a compact chat picker and approve/edit/reject review 
     await page.screenshot({ path: join(root,'test-results/candidate-review-columns.png'), fullPage: true });
     await page.getByRole('button', { name: 'Save and approve', exact: true }).click();
     await expect(page.getByText('Alice Candidate saved.', { exact: true })).toBeVisible();
+    const savedAlice = (await (await context.request.get(`${draftsURL}/${first.id}`)).json()).result;
+    const partial = await createDraft('Alice', 'Accepted update', { location: 'Rejected location' });
+    await page.goto(`${baseURL}/staff/telegram-intake?draft=${partial.id}`);
+    await expect(page.getByRole('button', { name: 'Save updates', exact: true })).toBeDisabled();
+    await page.getByRole('button', { name: 'Approve Headline change', exact: true }).click();
+    await expect(page.getByRole('button', { name: 'Save updates', exact: true })).toBeDisabled();
+    await page.getByRole('button', { name: 'Reject Location change', exact: true }).click();
+    await expect(page.getByRole('button', { name: 'Reject Location change', exact: true })).toHaveAttribute('aria-pressed', 'true');
+    await page.getByRole('button', { name: 'Save updates', exact: true }).click();
+    await expect(page.getByText('Alice Candidate saved.', { exact: true })).toBeVisible();
+    const updatedAlice = (await (await context.request.get(`${baseURL}/api/staff/candidates/${savedAlice.candidateId}`)).json()).result;
+    assert.equal(updatedAlice.candidate.headline, 'Accepted update');
+    assert.equal(updatedAlice.candidate.location, null, 'rejected change leaves canonical value unchanged');
     await page.getByRole('button', { name: /Bob Candidate/ }).click();
     await expect(page.getByRole('region', { name: 'Candidate information' }).getByText('Bob Candidate', { exact: true })).toBeVisible();
     await page.getByRole('button', { name: 'Reject', exact: true }).click();
@@ -160,7 +173,7 @@ test('Candidate intake has a compact chat picker and approve/edit/reject review 
     await expect.poll(() => started?.action).toBe('start');
     assert.equal(started.chats.length, 2);
     assert.deepEqual(started.chats.map(chat => chat.chatId), [chats[0].id,chats[50].id]);
-    await expect(page.getByRole('link', { name: 'Review proposals' }).first()).toBeVisible();
+    await expect(page.getByRole('link', { name: 'Review proposals', exact: true })).toHaveCount(1);
     mkdirSync(join(root,'test-results'), { recursive: true });
     await page.screenshot({ path: join(root,'test-results/candidate-flow-desktop.png'), fullPage: true });
     await page.setViewportSize({ width: 390, height: 844 });

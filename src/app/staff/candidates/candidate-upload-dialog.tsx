@@ -103,7 +103,7 @@ function UploadForm({ options, onCreated, onClose }: {
     };
     return <Dialog open onOpenChange={next => { if (!next) close(); }}>
         <DialogContent className="max-h-[90vh] overflow-y-auto sm:max-w-2xl">
-            <DialogHeader><DialogTitle>Add candidate</DialogTitle><DialogDescription>Enter their name, primary email and CV. Other details are optional.</DialogDescription></DialogHeader>
+            <DialogHeader><DialogTitle>Add candidate</DialogTitle><DialogDescription className="sr-only">Add a candidate with a CV.</DialogDescription></DialogHeader>
             {recovery.required ? <StaffAuthRecoveryPrompt /> : null}
             <form onSubmit={submit} className="flex flex-col gap-5">
                 <fieldset disabled={pending} className="m-0 flex min-w-0 flex-col gap-5 border-0 p-0">
@@ -122,7 +122,7 @@ function UploadForm({ options, onCreated, onClose }: {
                         <Label htmlFor="candidate-cv">CV <span aria-hidden="true">*</span></Label>
                         <div className="rounded-lg border border-dashed border-border bg-muted/30 p-4" onDragOver={event => event.preventDefault()} onDrop={event => { event.preventDefault(); if (!pending) { if (event.dataTransfer.files.length !== 1) { setFile(null); setFileError('Choose one CV file.'); if (input.current) input.current.value = ''; } else { if (input.current) input.current.files = event.dataTransfer.files; chooseFile(event.dataTransfer.files[0]); } } }}>
                             <Upload className="mb-2 h-5 w-5 text-muted-foreground" aria-hidden="true" />
-                            <p id="cv-help" className="mb-3 text-sm text-muted-foreground">Choose a file or drop it here. PDF or DOCX, up to 4 MB.</p>
+                            <p id="cv-help" className="mb-3 text-sm text-muted-foreground">PDF or DOCX · Up to 4 MB</p>
                             <Input ref={input} id="candidate-cv" type="file" accept={CV_ACCEPT_ATTRIBUTE} aria-describedby="cv-help cv-error" aria-invalid={!!fileError} onChange={event => chooseFile(event.target.files?.[0] ?? null)} />
                             {file && <div className="mt-3 flex items-center justify-between gap-2"><p className="min-w-0 break-words text-sm" role="status">{file.name} · {Math.ceil(file.size / 1024)} KB</p><Button type="button" variant="ghost" size="sm" onClick={() => { setFile(null); setFileError(''); if (input.current) input.current.value = ''; }}>Remove CV</Button></div>}
                         </div>
