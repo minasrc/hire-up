@@ -377,6 +377,16 @@ test('staff workspace end-to-end in a real browser', async (t) => {
         cookies.map((cookie) => `${cookie.name}=${cookie.value}`).join('; ');
 
     const browser = await chromium.launch();
+    const newWorkspaceContext = async options => {
+        const context = await browser.newContext(options);
+        // Exercise production UI behavior, including normal RSC refreshes. Dev
+        // cold compilation can otherwise reload a page and discard open dialogs
+        // or confirmed save responses. Production has no HMR websocket.
+        if (serverMode === 'development') {
+            await context.routeWebSocket('**/_next/webpack-hmr*', () => {});
+        }
+        return context;
+    };
     t.after(async () => { await browser.close().catch(() => {}); });
     mkdirSync(resultsDir, { recursive: true });
 
@@ -400,14 +410,14 @@ test('staff workspace end-to-end in a real browser', async (t) => {
         });
     };
 
-    const desktop = await browser.newContext({ viewport: { width: 1440, height: 1000 } });
+    const desktop = await newWorkspaceContext({ viewport: { width: 1440, height: 1000 } });
     await desktop.addCookies(staffCookies);
     await observeUploads(desktop);
     const page = await desktop.newPage();
     page.setDefaultTimeout(90_000);
 
     await runCase('MFA verification navigates on the first submit and verified revisits skip the form', async () => {
-        const context = await browser.newContext({ viewport: { width: 1440, height: 1000 } });
+        const context = await newWorkspaceContext({ viewport: { width: 1440, height: 1000 } });
         try {
             await context.addCookies(sessionOnlyCookies);
             const verifying = await context.newPage();
@@ -1259,7 +1269,7 @@ test('staff workspace end-to-end in a real browser', async (t) => {
         const capturePageError = error => pageErrors.push(error.message);
         page.on('pageerror', capturePageError);
         t.after(() => page.off('pageerror', capturePageError));
-        const anonymous = await browser.newContext();
+        const anonymous = await newWorkspaceContext();
         boardPage = await anonymous.newPage();
         boardPage.setDefaultTimeout(90_000);
         await openBoard();
@@ -1847,7 +1857,7 @@ test('staff workspace end-to-end in a real browser', async (t) => {
     });
 
     await runCase('members without manage or collaboration permissions see read-only surfaces', async () => {
-        const context = await browser.newContext({
+        const context = await newWorkspaceContext({
             viewport: { width: 1440, height: 1000 },
         });
         try {
@@ -1961,7 +1971,7 @@ test('staff workspace end-to-end in a real browser', async (t) => {
     });
 
     await runCase('missing MFA redirects to verification', async () => {
-        const context = await browser.newContext({ viewport: { width: 1440, height: 1000 } });
+        const context = await newWorkspaceContext({ viewport: { width: 1440, height: 1000 } });
         try {
             await context.addCookies(sessionOnlyCookies);
             const pending = await context.newPage();
@@ -1974,7 +1984,7 @@ test('staff workspace end-to-end in a real browser', async (t) => {
     });
 
     await runCase('mobile sheet exposes navigation and sign-out', async () => {
-        const context = await browser.newContext({ viewport: { width: 390, height: 844 } });
+        const context = await newWorkspaceContext({ viewport: { width: 390, height: 844 } });
         try {
             await context.addCookies(staffCookies);
             const mobile = await context.newPage();
@@ -2062,7 +2072,7 @@ test('staff workspace end-to-end in a real browser', async (t) => {
             await expect(page.getByRole('heading', { name: 'Legacy Synthetic Job', exact: true })).toBeVisible();
             await expect(page.getByText('Job creation is temporarily unavailable.', { exact: true })).toHaveCount(0);
 
-            const context = await browser.newContext({
+            const context = await newWorkspaceContext({
                 viewport: { width: 390, height: 844 },
             });
             try {
@@ -2575,7 +2585,7 @@ test('staff workspace end-to-end in a real browser', async (t) => {
     });
 
     await runCase('read-only staff cannot add or edit candidate profiles', async () => {
-        const context = await browser.newContext({
+        const context = await newWorkspaceContext({
             viewport: { width: 1440, height: 1000 },
         });
         try {
@@ -2636,7 +2646,7 @@ test('staff workspace end-to-end in a real browser', async (t) => {
     });
 
     await runCase('mobile staff can add and edit a candidate profile', async () => {
-        const context = await browser.newContext({
+        const context = await newWorkspaceContext({
             viewport: { width: 390, height: 844 },
         });
         try {
@@ -2804,13 +2814,8 @@ test('staff workspace end-to-end in a real browser', async (t) => {
     });
 
     await runCase('staff time zone settings persist only after explicit acceptance', async () => {
-        const context = await browser.newContext({ viewport: { width: 390, height: 844 }, timezoneId: 'America/New_York' });
-        const other = await browser.newContext({ timezoneId: 'America/New_York' });
-        // This case tests confirmed preferences and their RSC refresh, not a
-        // dev-only page reload when the preference API cold-compiles.
-        if (serverMode === 'development') {
-            await context.routeWebSocket('**/_next/webpack-hmr*', () => {});
-        }
+        const context = await newWorkspaceContext({ viewport: { width: 390, height: 844 }, timezoneId: 'America/New_York' });
+        const other = await newWorkspaceContext({ timezoneId: 'America/New_York' });
         let savedVersion = null;
         let settings;
         // Chromium accepts Secure cookies on trustworthy loopback URLs, while
@@ -2945,7 +2950,7 @@ test('staff workspace end-to-end in a real browser', async (t) => {
         const oldProof = await fetch(`${baseURL}/api/staff/clients`, { method: 'POST',
             headers: { 'content-type': 'application/json', cookie: cookieHeader(recruiterCookies) }, body: '{}' });
         assert.equal(oldProof.status, 428);
-        const recovered = await browser.newContext();
+        const recovered = await newWorkspaceContext();
         try {
             await recovered.addCookies(recruiterCookies);
             const userPage = await recovered.newPage();
@@ -3006,7 +3011,7 @@ test('staff workspace end-to-end in a real browser', async (t) => {
         psql(container, `update app.totp_credentials set status = 'revoked', revoked_at = now()
             where organization_id = '${ORG_ID}' and user_id = '${CJ_ID.USER_B_REC}'
             and status in ('active','pending');`);
-        const context = await browser.newContext();
+        const context = await newWorkspaceContext();
         try {
             await context.addCookies([recruiterCookies[0]]);
             const tabs = await Promise.all([context.newPage(), context.newPage()]);
@@ -3082,7 +3087,7 @@ test('staff workspace end-to-end in a real browser', async (t) => {
             set status = 'revoked', revoked_at = now()
             where id = '${AUTHZ_ID.MEMBER_B_ADMIN}'
         `);
-        const context = await browser.newContext({ viewport: { width: 1440, height: 1000 } });
+        const context = await newWorkspaceContext({ viewport: { width: 1440, height: 1000 } });
         try {
             await context.addCookies(staffCookies);
             const denied = await context.newPage();
