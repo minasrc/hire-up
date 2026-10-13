@@ -17,7 +17,7 @@ const read = (client, id) => result(client, 'select app.telegram_review_draft_v1
 
 export function listTelegramDrafts(pool, identity, org, filters = {}) {
     const { view = 'ready', missing = null, q = '', page = 1 } = filters;
-    if (!['ready', 'needs_information', 'snoozed', 'duplicates', 'all'].includes(view)) invalid('view', 'Choose a supported view.');
+    if (!['ready', 'needs_information', 'snoozed', 'duplicates', 'all', 'archived'].includes(view)) invalid('view', 'Choose a supported view.');
     if (missing != null && !['firstName', 'lastName', 'primaryEmail', 'cv', 'cvAnalysis'].includes(missing)) invalid('missing', 'Choose a required field.');
     if (typeof q !== 'string' || q.length > 200 || !Number.isInteger(page) || page < 1 || page > 10000) invalid('query', 'Invalid inbox query.');
     return transact(pool, identity, org, ({ client }) => result(client, 'select app.telegram_review_list_v1($1,$2,$3,$4) as result', [view, missing, q, page]));

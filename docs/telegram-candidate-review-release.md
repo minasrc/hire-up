@@ -8,12 +8,12 @@ Telegram is an intake source. The main flow is Connect → Choose chats → Revi
 - Review shows a profile preview, highlights changes against an existing candidate, and offers Approve, Edit, and Reject. Existing profile updates require an Approve or Reject choice for each changed field before Save updates. Rejected values revert to the current profile; rejecting every change closes the proposal without saving a profile update. CVs, individual suggestions, and message evidence are available on demand. A name is required; email and CV are optional for this intake flow.
 - Exact email or Telegram user identifiers suggest an existing candidate only when there is one visible active match. Reviewers can search for and explicitly select a different existing candidate. Names alone never automatically merge records.
 - Approvals preserve unmentioned fields, reject stale candidate versions and unseen proposal changes, and use the existing candidate save/indexing procedures. Refresh rebases saved proposed changes onto the latest profile for another review.
-- Rejecting an update leaves the candidate unchanged and permits future proposals for that person.
+- Rejecting a proposal saves an independent snapshot in the inbox’s Archived view, preserving profile information and an attached CV. Restore returns it to review; existing profile updates rebase onto the latest candidate. Saved candidates stay unchanged and later extraction can still propose new updates. Archived snapshots do not retain raw chat history. Earlier rejections that already cleared their fields cannot be reconstructed.
 - New extraction batches request source release automatically. The existing maintenance worker deletes sources only after all associated proposals, drafts, context dependencies, and CV work permit it. Existing sources associated with an opened proposal adopt the same policy. Candidate records and their audit history remain.
 
 ## Release
 
-Apply `20261013180000_telegram_candidate_review.sql` and `20261014100000_telegram_onboarding.sql` before deploying these application changes. Keep the existing Telegram connector, extraction worker, semantic worker/local embedding service, and maintenance worker running. This change does not replace the embedding model or deploy any services.
+Apply `20261013180000_telegram_candidate_review.sql` , `20261014100000_telegram_onboarding.sql`, and `20261014110000_telegram_review_archive.sql` before deploying these application changes. Keep the existing Telegram connector, extraction worker, semantic worker/local embedding service, and maintenance worker running. This change does not replace the embedding model or deploy any services.
 
 ## Focused verification
 

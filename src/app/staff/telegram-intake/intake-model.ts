@@ -1,4 +1,4 @@
-export type IntakeView = 'ready' | 'needs_information' | 'snoozed' | 'duplicates' | 'all';
+export type IntakeView = 'ready' | 'needs_information' | 'snoozed' | 'duplicates' | 'all' | 'archived';
 export type MissingField = '' | 'cv' | 'firstName' | 'lastName' | 'primaryEmail' | 'cvAnalysis';
 export interface DraftFields {
     firstName?: string;
@@ -42,7 +42,7 @@ export interface IntakeResult {
 
 export const viewLabels: Record<IntakeView, string> = {
     ready: 'Ready', needs_information: 'Needs information', snoozed: 'Snoozed',
-    duplicates: 'Duplicates', all: 'All proposals',
+    duplicates: 'Duplicates', all: 'All proposals', archived: 'Archived',
 };
 export const fieldLabels: Record<string, string> = {
     firstName: 'First name', lastName: 'Last name', primaryEmail: 'Primary email',
