@@ -14,10 +14,13 @@ function fakeRuntime() {
   class LogOut {}
   class GetPassword {}
   class UpdateLoginToken {}
-  const Api = { messages: { GetHistory: ObjectValue }, InputPeerChat: ObjectValue, auth: { Authorization, LoginToken, LoginTokenMigrateTo, LoginTokenSuccess, ExportLoginToken, ImportLoginToken, CheckPassword, LogOut }, account: { GetPassword }, UpdateLoginToken };
+  class UpdateShort extends ObjectValue {}
+  class Updates extends ObjectValue {}
+  class UpdatesCombined extends ObjectValue {}
+  const Api = { messages: { GetHistory: ObjectValue }, InputPeerChat: ObjectValue, auth: { Authorization, LoginToken, LoginTokenMigrateTo, LoginTokenSuccess, ExportLoginToken, ImportLoginToken, CheckPassword, LogOut }, account: { GetPassword }, UpdateLoginToken, UpdateShort, Updates, UpdatesCombined };
   const queue = []; const calls = []; const clients = [];
   class TelegramClient {
-    constructor(session, apiId, apiHash, options) { this.session = session; this.options = options; clients.push(this); }
+    constructor(session, apiId, apiHash, options) { this.session = session; this.options = options; this.updateManager = { start() {}, stop() {}, onUpdates() {} }; clients.push(this); }
     async connect() {}
     async destroy() { this.destroyed = true; }
     addEventHandler(handler) { this.handler = handler; }
@@ -40,7 +43,7 @@ test('actual adapter handles QR refresh signal, DC migration and account identit
   f.queue.push(new f.Api.auth.LoginToken({ token: Buffer.from('synthetic'), expires: Math.floor(Date.now() / 1000) + 60 }));
   assert.equal((await client.poll()).status, 'qr_pending');
   assert.equal(await client.poll(), null);
-  f.clients[0].handler(new f.Api.UpdateLoginToken());
+  f.clients[0].updateManager.onUpdates(new f.Api.UpdateLoginToken());
   f.queue.push(new f.Api.auth.LoginTokenMigrateTo({ dcId: 4, token: 'migration-token' }), new f.Api.auth.LoginTokenSuccess({ authorization: new f.Api.auth.Authorization({ user: { id: 999, firstName: 'Synthetic', username: 'example' } }) }));
   const result = await client.poll();
   assert.equal(f.clients[0].dcId, 4); assert.equal(result.profile.telegramUserId, '999');

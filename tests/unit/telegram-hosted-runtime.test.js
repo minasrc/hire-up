@@ -163,6 +163,10 @@ test('child status accepts only exact fixed code messages and never logs arbitra
     { type: 'telegram-connector-status', code: 'CONNECTOR_STARTED', token: secret },
     { type: 'other', code: 'CONNECTOR_STARTED' }]) assert.equal(connectorStatusCode(value), null);
   assert.equal(connectorStatusCode({ type: 'telegram-connector-status', code: 'CONNECTOR_INITIALIZING' }), 'CONNECTOR_INITIALIZING');
+  for (const code of ['CONNECTOR_PHONE_APPROVED', 'CONNECTOR_PASSWORD_REQUIRED', 'CONNECTOR_AUTHENTICATED', 'CONNECTOR_CONNECTION_CONFIRMED']) {
+    assert.equal(connectorStatusCode({ type: 'telegram-connector-status', code }), code);
+    assert.equal(connectorStatusCode({ type: 'telegram-connector-status', code, profile: 'private' }), null);
+  }
   const logs = []; const f = supervisorFixture({ output: code => logs.push(code) }); await f.supervisor.refresh(); await f.supervisor.reconcile();
   f.children[0].emit('message', { type: 'telegram-connector-status', code: 'CONNECTOR_STARTED', token: secret });
   f.children[0].emit('message', { type: 'telegram-connector-status', code: secret });

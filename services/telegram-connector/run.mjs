@@ -75,9 +75,9 @@ try {
     const updates = createSourceWork({ native, reconcile });
     const cv = createCvWorker({ ...createCvHostClient(config), vault });
     output('CONNECTOR_WORKERS_READY');
-    const createTelegram = await createTelegramFactory(config);
+    const createTelegram = await createTelegramFactory(config, undefined, output);
     output('CONNECTOR_SDK_READY');
-    connector = createConnector({ host, vault, createTelegram, efficientPolling: true, cleanupEnabled: true, onConnectedTick: createConnectedWork({ history, cv, updates }) });
+    connector = createConnector({ host, vault, createTelegram, efficientPolling: true, cleanupEnabled: true, onStatus: output, onConnectedTick: createConnectedWork({ history, cv, updates }) });
     if (pendingWake) connector.wake();
     process.once('SIGINT', stop); process.once('SIGTERM', stop);
     watchdog = setInterval(() => { void connector.checkLease().catch(() => output('LEASE_CLOSED')); }, 1000);
