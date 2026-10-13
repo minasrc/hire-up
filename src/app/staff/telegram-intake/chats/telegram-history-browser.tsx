@@ -199,14 +199,15 @@ export function TelegramHistoryBrowser({ workspaceId, hostedEnabled = false, onb
         // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [snapshot, busy, loading, denied]);
 
-    return <section className="mx-auto flex w-full max-w-6xl flex-col gap-3">
-        <header className="flex flex-wrap items-center justify-between gap-2"><h1 className="text-lg font-semibold">{onboarding ? 'Connect Telegram' : 'Choose chats'}</h1>{!onboarding ? <Button asChild size="sm" variant="outline"><Link href="/staff/telegram-intake">Review proposals</Link></Button> : null}</header>
-        {onboarding ? <ol aria-label="Telegram onboarding steps" className="flex items-center gap-4 rounded-lg bg-muted/50 px-3 py-2 text-xs sm:text-sm">
+    return <section className="flex w-full flex-col gap-3">
+        <header className="mx-auto flex w-full max-w-6xl flex-wrap items-center justify-between gap-2"><h1 className="text-lg font-semibold">{onboarding ? 'Connect Telegram' : 'Choose chats'}</h1>{!onboarding ? <Button asChild size="sm" variant="outline"><Link href="/staff/telegram-intake">Review proposals</Link></Button> : null}</header>
+        {onboarding ? <ol aria-label="Telegram onboarding steps" className="flex w-full items-center gap-3 py-3 text-sm text-muted-foreground">
             {['Connect', 'Choose chats', 'Review'].map((label, index) => {
                 const active = snapshot?.canImport ? 1 : 0;
-                return <li key={label} aria-current={index === active ? 'step' : undefined} className={`flex items-center gap-2 ${index === active ? 'font-medium text-foreground' : 'text-muted-foreground'}`}><span className="flex h-5 w-5 items-center justify-center rounded-full bg-background">{index < active ? <CheckCircle2 className="h-3.5 w-3.5" aria-label="Complete" /> : index + 1}</span>{label}</li>;
+                return <li key={label} aria-current={index === active ? 'step' : undefined} className={`flex min-w-0 flex-1 items-center gap-2 ${index === active ? 'font-medium text-foreground' : 'text-muted-foreground'}`}><span className={`flex h-7 w-7 shrink-0 items-center justify-center rounded-full ${index <= active ? 'bg-primary text-primary-foreground' : 'bg-muted'}`}>{index < active ? <CheckCircle2 className="h-4 w-4" aria-label="Complete" /> : index + 1}</span>{label}</li>;
             })}
         </ol> : null}
+        <div className="mx-auto flex w-full max-w-6xl flex-col gap-3">
         {error ? <div role="alert" className="flex flex-wrap items-center justify-between gap-3 rounded-lg border p-4 text-sm"><p>{error}</p><Button variant="outline" onClick={refreshStatus} disabled={busy}>Retry</Button></div> : null}
         {snapshot?.canImport ? <details className="rounded-lg border bg-card px-3 py-2"><summary className="cursor-pointer text-sm font-medium"><CheckCircle2 className="mr-2 inline h-4 w-4 text-primary" />Telegram connected</summary><div className="mt-4"><TelegramConnectionBrowser workspaceId={workspaceId} hostedEnabled={hostedEnabled} blocked={denied} onConnectionChange={connectionChanged} onDenied={denyRemovalAccess} onChooseChats={chooseChats} chooseChatsLabel={null} /></div></details>
             : <TelegramConnectionBrowser workspaceId={workspaceId} hostedEnabled={hostedEnabled} blocked={denied} onConnectionChange={connectionChanged} onDenied={denyRemovalAccess} onChooseChats={chooseChats} chooseChatsLabel="Choose chats" />}
@@ -229,5 +230,6 @@ export function TelegramHistoryBrowser({ workspaceId, hostedEnabled = false, onb
         {notice ? <p role="status" className="text-sm text-muted-foreground">{notice}</p> : null}
         {snapshot && snapshot.totals.messages >= snapshot.totals.maxMessages ? <p role="alert" className="text-sm">Storage is full. Review pending proposals to release their sources.</p> : null}
         {showChats ? <details className="text-sm text-muted-foreground"><summary className="cursor-pointer">Manage connected chats</summary><div className="mt-3 space-y-3">{snapshot?.chats.filter(chat => chat.selected || (chat.removalState && chat.removalState !== 'none')).map(chat => <div key={chat.id} className="flex flex-wrap items-center justify-between gap-2 rounded-lg border p-3"><span>{chatDisplayTitle(chat, snapshot.account?.accountUserId)}</span><div className="flex flex-wrap gap-2"><Button size="sm" variant="outline" disabled={blocked} onClick={() => void act({ action: chat.import?.status === 'paused' ? 'resume' : 'pause', chatId: chat.id, expectedVersion: chat.version }, 'Chat updated.')}>{chat.import?.status === 'paused' ? 'Resume' : 'Pause'}</Button><ChatRemoval chatId={chat.id} title={chat.title} state={chat.removalState} receipt={chat.removal} disabled={busy || loading} accessBlocked={denied} connected={Boolean(snapshot.canImport)} onChanged={refreshStatus} onDenied={denyRemovalAccess} /></div></div>)}</div></details> : null}
+        </div>
     </section>;
 }
