@@ -4,8 +4,7 @@ import { staffWorkspaceFetch } from '@/lib/staff-workspace-fetch';
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 import Link from 'next/link';
-import { Check, CheckCircle2, MessageSquare, RefreshCw, Search } from 'lucide-react';
-import { PageHeader } from '@/components/staff-preview/shared';
+import { CheckCircle2, MessageSquare, RefreshCw, Search } from 'lucide-react';
 import { Button } from '@/components/staff-ui/button';
 import { Card } from '@/components/staff-ui/card';
 import { Input } from '@/components/staff-ui/input';
@@ -198,18 +197,14 @@ export function TelegramHistoryBrowser({ workspaceId, hostedEnabled = false }: {
         // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [snapshot, busy, loading, denied]);
 
-    return <section className="mx-auto flex w-full max-w-3xl flex-col gap-5">
-        <PageHeader title="Import candidates" description="Turn Telegram conversations into candidate profiles."
-            actions={<Button asChild variant="outline"><Link href="/staff/telegram-intake">Review proposals</Link></Button>} />
-        <ol aria-label="Import steps" className="flex items-center gap-3 text-sm text-muted-foreground">
-            {['Connect', 'Choose chats', 'Review'].map((label, index) => <li key={label} className="flex flex-1 items-center gap-2"><span className={`flex h-7 w-7 shrink-0 items-center justify-center rounded-full ${index === 0 && snapshot?.canImport ? 'bg-primary text-primary-foreground' : 'bg-muted'}`}>{index === 0 && snapshot?.canImport ? <Check className="h-4 w-4" /> : index + 1}</span>{label}</li>)}
-        </ol>
+    return <section className="mx-auto flex w-full max-w-6xl flex-col gap-3">
+        <header className="flex flex-wrap items-center justify-between gap-2"><h1 className="text-lg font-semibold">Choose chats</h1><Button asChild size="sm" variant="outline"><Link href="/staff/telegram-intake">Review proposals</Link></Button></header>
         {error ? <div role="alert" className="flex flex-wrap items-center justify-between gap-3 rounded-lg border p-4 text-sm"><p>{error}</p><Button variant="outline" onClick={refreshStatus} disabled={busy}>Retry</Button></div> : null}
-        {snapshot?.canImport ? <details className="rounded-xl border bg-card p-4"><summary className="cursor-pointer text-sm font-medium"><CheckCircle2 className="mr-2 inline h-4 w-4 text-primary" />Telegram connected</summary><div className="mt-4"><TelegramConnectionBrowser workspaceId={workspaceId} hostedEnabled={hostedEnabled} blocked={denied} onConnectionChange={connectionChanged} onDenied={denyRemovalAccess} onChooseChats={chooseChats} chooseChatsLabel={null} /></div></details>
+        {snapshot?.canImport ? <details className="rounded-lg border bg-card px-3 py-2"><summary className="cursor-pointer text-sm font-medium"><CheckCircle2 className="mr-2 inline h-4 w-4 text-primary" />Telegram connected</summary><div className="mt-4"><TelegramConnectionBrowser workspaceId={workspaceId} hostedEnabled={hostedEnabled} blocked={denied} onConnectionChange={connectionChanged} onDenied={denyRemovalAccess} onChooseChats={chooseChats} chooseChatsLabel={null} /></div></details>
             : <TelegramConnectionBrowser workspaceId={workspaceId} hostedEnabled={hostedEnabled} blocked={denied} onConnectionChange={connectionChanged} onDenied={denyRemovalAccess} onChooseChats={chooseChats} chooseChatsLabel="Choose chats" />}
         {started || (snapshot?.totals.selected ?? 0) > 0 ? <ProcessingStatus /> : null}
         {snapshot?.canImport ? <Card className="overflow-hidden">
-            <div className="flex items-center justify-between gap-3 border-b p-4"><h2 ref={chatPanel} tabIndex={-1} className="scroll-mt-24 font-semibold">Choose chats</h2><Button ref={discoveryPanel} variant="ghost" size="sm" disabled={blocked || snapshot.discovery.status === 'active'} onClick={() => void act({ action: 'discover' }, 'Updating chats…')} aria-label="Refresh chat list"><RefreshCw className={snapshot.discovery.status === 'active' ? 'motion-safe:animate-spin' : ''} /></Button></div>
+            <div className="flex items-center justify-between gap-3 border-b p-4"><h2 ref={chatPanel} tabIndex={-1} className="scroll-mt-24 font-semibold">Your chats</h2><Button ref={discoveryPanel} variant="ghost" size="sm" disabled={blocked || snapshot.discovery.status === 'active'} onClick={() => void act({ action: 'discover' }, 'Updating chats…')} aria-label="Refresh chat list"><RefreshCw className={snapshot.discovery.status === 'active' ? 'motion-safe:animate-spin' : ''} /></Button></div>
             <form className="flex items-center gap-2 p-4" onSubmit={event => { event.preventDefault(); setQuery(search.trim()); setCursors(['']); setLoading(true); }}>
                 <Label htmlFor="telegram-chat-search" className="sr-only">Search chats</Label><Input id="telegram-chat-search" value={search} maxLength={100} onChange={event => setSearch(event.target.value)} placeholder="Search chats…" /><Button type="submit" variant="outline" size="icon" aria-label="Search chats" disabled={busy}><Search /></Button>
             </form>

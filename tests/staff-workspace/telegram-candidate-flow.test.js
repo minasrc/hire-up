@@ -95,16 +95,23 @@ test('Candidate intake has a compact chat picker and approve/edit/reject review 
     const first = await createDraft('Alice', 'Original headline');
     await createDraft('Bob', 'Reject me');
     await page.goto(`${baseURL}/staff/telegram-intake?draft=${first.id}`);
-    await expect(page.getByRole('heading', { name: 'Review candidate', exact: true })).toBeVisible();
-    await expect(page.getByRole('dialog').getByText('Original headline', { exact: true })).toBeVisible();
+    await expect(page.getByRole('region', { name: 'Candidate information', exact: true })).toBeVisible();
+    await expect(page.getByRole('region', { name: 'Candidate information' }).getByText('Original headline', { exact: true })).toBeVisible();
     await page.getByRole('button', { name: 'Edit', exact: true }).click();
     await page.getByLabel('Headline', { exact: true }).fill('Edited headline');
+    await createDraft('Carol', 'Arrived while reviewing');
+    await expect(page.getByRole('button', { name: /Carol Candidate/ })).toBeVisible();
+    assert.equal(await page.getByLabel('Headline', { exact: true }).inputValue(), 'Edited headline', 'live arrivals preserve unsaved review edits');
+    mkdirSync(join(root,'test-results'), { recursive: true });
+    await page.setViewportSize({ width: 1440, height: 1000 });
+    await page.screenshot({ path: join(root,'test-results/candidate-review-columns.png'), fullPage: true });
     await page.getByRole('button', { name: 'Save and approve', exact: true }).click();
     await expect(page.getByText('Alice Candidate saved.', { exact: true })).toBeVisible();
-    await expect(page.getByRole('dialog').getByText('Bob Candidate', { exact: true })).toBeVisible();
+    await page.getByRole('button', { name: /Bob Candidate/ }).click();
+    await expect(page.getByRole('region', { name: 'Candidate information' }).getByText('Bob Candidate', { exact: true })).toBeVisible();
     await page.getByRole('button', { name: 'Reject', exact: true }).click();
     await expect(page.getByText('Proposal rejected.', { exact: true })).toBeVisible();
-    await expect(page.getByRole('heading', { name: 'Review candidate', exact: true })).not.toBeVisible();
+    await expect(page.getByRole('button', { name: /Bob Candidate/ })).not.toBeVisible();
     const chats = Array.from({ length: 60 }, (_, index) => ({ id: `a0000000-0000-4000-8000-${String(index + 1).padStart(12, '0')}`, peer: { kind: 'user', id: String(index+1) }, title: `Chat ${index+1}`, username: null, selected: false, version: 1, extractionEnabled: false, extractionPending: false, import: null }));
     let started;
     await page.route('**/api/staff/telegram-history*', async route => {
@@ -124,7 +131,7 @@ test('Candidate intake has a compact chat picker and approve/edit/reject review 
     await expect.poll(() => started?.action).toBe('start');
     assert.equal(started.chats.length, 2);
     assert.deepEqual(started.chats.map(chat => chat.chatId), [chats[0].id,chats[50].id]);
-    await expect(page.getByText('Finding candidates…', { exact: true }).last()).toBeVisible();
+    await expect(page.getByRole('link', { name: 'Review proposals' }).first()).toBeVisible();
     mkdirSync(join(root,'test-results'), { recursive: true });
     await page.screenshot({ path: join(root,'test-results/candidate-flow-desktop.png'), fullPage: true });
     await page.setViewportSize({ width: 390, height: 844 });

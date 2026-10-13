@@ -4,6 +4,7 @@ import { staffWorkspaceFetch } from '@/lib/staff-workspace-fetch';
 
 import { useEffect, useMemo, useRef, useState, type MouseEvent, type ReactNode } from 'react';
 import Link from 'next/link';
+import { usePathname } from 'next/navigation';
 import dynamic from 'next/dynamic';
 import { useSession } from 'next-auth/react';
 import { staffAuthRecovery } from '@/lib/staff-auth-recovery';
@@ -206,6 +207,7 @@ function JobPreview({ record }: { record: JobRecord }) {
 const recordPath = /^\/staff\/(candidates|jobs)\/([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})\/?$/i;
 
 export function RecordPreview({ children }: { children: ReactNode }) {
+    const compact = usePathname()?.startsWith('/staff/telegram-intake');
     const [selection, setSelection] = useState<Selection | null>(null);
     const { data: session, status } = useSession();
     const recovery = useStaffAuthRecovery();
@@ -370,7 +372,7 @@ export function RecordPreview({ children }: { children: ReactNode }) {
 
     return <>
         <main onClickCapture={handleClick}
-            className="min-w-0 flex-1 px-4 py-6 md:px-8 md:py-8">{children}</main>
+            className={compact ? "min-w-0 flex-1 px-3 py-3 md:px-4 md:py-4" : "min-w-0 flex-1 px-4 py-6 md:px-8 md:py-8"}>{children}</main>
         <Sheet open={selection !== null} onOpenChange={(open) => {
             if (!open) {
                 setSelection(null);

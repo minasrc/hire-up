@@ -16,12 +16,12 @@ export function StaffTimeZoneBanner() {
     const data = useStaffTimeZone();
     const controls = useStaffTimeZoneControls();
     if (!controls.prompt) return null;
-    return <aside aria-label="Time zone preference" className="mx-4 mt-4 flex flex-wrap items-center gap-3 rounded-lg border border-border bg-card p-3 md:mx-6">
-        <p className="min-w-0 basis-60 flex-1 break-words text-sm text-foreground">{data.savedTimeZone === null
-            ? `Your device uses ${controls.prompt.timeZone}. Use it instead of the UTC default?`
-            : `Your device uses ${controls.prompt.timeZone}. Switch from ${data.timeZone}?`}</p>
-        <Button type="button" disabled={controls.saving} onClick={() => void controls.saveTimeZone(controls.prompt!.timeZone, 'device')}>{controls.saving ? 'Saving…' : controls.error ? 'Retry' : 'Switch'}</Button>
-        <Button type="button" variant="outline" disabled={controls.saving} onClick={controls.keepCurrentZone}>Keep current zone</Button>
+    return <aside aria-label="Time zone preference" className="mx-3 mt-2 flex flex-wrap items-center gap-2 rounded-md border bg-muted/20 px-3 py-1.5 md:mx-4">
+        <p className="min-w-0 flex-1 break-words text-xs text-muted-foreground">{data.savedTimeZone === null
+            ? `Use ${controls.prompt.timeZone}?`
+            : `Use ${controls.prompt.timeZone} instead of ${data.timeZone}?`}</p>
+        <Button type="button" size="sm" className="h-6 px-2 text-xs" disabled={controls.saving} onClick={() => void controls.saveTimeZone(controls.prompt!.timeZone, 'device')}>{controls.saving ? 'Saving…' : controls.error ? 'Retry' : 'Switch'}</Button>
+        <Button type="button" size="sm" className="h-6 px-2 text-xs" variant="ghost" disabled={controls.saving} onClick={controls.keepCurrentZone}>Keep current</Button>
         <ErrorMessage />
     </aside>;
 }

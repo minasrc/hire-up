@@ -2,17 +2,14 @@
 
 import { staffWorkspaceFetch } from '@/lib/staff-workspace-fetch';
 
-import { useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import Link from 'next/link';
 import { ArrowRight, Check, FileText, Inbox, Pencil, RefreshCw, Search, X } from 'lucide-react';
-import { PageHeader } from '@/components/staff-preview/shared';
 import { Badge } from '@/components/staff-ui/badge';
 import { Button } from '@/components/staff-ui/button';
-import { Card } from '@/components/staff-ui/card';
 import { Input } from '@/components/staff-ui/input';
 import { Label } from '@/components/staff-ui/label';
 import { Textarea } from '@/components/staff-ui/textarea';
-import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from '@/components/staff-ui/sheet';
 import { ProcessingStatus } from './processing-status';
 import { CvAnalysisReview } from './cv-analysis/cv-analysis-review';
 import { mergeAnalysisDraft } from './cv-analysis/analysis-model';
@@ -51,7 +48,13 @@ export function TelegramIntakeBrowser({ initialResult, initialDraftId }: { initi
     const [listError, setListError] = useState('');
     const [selected, setSelected] = useState<string | null>(initialDraftId ?? null);
     const [notice, setNotice] = useState('');
-    const firstLoad = useRef(true);
+    const reviewState = useRef({ dirty: false, busy: false });
+    const onReviewState = useCallback((dirty: boolean, busy: boolean) => { reviewState.current = { dirty, busy }; }, []);
+    function chooseProposal(id: string) {
+        if (reviewState.current.busy || id === selected) return;
+        if (reviewState.current.dirty && !window.confirm('Discard unsaved edits?')) return;
+        setSelected(id);
+    }
 
     useEffect(() => {
         // Cleanup is best effort and must never delay the inbox or expose private keys.
@@ -59,24 +62,26 @@ export function TelegramIntakeBrowser({ initialResult, initialDraftId }: { initi
     }, []);
 
     useEffect(() => {
-        if (firstLoad.current && initialResult) { firstLoad.current = false; return; }
-        firstLoad.current = false;
-        const controller = new AbortController();
-        setLoading(true);
-        setListError('');
+        let stopped = false;
+        let timer: ReturnType<typeof setTimeout>;
+        let controller: AbortController;
         const params = new URLSearchParams({ view, q: query, page: String(page) });
         if (missing) params.set('missing', missing);
-        request(`${endpoint}?${params}`, { signal: controller.signal })
-            .then(data => { if (!controller.signal.aborted) setResult(data); })
-            .catch(error => { if (!controller.signal.aborted) setListError(error.message); })
-            .finally(() => { if (!controller.signal.aborted) setLoading(false); });
-        return () => controller.abort();
-    }, [view, missing, query, page, revision, initialResult]);
-
-    useEffect(() => {
-        const timer = setInterval(() => { if (!document.hidden && !selected) setRevision(value => value + 1); }, 10000);
-        return () => clearInterval(timer);
-    }, [selected]);
+        async function poll() {
+            if (document.hidden || stopped) return;
+            controller?.abort(); controller = new AbortController();
+            try {
+                const data = await request(`${endpoint}?${params}`, { signal: controller.signal });
+                if (!stopped && !controller.signal.aborted) {
+                    setResult(data); setListError(''); setSelected(current => current ?? data.drafts[0]?.id ?? null);
+                }
+            } catch (error) { if (!stopped && !controller.signal.aborted) setListError(error instanceof Error ? error.message : 'Unable to load proposals.'); }
+            finally { if (!stopped && !controller.signal.aborted) { setLoading(false); timer = setTimeout(() => void poll(), 3000); } }
+        }
+        const visibility = () => { clearTimeout(timer); controller?.abort(); if (!document.hidden) void poll(); };
+        void poll(); document.addEventListener('visibilitychange', visibility);
+        return () => { stopped = true; clearTimeout(timer); controller?.abort(); document.removeEventListener('visibilitychange', visibility); };
+    }, [view, missing, query, page, revision]);
 
     function updateRow(row: IntakeDraft) {
         // Never put private message evidence into the list's state.
@@ -92,28 +97,28 @@ export function TelegramIntakeBrowser({ initialResult, initialDraftId }: { initi
         setResult(current => ({ ...current, drafts: current.drafts.filter(row => row.id !== id) }));
         setRevision(value => value + 1);
     }
-    return <section className="mx-auto flex w-full max-w-4xl flex-col gap-5">
-        <PageHeader title="Candidate proposals" description="Review new profiles and changes before saving."
-            actions={<div className="flex gap-2"><Button asChild variant="outline"><Link href="/staff/telegram-intake/chats">Import chats</Link></Button><Button asChild><Link href="/staff/candidates/search">Search candidates</Link></Button></div>} />
-        <ProcessingStatus />
-        <div className="flex flex-wrap items-center gap-3">
-            <form className="flex min-w-48 flex-1 gap-2" onSubmit={event => { event.preventDefault(); setQuery(search.trim()); setPage(1); }}><Label htmlFor="draft-search" className="sr-only">Find a proposal</Label><Input id="draft-search" value={search} onChange={event => setSearch(event.target.value)} placeholder="Find a candidate…" /><Button type="submit" variant="outline" size="icon" aria-label="Find proposal"><Search /></Button></form>
-            <details className="relative text-sm"><summary className="cursor-pointer">Filters</summary><div className="absolute right-0 z-10 mt-2 min-w-52 rounded-lg border bg-card p-3 shadow-lg"><Label htmlFor="proposal-view">Show</Label><select id="proposal-view" className="mt-2 h-9 w-full rounded-lg border bg-card px-2" value={view} onChange={event => { setView(event.target.value as IntakeView); setPage(1); }}>{Object.entries(viewLabels).filter(([key]) => ['all', 'snoozed', 'duplicates'].includes(key)).map(([key, label]) => <option key={key} value={key}>{label} ({result.counts[key]})</option>)}</select></div></details>
-            <Button variant="ghost" size="icon" aria-label="Refresh proposals" disabled={loading} onClick={() => setRevision(value => value + 1)}><RefreshCw /></Button>
-        </div>
+    return <section className="flex w-full min-w-0 flex-col gap-3">
+        <header className="flex flex-wrap items-center justify-between gap-2"><div className="flex items-center gap-3"><h1 className="text-lg font-semibold">Candidate proposals</h1><Badge variant="secondary" aria-live="polite">{result.counts.all}</Badge></div><div className="flex gap-2"><Button asChild size="sm" variant="outline"><Link href="/staff/telegram-intake/chats">Choose chats</Link></Button><Button asChild size="sm" variant="outline"><Link href="/staff/candidates/search">Search candidates</Link></Button></div></header>
+        <ProcessingStatus reviewLink={false} />
+        {notice ? <p role="status" className="text-xs text-muted-foreground">{notice}</p> : null}
         {listError ? <p role="alert" className="text-sm">{listError}</p> : null}
-        <Card className="divide-y overflow-hidden" aria-busy={loading}>
-            {!result.drafts.length ? <div className="flex flex-col items-center gap-3 p-12 text-center"><Inbox className="h-8 w-8 text-muted-foreground" /><p role="status" className="font-medium">{loading ? 'Loading proposals…' : 'You’re all caught up'}</p><p className="text-sm text-muted-foreground">{loading ? '' : query ? 'Try another name.' : 'New candidate information will appear here.'}</p></div> : result.drafts.map(draft => <button key={draft.id} type="button" onClick={() => setSelected(draft.id)} className="flex w-full items-center gap-4 p-4 text-left hover:bg-muted/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring">
-                <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-muted text-sm font-medium">{draftName(draft).slice(0, 1)}</span><span className="min-w-0 flex-1"><span className="block truncate font-medium">{draftName(draft)}</span><span className="mt-1 block truncate text-xs text-muted-foreground">{draft.fields.headline || draft.fields.primaryEmail || 'Candidate profile'}</span></span><Badge variant={draft.existingCandidate ? 'secondary' : 'outline'}>{draft.existingCandidate ? 'Profile update' : 'New candidate'}</Badge><ArrowRight className="h-4 w-4 shrink-0 text-muted-foreground" />
-            </button>)}
-        </Card>
-        {result.hasMore || page > 1 ? <div className="flex justify-between"><Button variant="outline" size="sm" disabled={loading || page <= 1} onClick={() => setPage(value => value - 1)}>Previous</Button><Button variant="outline" size="sm" disabled={loading || !result.hasMore} onClick={() => setPage(value => value + 1)}>Next</Button></div> : null}
-        {notice ? <p role="status" className="text-sm">{notice}</p> : null}
-        <Sheet open={Boolean(selected)} onOpenChange={open => { if (!open) setSelected(null); }}><SheetContent className="w-full max-w-2xl gap-0 overflow-y-auto p-0 sm:w-full"><SheetHeader className="border-b p-5 pr-12"><SheetTitle>Review candidate</SheetTitle><SheetDescription>Approve, edit or reject this proposal.</SheetDescription></SheetHeader>{selected ? <DraftEditor key={selected} id={selected} onUpdate={updateRow} onNotice={setNotice} onDone={() => nextProposal(selected)} /> : null}</SheetContent></Sheet>
+        <div className="grid min-h-[420px] grid-cols-1 overflow-hidden rounded-xl border bg-card md:h-[calc(100dvh-12rem)] md:min-h-[480px] md:grid-cols-[280px_minmax(0,1fr)] xl:grid-cols-[320px_minmax(0,1fr)]">
+            <aside aria-label="Candidate proposals" className="flex min-h-0 flex-col border-b md:border-b-0 md:border-r">
+                <form className="flex gap-2 border-b p-3" onSubmit={event => { event.preventDefault(); setQuery(search.trim()); setPage(1); }}><Label htmlFor="draft-search" className="sr-only">Find a proposal</Label><Input id="draft-search" value={search} onChange={event => setSearch(event.target.value)} placeholder="Find a candidate…" /><Button type="submit" variant="ghost" size="icon" aria-label="Find proposal"><Search /></Button></form>
+                <div className="flex items-center justify-between border-b px-3 py-2"><Label htmlFor="proposal-view" className="sr-only">Proposal filter</Label><select id="proposal-view" className="h-7 max-w-48 rounded bg-card text-xs" value={view} onChange={event => { setView(event.target.value as IntakeView); setPage(1); }}>{Object.entries(viewLabels).filter(([key]) => ['all', 'snoozed', 'duplicates'].includes(key)).map(([key, label]) => <option key={key} value={key}>{label}</option>)}</select><Button variant="ghost" size="icon" className="h-7 w-7" aria-label="Refresh proposals" disabled={loading} onClick={() => setRevision(value => value + 1)}><RefreshCw className="h-3.5 w-3.5" /></Button></div>
+                <div className="max-h-64 min-h-0 flex-1 overflow-y-auto md:max-h-none" aria-busy={loading}>
+                    {!result.drafts.length ? <div className="flex flex-col items-center gap-2 p-8 text-center"><Inbox className="h-6 w-6 text-muted-foreground" /><p role="status" className="text-sm">{loading ? 'Loading…' : 'You’re all caught up'}</p></div> : result.drafts.map(draft => <button key={draft.id} type="button" aria-pressed={selected === draft.id} onClick={() => chooseProposal(draft.id)} className={`flex w-full items-start gap-3 border-b p-3 text-left hover:bg-muted/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring ${selected === draft.id ? 'bg-primary/5 border-l-2 border-l-primary' : 'border-l-2 border-l-transparent'}`}>
+                        <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-muted text-xs font-medium">{draftName(draft).slice(0, 1)}</span><span className="min-w-0 flex-1"><span className="block truncate text-sm font-medium">{draftName(draft)}</span><span className="mt-0.5 block truncate text-xs text-muted-foreground">{draft.fields.headline || draft.fields.primaryEmail || 'Candidate profile'}</span><span className="mt-1 block text-[11px] text-muted-foreground">{draft.existingCandidate ? 'Profile update' : 'New candidate'}</span></span>
+                    </button>)}
+                </div>
+                {result.hasMore || page > 1 ? <div className="flex justify-between border-t p-2"><Button variant="ghost" size="sm" disabled={loading || page <= 1} onClick={() => setPage(value => value - 1)}>Previous</Button><Button variant="ghost" size="sm" disabled={loading || !result.hasMore} onClick={() => setPage(value => value + 1)}>Next</Button></div> : null}
+            </aside>
+            <section aria-label="Candidate information" className="min-h-0 min-w-0 overflow-y-auto" tabIndex={0}>{selected ? <DraftEditor key={selected} id={selected} onUpdate={updateRow} onNotice={setNotice} onDone={() => nextProposal(selected)} onReviewState={onReviewState} /> : <div className="flex h-full min-h-60 items-center justify-center p-8 text-sm text-muted-foreground">Select a proposal to review</div>}</section>
+        </div>
     </section>;
 }
 
-function DraftEditor({ id, onUpdate, onNotice, onDone }: { id: string; onUpdate: (row: IntakeDraft) => void; onNotice: (message: string) => void; onDone: () => void }) {
+function DraftEditor({ id, onUpdate, onNotice, onDone, onReviewState }: { id: string; onUpdate: (row: IntakeDraft) => void; onNotice: (message: string) => void; onDone: () => void; onReviewState: (dirty: boolean, busy: boolean) => void }) {
     const [draft, setDraft] = useState<IntakeDraft | null>(null);
     const [fields, setFields] = useState<Record<string, string>>({});
     const [errors, setErrors] = useState<Record<string, string>>({});
@@ -144,6 +149,7 @@ function DraftEditor({ id, onUpdate, onNotice, onDone }: { id: string; onUpdate:
 
     const dirty = draft && JSON.stringify(fields) !== JSON.stringify(editableFields(reviewFields(draft)));
     const terminal = draft?.status === 'approved' || draft?.status === 'discarded';
+    useEffect(() => { onReviewState(Boolean(dirty), busy); return () => onReviewState(false, false); }, [dirty, busy, onReviewState]);
 
     function refreshDraft() {
         if (draft?.existingCandidate && conflict) {
@@ -271,20 +277,21 @@ function DraftEditor({ id, onUpdate, onNotice, onDone }: { id: string; onUpdate:
     if (loading) return <p className="p-6 text-sm" role="status">Loading private draft…</p>;
     if (!draft) return <div className="space-y-3 p-6"><p role="alert">{message || 'Draft could not be loaded.'}</p><Button variant="outline" onClick={refreshDraft}>Retry</Button></div>;
 
-    return <div className="flex flex-col gap-5 p-5" aria-busy={busy}>
-        <div className="flex items-start justify-between gap-3"><div><h2 className="font-semibold">{terminal ? draft.status === 'approved' ? 'Approved candidate draft' : 'Discarded draft' : draftName(draft)}</h2><p className="mt-1 text-xs text-muted-foreground">{draft.sourceTitle || 'Private draft'} · {dateLabel(draft.updatedAt)}</p></div><Badge variant="secondary">{draft.existingCandidate ? 'Profile update' : 'New candidate'}</Badge></div>
+    return <div className="flex min-h-full flex-col gap-4 p-5" aria-busy={busy}>
+        <div className="flex items-start justify-between gap-3"><div><h2 className="font-semibold">{terminal ? draft.status === 'approved' ? 'Approved candidate' : 'Rejected proposal' : [fields.firstName, fields.lastName].filter(Boolean).join(' ') || draftName(draft)}</h2><p className="mt-1 text-xs text-muted-foreground">{fields.primaryEmail || draft.sourceTitle}</p></div><Badge variant="secondary">{draft.existingCandidate ? 'Profile update' : 'New candidate'}</Badge></div>
         {message ? <div role={conflict || Object.keys(errors).length ? 'alert' : 'status'} className="space-y-3 rounded-lg border border-border bg-muted/30 p-3 text-sm"><p>{message}</p>{conflict ? <Button variant="outline" size="sm" onClick={refreshDraft}>Refresh draft{dirty ? ' (replace my edits)' : ''}</Button> : null}</div> : null}
         {closedEdits ? <div className="space-y-2"><Label htmlFor="closed-draft-edits">Your unsaved changes</Label><Textarea id="closed-draft-edits" readOnly rows={6} value={Object.entries(closedEdits).map(([key, value]) => `${fieldLabels[key] ?? key}: ${value || '(cleared)'}`).join('\n')} /><p className="text-xs text-muted-foreground">These values are available to copy in this open review only. They were not added to the closed draft or candidate profile.</p></div> : null}
         {candidateId ? <Link className="text-sm font-medium underline underline-offset-4" href={`/staff/candidates/${encodeURIComponent(candidateId)}`}>Open {draft.status === 'duplicate' ? 'existing' : 'approved'} candidate</Link> : null}
-        {!terminal ? <details className="rounded-lg border p-3"><summary className="cursor-pointer text-sm">{draft.existingCandidate ? 'Choose a different candidate' : 'Already in the database?'}</summary><form onSubmit={findCandidates} className="mt-3 flex gap-2"><Label htmlFor="match-candidate" className="sr-only">Find existing candidate</Label><Input id="match-candidate" value={matchQuery} maxLength={100} onChange={event => setMatchQuery(event.target.value)} placeholder="Name or email…" /><Button type="submit" variant="outline" disabled={busy || !matchQuery.trim()}><Search /><span className="sr-only">Find candidate</span></Button></form>{dirty ? <p className="mt-2 text-xs text-muted-foreground">Save your edits before choosing another profile.</p> : null}{matches?.length === 0 ? <p className="mt-3 text-sm text-muted-foreground">No matching candidates.</p> : null}<div className="mt-2 divide-y">{matches?.map(item => <button key={item.id} type="button" disabled={busy || Boolean(dirty) || conflict} onClick={() => void chooseCandidate(item.id)} className="block w-full rounded p-3 text-left text-sm hover:bg-muted disabled:opacity-50"><span className="font-medium">{item.name}</span><span className="block text-xs text-muted-foreground">{item.email}</span></button>)}</div></details> : null}
         {Object.keys(errors).length ? <div role="alert" className="rounded-lg border border-border p-3 text-sm"><p className="font-medium">Resolve these issues before approval:</p><ul className="mt-2 list-disc space-y-1 pl-5">{Object.entries(errors).map(([key, error]) => <li key={key}><a className="underline underline-offset-4" href={`#intake-${key}`}>{reviewLabels[key] ?? key}: {error}</a></li>)}</ul></div> : null}
 
+        <details className="rounded-lg border px-3 py-2"><summary className="cursor-pointer text-xs text-muted-foreground">Review options</summary><div className="mt-3 space-y-3">        {!terminal ? <details className="rounded-lg border p-3"><summary className="cursor-pointer text-sm">{draft.existingCandidate ? 'Choose a different candidate' : 'Already in the database?'}</summary><form onSubmit={findCandidates} className="mt-3 flex gap-2"><Label htmlFor="match-candidate" className="sr-only">Find existing candidate</Label><Input id="match-candidate" value={matchQuery} maxLength={100} onChange={event => setMatchQuery(event.target.value)} placeholder="Name or email…" /><Button type="submit" variant="outline" disabled={busy || !matchQuery.trim()}><Search /><span className="sr-only">Find candidate</span></Button></form>{dirty ? <p className="mt-2 text-xs text-muted-foreground">Save your edits before choosing another profile.</p> : null}{matches?.length === 0 ? <p className="mt-3 text-sm text-muted-foreground">No matching candidates.</p> : null}<div className="mt-2 divide-y">{matches?.map(item => <button key={item.id} type="button" disabled={busy || Boolean(dirty) || conflict} onClick={() => void chooseCandidate(item.id)} className="block w-full rounded p-3 text-left text-sm hover:bg-muted disabled:opacity-50"><span className="font-medium">{item.name}</span><span className="block text-xs text-muted-foreground">{item.email}</span></button>)}</div></details> : null}
         <details className="rounded-lg border p-3"><summary className="cursor-pointer text-sm">Review individual suggestions</summary><div className="mt-3"><DraftSuggestions draft={draft} dirty={Boolean(dirty)} busy={busy} conflict={conflict} onUpdate={row => { accept(row); setErrors(current => { const next = { ...current }; delete next.proposals; return next; }); setMessage(''); }} onBusyChange={setBusy} onConflict={() => fail(new IntakeError('Draft changed', 409, {}))} /></div></details>
-        {!terminal && !editing ? <dl className="space-y-4">{Object.entries(fieldLabels).filter(([key]) => key !== 'cv').map(([key, label]) => {
+</div></details>
+        {!terminal && !editing ? <dl className="grid gap-3 sm:grid-cols-2">{Object.entries(fieldLabels).filter(([key]) => key !== 'cv').map(([key, label]) => {
             const value = fields[key]; const before = draft.existingCandidate ? editableFields(draft.existingCandidate.fields)[key] : null;
             const changed = draft.existingCandidate && value !== before;
-            if (!value && !changed) return null;
-            return <div key={key} className={changed ? 'rounded-lg border border-primary/20 bg-primary/5 p-3' : ''}><dt className="text-xs text-muted-foreground">{label}{changed ? <span className="ml-2 font-medium text-primary">Changed</span> : null}</dt><dd className="mt-1 whitespace-pre-wrap break-words text-sm">{changed ? <><span className="text-muted-foreground line-through">{before || 'Not set'}</span><ArrowRight className="mx-2 inline h-3 w-3" /></> : null}{value || 'Removed'}</dd></div>;
+            if ((!value || ['firstName', 'lastName', 'primaryEmail'].includes(key)) && !changed) return null;
+            return <div key={key} className={changed ? 'rounded-lg border border-primary/20 bg-primary/5 p-3 sm:col-span-2' : key === 'professionalSummary' ? 'sm:col-span-2' : ''}><dt className="text-xs text-muted-foreground">{label}{changed ? <span className="ml-2 font-medium text-primary">Changed</span> : null}</dt><dd className="mt-1 whitespace-pre-wrap break-words text-sm">{changed ? <><span className="text-muted-foreground line-through">{before || 'Not set'}</span><ArrowRight className="mx-2 inline h-3 w-3" /></> : null}{value || 'Removed'}</dd></div>;
         })}</dl> : null}
         {!terminal && editing ? <form className="space-y-5" onSubmit={event => { event.preventDefault(); void run('save'); }} noValidate>
             <fieldset disabled={busy || terminal || conflict} className="grid gap-4 sm:grid-cols-2">
@@ -306,7 +313,7 @@ function DraftEditor({ id, onUpdate, onNotice, onDone }: { id: string; onUpdate:
             <CvRetrieval draft={draft} busy={busy} conflict={conflict} onDraft={refreshRetrievedDraft} />
         </details>
         {!terminal ? <details className="rounded-lg border border-border p-4"><summary className="cursor-pointer text-sm font-medium">View source ({draft.evidenceCount ?? draft.evidence?.length ?? 0})</summary><p className="mt-3 text-xs text-muted-foreground">Source messages are for intake review only and are not added to the candidate profile.</p>{draft.evidenceTruncated ? <p className="mt-2 text-xs text-muted-foreground">Showing the latest 100 source quotes. Earlier quotes remain private; pending suggestions include their own evidence.</p> : null}<div className="mt-4 space-y-4">{draft.evidence?.length ? draft.evidence.map(item => <article key={item.id} className="border-t border-border pt-3"><p className="text-xs text-muted-foreground">{item.senderName || 'Unknown sender'} · {dateLabel(item.sentAt)}</p><p className="mt-2 whitespace-pre-wrap break-words text-sm">{item.text}</p></article>) : <p className="text-sm text-muted-foreground">No source evidence attached.</p>}</div></details> : null}
-        {!terminal ? <div className="sticky -bottom-5 -mx-5 flex flex-wrap items-center gap-2 border-t bg-card p-4 shadow-sm">
+        {!terminal ? <div className="sticky bottom-0 z-10 -mx-5 -mb-5 mt-auto flex flex-wrap items-center gap-2 border-t bg-card p-4 shadow-sm">
             <Button disabled={busy || conflict || draft.status === 'snoozed'} onClick={() => void run('approve')}><Check />{busy ? 'Saving…' : editing ? 'Save and approve' : 'Approve'}</Button>
             <Button variant="outline" disabled={busy || conflict} onClick={() => setEditing(value => !value)}><Pencil />{editing ? 'Preview' : 'Edit'}</Button>
             <Button variant="ghost" disabled={busy || conflict} onClick={() => void run('discard')}><X />Reject</Button>
