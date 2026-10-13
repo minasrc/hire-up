@@ -22,6 +22,12 @@ For local work, run focused checks while editing and broaden once when shared bo
 
 When adding a feature or suite, update the selector and its tests. Unknown files deliberately select all jobs until their dependencies are mapped.
 
+The Telegram connection suite includes real PostgreSQL wake delivery, rollback
+isolation, expired-lease rejection, unchanged service expiry, restricted function
+privileges and global listener ownership. The hosted browser journey checks
+authenticated wake delivery and the single bottom action row on mobile. The new
+wake schema migration retains full schema coverage.
+
 The workflows reference `actions/checkout@v4`, `actions/setup-node@v4`, `actions/setup-python@v5`, `supabase/setup-cli@1dedf2c611547ede7232d26866dd3c56ab903bbb`, `actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02` and `actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093`. Repository owners must allow these exact references in Actions permissions; the workflow does not change that policy. CI validates code; database migration is a separate production-gated release workflow. Telegram maintenance is scheduled operational work, not PR validation.
 
 When browser coverage is selected, the quality job builds once and transfers its output to the separate browser job by artifact ID from the same workflow run. Builds are retained for one day, exclude the build cache, and are never rebuilt by the browser job. Failed browser traces are retained for three days. Local browser tests still use the development server by default; set `E2E_SERVER_MODE=production` to test an existing production build. Both modes enforce the nonproduction environment guard. Never run another Next build or development fixture while these tests are using the checkout.

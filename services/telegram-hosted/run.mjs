@@ -8,9 +8,10 @@ import { readPrivateJson, createServiceStore } from './store.mjs';
 import { createControlClient } from './http.mjs';
 import { createSupervisor } from './supervisor.mjs';
 import { acquireLock, unlockStoppedProcess } from '../telegram-connector/vault.mjs';
+import { createWakeClient, listenForServiceWake } from './wake.mjs';
 
 const output = code => process.stderr.write(`${new Date().toISOString()} ${code}\n`);
-let release, supervisor, watchdog, renewal, reconciling, stopping = false;
+let release, supervisor, watchdog, renewal, wakeListener, stopping = false;
 const abort = new AbortController();
 const stop = () => { stopping = true; abort.abort(); void supervisor?.stop(); };
 process.once('SIGINT', stop); process.once('SIGTERM', stop);
@@ -32,12 +33,23 @@ try {
     release = acquireLock(store.root);
     supervisor = createSupervisor({ control, store, api,
       efficientPolling: true, connectorEntrypoint: resolve(fileURLToPath(new URL('../telegram-connector/run.mjs', import.meta.url))), output });
+    let syncing = null, syncAgain = false;
+    const sync = () => {
+      syncAgain = true;
+      if (syncing) return syncing;
+      syncing = (async () => {
+        do { syncAgain = false; await supervisor.refresh(); await supervisor.reconcile(); }
+        while (syncAgain && !stopping && !supervisor.stopped);
+      })().finally(() => { syncing = null; });
+      return syncing;
+    };
     watchdog = setInterval(() => supervisor.watch(), 250);
-    renewal = setInterval(() => { void supervisor.refresh().then(() => supervisor.reconcile()).then(() => supervisor.maintain()).then(() => supervisor.cleanupRetired()); }, 10000);
-    // Reconciliation consumes the complete snapshot from each ten-second renewal.
+    renewal = setInterval(() => { void sync().then(() => supervisor.maintain()).then(() => supervisor.cleanupRetired()); }, 10000);
+    // Scheduled renewal remains the fallback when the notification channel fails.
     output('SERVICE_STARTED');
-    await supervisor.refresh();
-    await supervisor.reconcile();
+    await sync();
+    wakeListener = listenForServiceWake({ listen: createWakeClient(config), scope: () => supervisor.wakeScope(),
+      refresh: sync, stop, signal: abort.signal, output });
     await supervisor.maintain();
     await supervisor.cleanupRetired();
     while (!stopping && !supervisor.stopped) await delay(1000, undefined, { signal: abort.signal }).catch(() => {});
@@ -48,7 +60,8 @@ try {
     'UNSAFE_LOCAL_FILE', 'UNSAFE_LOCAL_DIRECTORY', 'CONNECTOR_ALREADY_LOCKED', 'CONNECTOR_STILL_RUNNING', 'INVALID_LOCK', 'CANNOT_VERIFY_LOCK']);
   output(safe.has(error.message) ? error.message : 'SERVICE_START_FAILED'); process.exitCode = 1;
 } finally {
-  clearInterval(watchdog); clearInterval(renewal); clearInterval(reconciling);
+  clearInterval(watchdog); clearInterval(renewal); abort.abort();
+  await wakeListener;
   await supervisor?.stop(); release?.();
   process.removeListener('SIGINT', stop); process.removeListener('SIGTERM', stop);
 }

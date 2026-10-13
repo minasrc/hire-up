@@ -74,6 +74,39 @@ codes do not mean a user has authorized Telegram or that an import has completed
 
 ## Isolation and recovery
 
+### Immediate sign-in wake
+
+Apply `20261013180000_telegram_hosted_wake.sql` and deploy the website before
+restarting an updated supervisor. A shared outbound HTTPS long poll wakes this
+service when committed enrollment state changes. It uses the existing service
+secret; users and the Mac need no new credentials. `SERVICE_WAKE_READY` confirms
+that the channel is responding. Failure retains the ten-second control fallback,
+with bounded reconnect backoff and fixed operational codes.
+
+The website needs a PostgreSQL **session** connection for `LISTEN`. Supabase's
+shared transaction pooler on port 6543 is automatically changed to its session
+port 5432, using the same credentials and certificate verification. Other URLs
+are unchanged. Set server-only `TELEGRAM_HOSTED_WAKE_DATABASE_URL` if another
+provider requires a distinct session endpoint. The restricted database role
+receives only a fenced snapshot function; wake reads never renew service leases.
+Notifications contain a constant hint, and the HTTPS response contains only an
+opaque cursor. Normal control requests still validate authority before work.
+
+One held listener per service is enforced across website instances. Vercel pauses
+active CPU billing during I/O waits but still bills provisioned memory while the
+request waits. At published Pro rates, one continuous 2 GB listener is roughly
+$15/month in US East or $20/month in Dublin before credits, CPU and other work;
+this is an estimate, not a measured bill. See [Vercel pricing](https://vercel.com/docs/functions/usage-and-pricing)
+and [Supabase connection modes](https://supabase.com/docs/guides/database/connecting-to-postgres).
+For larger deployments, a persistent gateway beside the workers can avoid
+holding serverless requests while retaining the same lease and isolation rules.
+
+The child scheduler responds immediately to a wake hint. The browser checks
+requested sign-in every 500 ms for ten seconds, then every two seconds; initial
+registration checks every 250 ms for ten seconds, then every two seconds. This
+removes avoidable scheduling waits. Telegram network latency and provider retry
+limits still determine when a real QR code can be shown.
+
 The authenticated browser requests an idempotent enrollment scoped to its
 organization and owner. The service saves a fresh worker UUID and token durably
 before registration. The database stores only its token hash. Lost registration

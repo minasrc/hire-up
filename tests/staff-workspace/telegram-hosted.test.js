@@ -11,6 +11,8 @@ import { POSTGRES_17_IMAGE, assertLocalTestEnvironment, findFreePort, psql, publ
 import { AUTHZ_ID, installStaffFixture } from '../support/staff-authorization.js';
 import { clientJobFixtureSql } from '../support/client-job-workflows.js';
 import { STAFF_MFA_COOKIE, createStaffMfaProof } from '../../src/lib/staff-mfa-cookie.js';
+import { hostedWakeCursor } from '../../src/lib/telegram-hosted-wake.js';
+import { createWakeClient } from '../../services/telegram-hosted/wake.mjs';
 
 const expect = baseExpect.configure({ timeout: 15000 });
 const root = resolve(process.env.TELEGRAM_HOSTED_TEST_ROOT || fileURLToPath(new URL('../../', import.meta.url)));
@@ -125,6 +127,10 @@ test('Hosted Telegram browser starts on demand, cancels setup and protects QR/pa
         assert.equal(/\bMac\b|API hash|API ID|worker token/.test(await page.locator('body').innerText()), false);
     };
     try {
+        const wakeURL = `${baseURL}/api/telegram-hosted/wake`;
+        assert.equal((await fetch(wakeURL, { method: 'POST', headers: { 'content-type': 'application/json' }, body: '{}' })).status, 401);
+        assert.equal((await fetch(wakeURL, { method: 'POST', headers: { authorization: `Bearer ${serviceSecret}`, origin: baseURL, 'content-type': 'application/json' }, body: '{}' })).status, 401);
+        assert.equal((await fetch(wakeURL, { method: 'POST', headers: { authorization: `Bearer ${serviceSecret}`, 'content-type': 'application/json' }, body: JSON.stringify({ instanceId, leaseToken: randomUUID(), cursor: 'a'.repeat(64), ownerUserId: AUTHZ_ID.USER_ADMIN2 }) })).status, 400);
         await page.goto(`${baseURL}/staff/telegram-intake/connect`);
         await expect(page).toHaveURL(`${baseURL}/staff/telegram-intake/chats#telegram-connection`);
         await expect(page.getByRole('heading', { name: 'Telegram', exact: true })).toBeVisible();
@@ -133,15 +139,30 @@ test('Hosted Telegram browser starts on demand, cancels setup and protects QR/pa
         await noLocalSetup();
         assert.equal(prepares, 0, 'Page load must not provision a worker');
         assert.equal(starts, 0);
-        await expect(page.getByRole('link', { name: 'Search imported conversations', exact: true })).toHaveAttribute('href', '/staff/telegram-intake/context');
+        await expect(page.getByRole('link', { name: 'Search imported conversations', exact: true })).toHaveCount(0);
+        await expect(page.getByRole('link', { name: 'Search conversations', exact: true })).toHaveCount(1);
+        await expect(page.getByRole('link', { name: 'Search conversations', exact: true })).toHaveAttribute('href', '/staff/telegram-intake/context');
         leaseToken = (await control('heartbeat')).leaseToken;
         const heartbeatTimer = setInterval(() => void control('heartbeat').catch(() => {}), 20000);
         t.after(() => clearInterval(heartbeatTimer));
-        await page.getByRole('button', { name: 'Retry service status', exact: true }).click();
+        await page.getByRole('button', { name: 'Check service status', exact: true }).click();
         await expect(page.getByRole('button', { name: 'Connect Telegram', exact: true })).toBeEnabled();
+        await expect(page.getByRole('button', { name: 'Check service status', exact: true })).toHaveCount(0);
+        const wakeSnapshot = await control('sync');
+        const wakeAbort = new AbortController();
+        const pendingWake = createWakeClient({ server: baseURL, serviceToken: serviceSecret })({ instanceId, leaseToken, cursor: hostedWakeCursor(wakeSnapshot.requests) }, wakeAbort.signal);
+        pendingWake.catch(() => {});
         await page.getByRole('button', { name: 'Connect Telegram', exact: true }).click();
-        await expect(page.getByRole('button', { name: 'Cancel setup', exact: true })).toBeVisible();
-        await page.getByRole('button', { name: 'Cancel setup', exact: true }).click();
+        const actions = page.getByRole('group', { name: 'Telegram connection actions', exact: true });
+        await expect(actions.getByRole('button', { name: 'Preparing sign-in…', exact: true })).toBeDisabled();
+        await expect(actions.getByRole('button', { name: 'Cancel sign-in', exact: true })).toBeVisible();
+        const wakeReceipt = await pendingWake;
+        assert.equal(wakeReceipt.changed, true, 'The authenticated HTTP notification channel observes the browser action');
+        assert.deepEqual(Object.keys(wakeReceipt).sort(), ['changed', 'cursor', 'protocolVersion']);
+        wakeAbort.abort();
+        assert.equal((await actions.getByRole('button', { name: 'Preparing sign-in…', exact: true }).boundingBox()).y,
+            (await actions.getByRole('button', { name: 'Cancel sign-in', exact: true }).boundingBox()).y, 'Preparing and cancel share one action row');
+        await page.getByRole('button', { name: 'Cancel sign-in', exact: true }).click();
         await expect(page.getByText('Setup cancelled. Click Connect Telegram when you are ready.', { exact: true })).toBeVisible();
         assert.equal(prepares, 1, 'Strict mode must not duplicate provisioning');
         assert.equal(starts, 0, 'Cancellation must not start a Telegram connection');
@@ -149,9 +170,9 @@ test('Hosted Telegram browser starts on demand, cancels setup and protects QR/pa
         assert.equal(requests.length, 1);
         await control('register', { requestId: requests[0].requestId, workerId, tokenSha256: createHash('sha256').update(workerToken).digest('hex') });
         await worker('heartbeat', { publicKeySpki });
-        await page.getByRole('button', { name: 'Retry service status', exact: true }).click();
-        await expect(page.getByRole('button', { name: 'Connect Telegram', exact: true })).toBeEnabled();
         await expect(page.getByText('Setup cancelled. Click Connect Telegram when you are ready.', { exact: true })).toHaveCount(0);
+        await expect(page.getByRole('button', { name: 'Check service status', exact: true })).toHaveCount(0);
+        await expect(page.getByRole('button', { name: 'Connect Telegram', exact: true })).toBeEnabled();
         assert.equal(starts, 0, 'A ready status after cancellation cannot restart sign-in');
         await page.getByRole('button', { name: 'Connect Telegram', exact: true }).click();
         await expect(page.getByRole('heading', { name: 'Preparing Telegram sign-in', exact: true })).toBeVisible();
@@ -174,6 +195,12 @@ test('Hosted Telegram browser starts on demand, cancels setup and protects QR/pa
         await page.screenshot({ path: join(root, 'test-results/staff-workspace-telegram-signin-mobile.png'), fullPage: true });
         assert.equal(starts, 1, 'One click must reach QR sign-in without opening recovery or starting again');
         await expect(page.getByRole('button', { name: 'Preparing sign-in…', exact: true })).toHaveCount(0);
+        await expect(actions.getByRole('button', { name: 'Sign-in in progress', exact: true })).toBeDisabled();
+        await expect(actions.getByRole('button', { name: 'Cancel sign-in', exact: true })).toBeEnabled();
+        await expect(page.getByRole('button', { name: 'Check service status', exact: true })).toHaveCount(0);
+        const actionBounds = await actions.boundingBox();
+        const qrBounds = await qr.boundingBox();
+        assert.ok(actionBounds.y >= qrBounds.y + qrBounds.height, 'Sign-in actions belong together below the QR code');
         const recovery = page.getByText('Advanced recovery options', { exact: true });
         assert.ok((await qr.boundingBox()).y < (await recovery.boundingBox()).y, 'Recovery belongs below the QR sign-in');
         await recovery.click();
@@ -199,6 +226,11 @@ test('Hosted Telegram browser starts on demand, cancels setup and protects QR/pa
         await update({ status: 'awaiting_password', passwordHint: 'Synthetic hint' });
         const password = page.getByLabel('Telegram two-step verification password', { exact: true });
         await expect(password).toBeVisible();
+        await expect(actions.getByRole('button', { name: 'Continue securely', exact: true })).toBeDisabled();
+        await expect(actions.getByRole('button', { name: 'Cancel sign-in', exact: true })).toBeEnabled();
+        assert.ok((await actions.boundingBox()).y > (await password.boundingBox()).y, 'Password actions belong together below the password field');
+        assert.equal((await actions.getByRole('button', { name: 'Continue securely', exact: true }).boundingBox()).y,
+            (await actions.getByRole('button', { name: 'Cancel sign-in', exact: true }).boundingBox()).y, 'Continue and cancel share one action row');
         await page.reload();
         await expect(page.getByRole('heading', { name: 'Complete Telegram two-step verification', exact: true })).toBeVisible();
         await expect(page.getByRole('button', { name: 'Discover chats', exact: true })).toBeDisabled();
@@ -294,7 +326,7 @@ test('Hosted Telegram browser starts on demand, cancels setup and protects QR/pa
         await expect(page.getByRole('heading', { name: 'Telegram disconnected', exact: true })).toBeVisible();
         await expect(page.getByRole('button', { name: 'Connect Telegram', exact: true })).toBeEnabled();
         assert.equal(starts, 2, 'Logout acknowledgment must not trigger automatic sign-in');
-        await page.getByRole('link', { name: 'Search imported conversations', exact: true }).click();
+        await page.getByRole('link', { name: 'Search conversations', exact: true }).click();
         await page.getByLabel('Message words or phrase', { exact: true }).fill('Solidity');
         await page.getByRole('button', { name: 'Search messages', exact: true }).click();
         await expect(page.getByRole('button', { name: 'View conversation', exact: true })).toHaveCount(1);
@@ -313,7 +345,7 @@ test('Hosted Telegram browser starts on demand, cancels setup and protects QR/pa
         task = (await worker('claim')).connection;
         await update({ status: 'disconnected' });
         await expect(page.getByRole('heading', { name: 'Telegram disconnected', exact: true })).toBeVisible();
-        await page.getByRole('button', { name:'Retry service status', exact:true }).click();
+        await expect(page.getByRole('button', { name: 'Check service status', exact: true })).toHaveCount(0);
         await page.getByText('Advanced recovery options', {exact:true}).click();
         await expect(page.getByRole('button', {name:'Reset registration',exact:true})).toBeEnabled();
         const retired=page.waitForResponse(response=>response.url()===hostedURL&&response.request().postDataJSON()?.action==='retire');

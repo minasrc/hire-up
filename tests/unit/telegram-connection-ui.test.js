@@ -33,7 +33,9 @@ test('QR display accepts only unexpired Telegram login URLs in the QR state', ()
 });
 
 test('pending actions poll promptly; fixed error text never renders provider errors', () => {
-    for (const status of ['requested', 'qr_pending', 'awaiting_password', 'disconnecting']) assert.equal(pollingDelay(status), 2000);
+    assert.equal(pollingDelay('requested'), 500);
+    assert.equal(pollingDelay('requested', 10000), 2000);
+    for (const status of ['qr_pending', 'awaiting_password', 'disconnecting']) assert.equal(pollingDelay(status), 2000);
     assert.equal(pollingDelay('connected'), 15000);
     assert.match(connectionError('LOGOUT_FAILED'), /not confirmed logout/);
     assert.match(connectionError('PASSWORD_INVALID'), /not accepted/);
