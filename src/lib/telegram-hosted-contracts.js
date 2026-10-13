@@ -16,7 +16,7 @@ export function hostedStaffInput(input) {
 }
 export function hostedControlInput(input) {
     if (['heartbeat', 'sync'].includes(input?.action)) shape(input, ['action', 'instanceId'], ['leaseToken']);
-    else if (input?.action === 'list') shape(input, ['action', 'instanceId', 'leaseToken'], ['after']);
+    else if (['list', 'maintenance'].includes(input?.action)) shape(input, ['action', 'instanceId', 'leaseToken'], input.action === 'list' ? ['after'] : []);
     else if (input?.action === 'register') shape(input, ['action', 'instanceId', 'leaseToken', 'requestId', 'workerId', 'tokenSha256']);
     else throw new TelegramHostedError();
     hostedUuid(input.instanceId);

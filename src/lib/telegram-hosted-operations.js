@@ -16,6 +16,7 @@ export async function telegramHostedControl(pool, serviceId, input) {
     let sql;
     if (p.action === 'sync') sql = 'select app.telegram_hosted_sync_v1($1,$2,$3) result';
     else if (p.action === 'heartbeat') sql = 'select app.telegram_hosted_heartbeat_v1($1,$2,$3) result';
+    else if (p.action === 'maintenance') sql = 'select app.telegram_hosted_maintenance_v1($1,$2,$3) result';
     else if (p.action === 'list') { sql = 'select app.telegram_hosted_list_v1($1,$2,$3,$4) result'; args.push(p.after ?? null); }
     else { sql = 'select app.telegram_hosted_register_v1($1,$2,$3,$4,$5,$6) result'; args.push(p.requestId, p.workerId, p.tokenSha256); }
     const client = await pool.connect();
