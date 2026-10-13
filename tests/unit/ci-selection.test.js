@@ -194,6 +194,11 @@ test('feature APIs retain all downstream workflow consumers without unrelated st
 });
 
 test('Telegram page coverage includes its consumers; shared intake still covers the whole chain', () => {
+    const connectionCommand = JSON.parse(readFileSync(new URL('../../package.json', import.meta.url), 'utf8')).scripts['test:telegram-connection'];
+    for (const path of ['tests/database/telegram-hosted.test.js', 'tests/staff-workspace/telegram-hosted.test.js']) {
+        assert.ok(connectionCommand.includes(path), 'The connection workflow must actually run each mapped hosted test');
+        assert.deepEqual(selected([path]), ['quality', 'telegram-connection']);
+    }
     assert.deepEqual(selected(['src/app/staff/telegram-intake/chats/history-model.js']), ['quality', 'telegram-connection', 'telegram-history', 'telegram-source-updates']);
     assert.deepEqual(selected(['src/app/staff/telegram-intake/connect/worker-pairing-panel.tsx']), ['quality', 'telegram-connection', 'worker-pairing']);
     assert.ok(selected(['src/app/staff/telegram-intake/extraction/batch-source.tsx']).includes('cv-analysis'));
