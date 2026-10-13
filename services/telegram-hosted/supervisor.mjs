@@ -1,3 +1,4 @@
+import { createRetiredCleanup } from './retired-cleanup.mjs';
 import { validRunnable, validWake } from '../telegram-connector/scheduling.mjs';
 import { randomUUID } from 'node:crypto';
 import { performance } from 'node:perf_hooks';
@@ -58,6 +59,8 @@ export function createSupervisor({ control, store, api, connectorEntrypoint,
   const instanceId = randomUUID(), children = new Map(), backoff = new Map();
   let pendingSnapshot = null;
   let nextMaintenance = 0, maintaining = false;
+  let cleaningRetired = false;
+  const retiredRequests = new Set();
   const hints = new Map();
   let lease = null, proof = null, closed = false, refreshing = false, reconciling = false, shutdown;
   const grantMessage = id => ({ type: 'telegram-hosted-lease', leaseToken: proof, deadline: lease.deadline, ...(hints.get(id) ?? {}) });
@@ -151,6 +154,8 @@ export function createSupervisor({ control, store, api, connectorEntrypoint,
         if (!Number.isInteger(result.nextMaintenanceAfterSeconds) || result.nextMaintenanceAfterSeconds < 5 || result.nextMaintenanceAfterSeconds > 300) throw new Error('INVALID_HOST_RESPONSE');
         nextMaintenance = Math.min(nextMaintenance, wall() + result.nextMaintenanceAfterSeconds * 1000);
       }
+      if (result.retiredVaultActionable !== undefined && typeof result.retiredVaultActionable !== 'boolean') throw new Error('INVALID_HOST_RESPONSE');
+      retiredCleanup.hint(result.retiredVaultActionable === true);
       if (result.removalActionable) nextMaintenance = Math.min(nextMaintenance, wall() + 10000);
     } catch (error) {
       output('SERVICE_MAINTENANCE_DEFERRED');
@@ -158,8 +163,19 @@ export function createSupervisor({ control, store, api, connectorEntrypoint,
       if (['ACCESS_DENIED', 'LEASE_CONFLICT', 'INVALID_HOST_RESPONSE'].includes(error.message)) await stop();
     } finally { maintaining = false; }
   };
+  const retiredCleanup = createRetiredCleanup({ control, store, instanceId, proof: () => proof, valid, wall, output,
+    onLeaseLost: () => { void stop(); }, stopRequest: async id => {
+      retiredRequests.add(id);
+      const entry = children.get(id);
+      if (entry) { await terminate(entry.child); children.delete(id); output('CONNECTOR_STOPPED'); }
+    } });
+  const cleanupRetired = async () => {
+    if (cleaningRetired || reconciling || refreshing || closed) return;
+    cleaningRetired = true;
+    try { await retiredCleanup.tick(); } finally { cleaningRetired = false; }
+  };
   const reconcile = async () => {
-    if (reconciling || !valid()) return;
+    if (reconciling || cleaningRetired || !valid()) return;
     reconciling = true;
     const token = proof;
     try {
@@ -169,13 +185,13 @@ export function createSupervisor({ control, store, api, connectorEntrypoint,
       if (!valid() || token !== proof) return;
       validateSnapshot(response);
       // Validate the complete response before changing any running children.
-      const allowed = new Set(response.requests.filter(item => item.canRun).map(item => item.requestId));
+      const allowed = new Set(response.requests.filter(item => item.canRun && !retiredRequests.has(item.requestId)).map(item => item.requestId));
       for (const [id, entry] of children) {
         if (!allowed.has(id)) { await terminate(entry.child); children.delete(id); output('CONNECTOR_STOPPED'); }
       }
       for (const item of response.requests) {
         if (!valid()) return;
-        if (!item.canRun || item.state === 'stopped' || children.has(item.requestId)) continue;
+        if (retiredRequests.has(item.requestId) || !item.canRun || item.state === 'stopped' || children.has(item.requestId)) continue;
         if (children.size >= maxProcesses || (backoff.get(item.requestId)?.next ?? 0) > wall()) continue;
         try {
           const record = store.prepare(item, api);
@@ -214,7 +230,7 @@ export function createSupervisor({ control, store, api, connectorEntrypoint,
       if (['ACCESS_DENIED', 'LEASE_CONFLICT', 'INVALID_HOST_RESPONSE'].includes(error.message)) await stop();
     } finally { reconciling = false; }
   };
-  return { refresh, reconcile, maintain, watch, stop,
+  return { refresh, reconcile, maintain, cleanupRetired, retiredCleanupHint: pending => retiredCleanup.hint(pending), watch, stop,
     get stopped() { return closed; },
     snapshot: () => ({ leaseAcknowledged: valid(), runningConnectors: children.size, instanceId }),
   };
