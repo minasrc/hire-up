@@ -2,7 +2,7 @@
 
 import { staffWorkspaceFetch } from '@/lib/staff-workspace-fetch';
 
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
 import { ClipboardList, Plus } from 'lucide-react';
 
 import { Badge } from '@/components/staff-ui/badge';
@@ -45,7 +45,7 @@ const CATEGORIES: { value: 'all' | StaffTaskCategory; label: string }[] = [
 
 const PAGE_SIZE = 20;
 
-export function StaffTodoList({ writeEnabled }: { writeEnabled: boolean }) {
+export function StaffTodoList({ writeEnabled, reviewTasks }: { writeEnabled: boolean; reviewTasks?: ReactNode }) {
     const recovery = useStaffAuthRecovery();
     const [authRevision, setAuthRevision] = useState(0);
     const [category, setCategory] = useState<'all' | StaffTaskCategory>('all');
@@ -291,6 +291,7 @@ export function StaffTodoList({ writeEnabled }: { writeEnabled: boolean }) {
                 </div>
             </CardHeader>
             <CardContent className="flex flex-col gap-4">
+                {!showCompleted && (category === 'all' || category === 'review') ? reviewTasks : null}
                 {recovery.required ? <StaffAuthRecoveryPrompt /> : denied ? (
                     <p className="text-sm text-muted-foreground">
                         Task tracking requires the collaboration.read permission.

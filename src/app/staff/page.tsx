@@ -1,3 +1,7 @@
+import Link from 'next/link';
+import { ArrowRight, Send } from 'lucide-react';
+import type { IntakeResult } from './telegram-intake/intake-model';
+import { listTelegramDrafts } from '@/lib/telegram-intake-operations';
 import { Suspense } from 'react';
 import { Card, CardContent } from '@/components/staff-ui/card';
 import { PageHeader } from '@/components/staff-preview/shared';
@@ -50,13 +54,46 @@ async function OverviewSection({ section }: { section: SummarySection }) {
 }
 
 async function OverviewTasks() {
-    const { capabilities } = await loadStaffCapabilities();
+    const { capabilities, gate } = await loadStaffCapabilities();
+    let reviewTasks = null;
+    if (capabilities?.telegram && gate.stage === 'verified') {
+        let inbox: IntakeResult | null = null;
+        try {
+            inbox = await listTelegramDrafts(gate.pool, gate.identity, gate.organizationId, { view: 'all' });
+        } catch { /* The link remains available if the queue cannot be loaded. */ }
+        if (inbox && inbox.counts.all > 0) {
+            reviewTasks = (
+                <div aria-label="Candidate proposal tasks" className="rounded-lg bg-muted/40 p-3">
+                    <Link href="/staff/telegram-intake" className="flex items-center gap-2 rounded text-sm font-medium outline-none focus-visible:ring-2 focus-visible:ring-ring">
+                        <Send className="h-4 w-4" aria-hidden="true" />
+                        Review candidate proposals
+                        <span className="ml-auto text-muted-foreground">{inbox.counts.all}</span>
+                        <ArrowRight className="h-4 w-4" aria-hidden="true" />
+                    </Link>
+                    <ul className="mt-2 space-y-1">
+                        {inbox.drafts.slice(0, 5).map(draft => (
+                            <li key={draft.id}>
+                                <Link href={`/staff/telegram-intake?draft=${draft.id}`} className="flex items-center justify-between gap-3 rounded px-2 py-1.5 text-sm outline-none hover:bg-background focus-visible:ring-2 focus-visible:ring-ring">
+                                    <span className="truncate">{[draft.fields.firstName, draft.fields.lastName].filter(Boolean).join(' ') || 'Unnamed candidate'}</span>
+                                    <span className="shrink-0 text-xs text-muted-foreground">{draft.existingCandidate ? 'Profile update' : 'New candidate'}</span>
+                                </Link>
+                            </li>
+                        ))}
+                    </ul>
+                </div>
+            );
+        }
+        if (!inbox) {
+            reviewTasks = <Link href="/staff/telegram-intake" className="text-sm underline">Check candidate proposals</Link>;
+        }
+    }
     if (capabilities?.tasks === true) {
-        return <StaffTodoList writeEnabled={capabilities.writeTasks === true} />;
+        return <StaffTodoList writeEnabled={capabilities.writeTasks === true} reviewTasks={reviewTasks} />;
     }
     return (
         <Card id="tasks">
-            <CardContent className="flex flex-col items-center gap-3 py-8 text-center">
+            <CardContent className="flex flex-col gap-3 py-8">
+                {reviewTasks}
                 <p className="text-sm text-muted-foreground">
                     {capabilities === null
                         ? 'Task tracking is temporarily unavailable.'

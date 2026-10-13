@@ -92,9 +92,16 @@ test('Candidate intake has a compact chat picker and approve/edit/reject review 
         if (response.status() !== 201) throw new Error(`Draft creation failed: ${await response.text()}\n${output.join('')}`);
         return (await response.json()).result;
     };
+    await page.goto(`${baseURL}/staff/telegram-intake`);
+    await expect(page).toHaveURL(`${baseURL}/staff/telegram-intake/chats`);
+    await expect(page.getByRole('list', { name: 'Telegram onboarding steps' })).toBeVisible();
     const first = await createDraft('Alice', 'Original headline');
     await createDraft('Bob', 'Reject me');
-    await page.goto(`${baseURL}/staff/telegram-intake?draft=${first.id}`);
+    await page.goto(`${baseURL}/staff`);
+    const reviewTasks = page.getByLabel('Candidate proposal tasks');
+    await expect(reviewTasks.getByRole('link', { name: /Review candidate proposals/ })).toBeVisible();
+    await reviewTasks.getByRole('link', { name: /Alice Candidate/ }).click();
+    await expect(page).toHaveURL(`${baseURL}/staff/telegram-intake?draft=${first.id}`);
     const sidebar = page.locator('#staff-sidebar');
     await page.getByRole('button', { name: 'Collapse sidebar', exact: true }).click();
     await expect(sidebar).toHaveCSS('width', '64px');
@@ -126,6 +133,13 @@ test('Candidate intake has a compact chat picker and approve/edit/reject review 
     await page.getByRole('button', { name: 'Reject', exact: true }).click();
     await expect(page.getByText('Proposal rejected.', { exact: true })).toBeVisible();
     await expect(page.getByRole('button', { name: /Bob Candidate/ })).not.toBeVisible();
+    await page.goto(`${baseURL}/staff`);
+    await expect(page.getByLabel('Candidate proposal tasks').getByRole('link', { name: /Carol Candidate/ })).toBeVisible();
+    await expect(page.getByLabel('Candidate proposal tasks').getByRole('link', { name: /Alice Candidate|Bob Candidate/ })).not.toBeVisible();
+    psql(db, `insert into app.telegram_history_limits(organization_id,owner_user_id,onboarding_completed_at) values('${AUTHZ_ID.ORG_B}','${AUTHZ_ID.USER_ADMIN2}',now());`);
+    await page.getByRole('link', { name: 'Telegram', exact: true }).first().click();
+    await expect(page).toHaveURL(`${baseURL}/staff/telegram-intake`);
+    await expect(page.getByRole('heading', { name: 'Candidate proposals', exact: true })).toBeVisible();
     const chats = Array.from({ length: 60 }, (_, index) => ({ id: `a0000000-0000-4000-8000-${String(index + 1).padStart(12, '0')}`, peer: { kind: 'user', id: String(index+1) }, title: `Chat ${index+1}`, username: null, selected: false, version: 1, extractionEnabled: false, extractionPending: false, import: null }));
     let started;
     await page.route('**/api/staff/telegram-history*', async route => {
@@ -137,6 +151,7 @@ test('Candidate intake has a compact chat picker and approve/edit/reject review 
     });
     await page.goto(`${baseURL}/staff/telegram-intake/chats`);
     await expect(page.getByRole('heading', { name: 'Choose chats', exact: true })).toBeVisible();
+    await expect(page.getByRole('list', { name: 'Telegram onboarding steps' })).not.toBeVisible();
     await page.getByRole('checkbox', { name: 'Select Chat 1', exact: true }).check();
     await page.getByRole('button', { name: 'More chats' }).click();
     await page.getByRole('checkbox', { name: 'Select Chat 51', exact: true }).check();

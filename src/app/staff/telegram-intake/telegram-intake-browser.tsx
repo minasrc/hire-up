@@ -98,7 +98,7 @@ export function TelegramIntakeBrowser({ initialResult, initialDraftId }: { initi
         setRevision(value => value + 1);
     }
     return <section className="flex w-full min-w-0 flex-col gap-3">
-        <header className="flex flex-wrap items-center justify-between gap-2"><div className="flex items-center gap-3"><h1 className="text-lg font-semibold">Candidate proposals</h1><Badge variant="secondary" aria-live="polite">{result.counts.all}</Badge></div><div className="flex gap-2"><Button asChild size="sm" variant="outline"><Link href="/staff/telegram-intake/chats">Choose chats</Link></Button><Button asChild size="sm" variant="outline"><Link href="/staff/candidates/search">Search candidates</Link></Button></div></header>
+        <header className="flex flex-wrap items-center justify-between gap-2"><div className="flex items-center gap-3"><h1 className="text-lg font-semibold">Candidate proposals</h1><Badge variant="secondary" aria-live="polite">{result.counts.all}</Badge></div><div className="flex gap-2"><Button asChild size="sm" variant="outline"><Link href="/staff/telegram-intake/chats">Manage chats</Link></Button><Button asChild size="sm" variant="outline"><Link href="/staff/candidates/search">Search candidates</Link></Button></div></header>
         <ProcessingStatus reviewLink={false} />
         {notice ? <p role="status" className="text-xs text-muted-foreground">{notice}</p> : null}
         {listError ? <p role="alert" className="text-sm">{listError}</p> : null}

@@ -56,7 +56,7 @@ const NAV_ITEMS = [
         icon: Users,
         capability: 'candidates',
     },
-    { href: '/staff/telegram-intake/chats', activePrefix: '/staff/telegram-intake', label: 'Telegram', icon: Send, capability: 'telegram' },
+    { href: '/staff/telegram-intake', activePrefix: '/staff/telegram-intake', label: 'Telegram', icon: Send, capability: 'telegram' },
     { href: '/staff/jobs', label: 'Jobs', icon: BriefcaseBusiness, capability: 'jobs' },
     { href: '/staff/clients', label: 'Clients', icon: Building2, capability: 'clients' },
     { href: '/staff/members', label: 'Members', icon: UserCog, capability: 'members' },
@@ -558,7 +558,7 @@ export function StaffShell({
                                 {isDetail ? (
                                     <>
                                         <Link
-                                            href={section === 'telegram-intake' ? '/staff/telegram-intake/chats' : `/staff/${section}`}
+                                            href={section === 'telegram-intake' ? '/staff/telegram-intake' : `/staff/${section}`}
                                             className="truncate rounded-sm text-muted-foreground outline-none hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring"
                                         >
                                             {sectionLabel}

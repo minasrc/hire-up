@@ -2,6 +2,8 @@
 
 Telegram is an intake source. The main flow is Connect → Choose chats → Review proposals. Approved information is saved to the candidate database; candidate search defaults to approved profiles, independently of Telegram.
 
+- First-time visitors see a compact Connect → Choose chats → Review guide. Starting an import records onboarding completion for that recruiter and workspace. Later Telegram visits open proposals; Manage chats remains available. Removing chats or disconnecting does not restart onboarding. Existing imports are recognized automatically.
+- Overview To-do includes pending candidate proposal links and a count, derived from the private review inbox. Resolved proposals disappear on the next overview visit.
 - Chat selections survive search and pagination. Start atomically enables importing and candidate extraction for up to 50 selected chats.
 - Review shows a profile preview, highlights changes against an existing candidate, and offers Approve, Edit, and Reject. CVs, individual suggestions, and message evidence are available on demand. A name is required; email and CV are optional for this intake flow.
 - Exact email or Telegram user identifiers suggest an existing candidate only when there is one visible active match. Reviewers can search for and explicitly select a different existing candidate. Names alone never automatically merge records.
@@ -11,7 +13,7 @@ Telegram is an intake source. The main flow is Connect → Choose chats → Revi
 
 ## Release
 
-Apply `20261013180000_telegram_candidate_review.sql` before deploying these application changes. Keep the existing Telegram connector, extraction worker, semantic worker/local embedding service, and maintenance worker running. This change does not replace the embedding model or deploy any services.
+Apply `20261013180000_telegram_candidate_review.sql` and `20261014100000_telegram_onboarding.sql` before deploying these application changes. Keep the existing Telegram connector, extraction worker, semantic worker/local embedding service, and maintenance worker running. This change does not replace the embedding model or deploy any services.
 
 ## Focused verification
 
@@ -28,3 +30,7 @@ The demo does not sign into a real Telegram account, process live messages, or r
 `npm run proxy:setup` installs the pinned, checksum-verified CLIProxyAPI release. `npm run proxy:login` authorizes model access, and `npm run proxy:start` keeps the loopback backend running. `npm run proxy:check` checks GPT-6 Luna availability. Then run `npm run dev:telegram-ai` and open `http://127.0.0.1:3013/`. Select the sample chats and press Start: the real extraction worker sends their synthetic messages to GPT-6 Luna and new proposals appear as each batch completes.
 
 The review page uses an inline candidate list and detail pane with independent scrolling. Background arrivals refresh the list without resetting open profile edits.
+
+## CV policy
+
+The candidate table allows a null current document; the older upload workflow requires a CV. Telegram profile creation and enrichment intentionally allow no CV. Recommended policy: keep intake searchable without a CV, then require a CV at client submission when that process needs one. This change does not add a new submission requirement.

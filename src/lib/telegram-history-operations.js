@@ -62,3 +62,8 @@ export async function telegramHistoryWorkerOperation(pool, token, action, input)
     } catch (error) { await client.query('rollback').catch(() => {}); throw error; }
     finally { client.release(); }
 }
+
+export function telegramOnboardingComplete(pool, identity, org) {
+    return staff(pool, identity, org, async ({ client }) =>
+        (await client.query('select app.telegram_onboarding_complete_v1() as complete')).rows[0].complete);
+}

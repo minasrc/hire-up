@@ -8,7 +8,7 @@ import { AUTHZ_ID, installStaffFixture, staffPoolOptions } from '../support/staf
 import { CJ_SUBJECTS, clientJobFixtureSql } from '../support/client-job-workflows.js';
 import { createTelegramDraft, getTelegramDraft, decideTelegramDraft, updateTelegramDraft, refreshTelegramReview, registerTelegramWorker, matchTelegramReview, telegramReviewMatches } from '../../src/lib/telegram-intake-operations.js';
 import { saveCandidateProfile, getCandidateProfile } from '../../src/lib/candidate-profile-operations.js';
-import { telegramHistoryAction, telegramHistoryStatus } from '../../src/lib/telegram-history-operations.js';
+import { telegramHistoryAction, telegramHistoryStatus, telegramOnboardingComplete } from '../../src/lib/telegram-history-operations.js';
 import { normalizeTelegramDraftFields } from '../../src/lib/telegram-intake-contracts.js';
 
 const owner = { provider: 'google', issuer: 'https://accounts.google.com', subject: CJ_SUBJECTS.ADMIN };
@@ -26,6 +26,7 @@ test('Telegram proposals create candidates without CVs, update exact matches, fe
     const password = installStaffFixture(db); psql(db, clientJobFixtureSql);
     pool = new pg.Pool(staffPoolOptions(db, password, 3));
     const args = [pool, owner, org];
+    assert.equal(await telegramOnboardingComplete(...args), false);
     const approve = d => decideTelegramDraft(...args, d.id, { action: 'approve', expectedVersion: d.version, operationId: randomUUID(), reviewFlow: true, reviewedFields: Object.fromEntries(Object.entries(normalizeTelegramDraftFields(d.proposedFields ?? d.fields)).filter(([key]) => !['telegramUserId', 'ownerMembershipId'].includes(key))) });
     const created = await createTelegramDraft(...args, { fields: { firstName: 'New', lastName: 'Candidate', headline: 'Engineer' } });
     const saved = await approve(await getTelegramDraft(...args, created.id));
@@ -81,9 +82,13 @@ test('Telegram proposals create candidates without CVs, update exact matches, fe
     await assert.rejects(() => telegramHistoryAction(...args, { action: 'start', chats: [{ chatId: chat, expectedVersion: 1 }, { chatId: randomUUID(), expectedVersion: 1 }] }));
     let history = await telegramHistoryStatus(...args);
     assert.equal(history.chats[0].selected, false, 'failed Start rolls back selection');
+    assert.equal(await telegramOnboardingComplete(...args), false, 'failed Start preserves onboarding');
     await telegramHistoryAction(...args, { action: 'start', chats: [{ chatId: chat, expectedVersion: 1 }] });
     history = await telegramHistoryStatus(...args);
     assert.equal(history.chats[0].selected, true);
+    assert.equal(await telegramOnboardingComplete(...args), true);
+    psql(db, `update app.telegram_history_chats set selected=false where id='${chat}';`);
+    assert.equal(await telegramOnboardingComplete(...args), true, 'deselecting chats never resets onboarding');
     assert.equal(history.chats[0].extractionEnabled, true, 'one Start enables automatic extraction');
     psql(db, `insert into app.telegram_extraction_subjects(organization_id,owner_user_id,identity_key,draft_id,reviewed_fields) values('${org}','${AUTHZ_ID.USER_ADMIN2}','email:existing.flow@example.test','${update.id}','{}');`);
     const addProposal = headline => {

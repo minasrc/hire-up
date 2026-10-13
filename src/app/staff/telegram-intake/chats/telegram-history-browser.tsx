@@ -4,6 +4,7 @@ import { staffWorkspaceFetch } from '@/lib/staff-workspace-fetch';
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 import Link from 'next/link';
+import { useRouter } from 'next/navigation';
 import { CheckCircle2, MessageSquare, RefreshCw, Search } from 'lucide-react';
 import { Button } from '@/components/staff-ui/button';
 import { Card } from '@/components/staff-ui/card';
@@ -42,7 +43,8 @@ async function request(url: string, init?: RequestInit) {
     return body;
 }
 
-export function TelegramHistoryBrowser({ workspaceId, hostedEnabled = false }: { workspaceId: string; hostedEnabled?: boolean }) {
+export function TelegramHistoryBrowser({ workspaceId, hostedEnabled = false, onboarding = false }: { workspaceId: string; hostedEnabled?: boolean; onboarding?: boolean }) {
+    const router = useRouter();
     const [snapshot, setSnapshot] = useState<Snapshot | null>(null);
     const view = 'all';
     const [search, setSearch] = useState('');
@@ -186,7 +188,7 @@ export function TelegramHistoryBrowser({ workspaceId, hostedEnabled = false }: {
         const chats = marked.map(id => selectedRows.current.get(id)).filter((chat): chat is Chat => Boolean(chat));
         if (!chats.length) return;
         const success = await act({ action: 'start', selected: true, chats: chats.map(chat => ({ chatId: chat.id, expectedVersion: chat.version })) }, '', true);
-        if (success) setStarted(true);
+        if (success) { setStarted(true); if (onboarding) router.push('/staff/telegram-intake'); }
     }
     useEffect(() => {
         const account = snapshot?.connection?.accountUserId;
@@ -198,7 +200,13 @@ export function TelegramHistoryBrowser({ workspaceId, hostedEnabled = false }: {
     }, [snapshot, busy, loading, denied]);
 
     return <section className="mx-auto flex w-full max-w-6xl flex-col gap-3">
-        <header className="flex flex-wrap items-center justify-between gap-2"><h1 className="text-lg font-semibold">Choose chats</h1><Button asChild size="sm" variant="outline"><Link href="/staff/telegram-intake">Review proposals</Link></Button></header>
+        <header className="flex flex-wrap items-center justify-between gap-2"><h1 className="text-lg font-semibold">{onboarding ? 'Connect Telegram' : 'Choose chats'}</h1>{!onboarding ? <Button asChild size="sm" variant="outline"><Link href="/staff/telegram-intake">Review proposals</Link></Button> : null}</header>
+        {onboarding ? <ol aria-label="Telegram onboarding steps" className="flex items-center gap-4 rounded-lg bg-muted/50 px-3 py-2 text-xs sm:text-sm">
+            {['Connect', 'Choose chats', 'Review'].map((label, index) => {
+                const active = snapshot?.canImport ? 1 : 0;
+                return <li key={label} aria-current={index === active ? 'step' : undefined} className={`flex items-center gap-2 ${index === active ? 'font-medium text-foreground' : 'text-muted-foreground'}`}><span className="flex h-5 w-5 items-center justify-center rounded-full bg-background">{index < active ? <CheckCircle2 className="h-3.5 w-3.5" aria-label="Complete" /> : index + 1}</span>{label}</li>;
+            })}
+        </ol> : null}
         {error ? <div role="alert" className="flex flex-wrap items-center justify-between gap-3 rounded-lg border p-4 text-sm"><p>{error}</p><Button variant="outline" onClick={refreshStatus} disabled={busy}>Retry</Button></div> : null}
         {snapshot?.canImport ? <details className="rounded-lg border bg-card px-3 py-2"><summary className="cursor-pointer text-sm font-medium"><CheckCircle2 className="mr-2 inline h-4 w-4 text-primary" />Telegram connected</summary><div className="mt-4"><TelegramConnectionBrowser workspaceId={workspaceId} hostedEnabled={hostedEnabled} blocked={denied} onConnectionChange={connectionChanged} onDenied={denyRemovalAccess} onChooseChats={chooseChats} chooseChatsLabel={null} /></div></details>
             : <TelegramConnectionBrowser workspaceId={workspaceId} hostedEnabled={hostedEnabled} blocked={denied} onConnectionChange={connectionChanged} onDenied={denyRemovalAccess} onChooseChats={chooseChats} chooseChatsLabel="Choose chats" />}
