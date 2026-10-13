@@ -100,9 +100,10 @@ Disconnect retains the existing remote logout protocol. Removing a worker token
 does not guarantee remote logout; Telegram Settings → Devices remains the
 emergency revocation path.
 
-This initial deployment supports ten durable owner enrollments, including
-stopped/revoked registrations. It intentionally does not recycle uncertain
-identities. Capacity errors are real limits, not an invitation to bypass them.
+This deployment supports ten active owner enrollments. Stopped/revoked
+registrations keep their slot until an explicit retirement with logout proof
+or owner confirmation of external revocation. Historical identities remain
+private audit records; uncertain credentials are never silently replaced.
 Public workspace signup and independent workspace selection are separate work;
 this service currently uses the existing authorized workspace membership gate.
 
@@ -120,3 +121,103 @@ Runtime unit tests use temporary synthetic state and local child processes, with
 no Telegram calls. `npm run test:telegram-connection` includes real disposable
 PostgreSQL and browser coverage for hosted enrollment, QR/password handling,
 cancel/retry, offline service, owner isolation and acknowledged logout.
+
+## Polling and operating cost
+
+Apply the efficient-polling migration (`20261013110000`) and the chat-removal
+cleanup migration (`20261013120000`) before restarting the new service. Deploy
+the website/API before restarting the Mac. Legacy heartbeat, claim and list
+endpoints remain available during this rollout.
+
+The supervisor renews its lease and obtains all owner scheduling hints in one
+request every ten seconds. A connected idle child combines its heartbeat,
+connection lease renewal and work plan in one request each minute. Browser
+sign-in, password submission, disconnect and queue mutations change a bounded
+wake counter; the next supervisor snapshot wakes that owner immediately.
+Runnable hints also wake repeatedly, so a missed counter update cannot leave
+queued work asleep. Hints never grant access or claim jobs. Pending encrypted
+acknowledgements are processed even when the work plan says no new work exists.
+
+The pinned Telegram SDK disables raw event delivery when its automatic update
+manager is stopped. This version therefore uses explicit native differences
+with a sixty-second quiet-feed cooldown, rather than claiming push freshness.
+Account and channel lanes are independent; channels are served fairly using
+the authoritative server feed order. Scheduler/provider delays and many due
+channels add time. Missing updates, gaps and edits continue through the same
+fenced server cursor and repair protocol. Automatic SDK difference fetching
+remains disabled. This does not promise instantaneous edit/deletion detection.
+
+With fast responses and no queued work, supervisor control falls from 25,920
+to 8,640 requests/day. Ten enrolled idle children add 14,400 polls/day. A quiet
+account plus one quiet selected channel per owner adds approximately 57,600
+native claim/completion requests/day, including independent lane scheduling hints.
+Idle maintenance adds 288 requests/day. With no provider jobs the total is
+approximately 23,328 requests/day; with a quiet account and one quiet selected
+channel per owner it is approximately 80,928 requests/day. These are respectively
+about 97% and 90% below the previous roughly 817,920 empty requests/day.
+These are request estimates, not bill estimates. More channels, source
+repair, imports, browser tabs, retries and retention cleanup add real work.
+Every request still validates current permissions and revocation. Worker
+last-seen timestamps are written at most every thirty seconds and expiry is
+extended only when less than twenty-nine days remain.
+
+Disconnected owners retain their processes and poll once a minute. Parking is
+not enabled: no server hint alone proves that an uncertain local authorization
+session is safe to stop. Removal cleanup aborts the current provider epoch,
+erases only the claimed chat's scratch and CV chunks, flushes deletions, and
+then acknowledges its bounded page. Other chats' pending work and authentication
+keys/sessions are preserved. Offline removal remains pending until those
+acknowledgements arrive.
+
+## Retiring a lost registration
+
+`20261013150000` changes the ten-owner capacity limit to count active enrollments.
+Retired registrations remain as private audit/provenance records, with their old
+worker identity, owner, retirement time, reason and idempotent operation receipt.
+They are excluded from provisioning and service snapshots. Imported history is
+preserved.
+
+The owner can open **Reset a lost or revoked connection registration** in the
+hosted connection panel. A never-registered enrollment or server-recorded
+logout/cancellation can retire directly. For an uncertain or unavailable session,
+the owner must first terminate the old session in Telegram Settings → Devices,
+or verify it is absent, and explicitly confirm that step. This is an owner
+attestation; the website does not claim it performed remote logout.
+
+Reset requires the existing authenticated owner session and MFA gate. It revokes
+the old worker token immediately, fences the old connection generation, and
+queues the retired registration's private files for deletion. Clicking Connect
+then requests a fresh enrollment/worker; reset alone does not start sign-in. The
+next complete supervisor snapshot stops retired children before starting
+replacement children. The service verifies that the retired process is stopped,
+erases only that registration's private directory and flushes the deletion before
+acknowledging it. Unsafe paths or uncertain process state remain pending. Reset
+cannot restore a lost encryption key or prove Telegram-side revocation itself.
+
+## Retired private-state cleanup
+
+After `20261013170000`, retirement queues deletion of that exact old request's
+private directory. The supervisor first observes child exit and verifies any
+orphan PID lock represents a stopped process. It uses only the configured
+service root and canonical request UUID, checks deployment/worker/owner metadata,
+rejects links or unsafe files, erases the retired directory asynchronously, and
+flushes the parent directory before acknowledging the service's durable proof.
+An old encryption key is unnecessary for deleting the entire known retired
+scope. Active request directories and imported database history are preserved.
+
+Retired cleanup claims contain at most five identity records and no file paths.
+Fair claim ordering prevents an unverifiable old directory from indefinitely
+hiding later work. A live or unknown process/path stays pending with a fixed
+operational code and a five-minute retry. Lost acknowledgements retry the same
+proof and verified absence; they cannot recreate an old registration. Cleanup
+adds no idle polling requests: the existing maintenance aggregate provides its
+wake hint.
+
+Conversation removal keeps primary-worker cleanup evidence separate from old
+retired-vault obligations. A new worker's acknowledgement never proves an old
+worker's bytes were erased. Completion waits for both, plus server and storage
+purge. Future removal requests inherit any still-unverified retired scopes;
+verified whole-scope purge can cover later work because retired credentials are
+permanently fenced. Migration repair reopens only still-removed completed chats
+with missing old-scope proof, preserving explicit fresh reimports. Private
+backups remain governed by the operator's backup retention policy.

@@ -1,10 +1,11 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import * as filesystem from 'node:fs';
 import { mkdtempSync, rmSync, readdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { publicEncrypt, createPublicKey, constants } from 'node:crypto';
-import { createVault, acquireLock, unlockStoppedProcess } from '../../services/telegram-connector/vault.mjs';
+import { createVault, acquireLock, unlockStoppedProcess, atomicWrite } from '../../services/telegram-connector/vault.mjs';
 import { createHostClient } from '../../services/telegram-connector/http.mjs';
 import { createConnector } from '../../services/telegram-connector/connector.mjs';
 
@@ -250,7 +251,7 @@ test('timed-out connect closes a late client instead of retaining an orphan', as
   let finishConnect; let closed = 0;
   const connector = createConnector({ ...f.options, operationTimeoutMs: 5, createTelegram: () => new Promise((resolve) => { finishConnect = resolve; }) });
   await connector.tick();
-  assert.equal(f.current.status, 'failed');
+  assert.equal(f.current.status, 'requested');
   finishConnect({ close: async () => { closed++; } });
   await new Promise((resolve) => setImmediate(resolve));
   assert.equal(closed, 1); await connector.stop();
@@ -280,4 +281,98 @@ test('an expired QR acknowledgement is replaced by a fresh token after host outa
   f.responses.push({ status: 'qr_pending', qrLoginUrl: 'tg://login?token=fresh', qrExpiresAt: new Date(f.time() + 60000).toISOString() });
   await connector.tick();
   assert.equal(f.calls.at(-1).body.qrLoginUrl, 'tg://login?token=fresh'); assert.equal(f.clients.length, 1);
+});
+
+
+test('transient connected failure retries the durable session without remote logout', async (t) => {
+  const f = fixture(t);
+  f.responses.push({ status: 'connected', profile: f.profile });
+  await f.connector.tick();
+  f.clients[0].profile = async () => { throw new Error('TELEGRAM_UNAVAILABLE'); };
+  f.advance(60000); await f.connector.tick();
+  assert.equal(f.current.status, 'connected');
+  assert.equal(f.vault.load(id).session, 'private-telegram-session');
+  assert.equal(f.clients[0].closes, 1);
+  await f.connector.tick(); assert.equal(f.clients.length, 1);
+  f.advance(2000); await f.connector.tick();
+  assert.equal(f.clients[1].initialSession, 'private-telegram-session');
+  assert.equal(f.current.status, 'connected');
+  assert.equal(f.clients.reduce((sum, client) => sum + client.logouts, 0), 0);
+  assert.equal(f.calls.some(call => call.body?.status === 'failed'), false);
+});
+
+test('repeated transient connects back off to thirty seconds and keep host leases renewed', async (t) => {
+  const f = fixture(t); let attempts = 0;
+  const connector = createConnector({ ...f.options, createTelegram: async () => { attempts++; throw new Error('TELEGRAM_UNAVAILABLE'); } });
+  t.after(() => connector.stop());
+  for (const delay of [2000, 4000, 8000, 16000, 30000, 30000]) {
+    await connector.tick();
+    const before = attempts;
+    f.advance(delay - 1); await connector.tick(); assert.equal(attempts, before);
+    f.advance(1);
+  }
+  await connector.tick();
+  assert.equal(attempts, 7);
+  assert.equal(f.current.status, 'requested');
+  assert.ok(f.calls.filter(call => call.action === 'claim').length >= 5);
+});
+
+test('terminal session revocation still fails and retains the remote logout fence', async (t) => {
+  const f = fixture(t);
+  f.responses.push({ status: 'connected', profile: f.profile }); await f.connector.tick();
+  f.clients[0].profile = async () => { throw new Error('SESSION_REVOKED'); };
+  f.advance(60000); await f.connector.tick();
+  assert.equal(f.current.status, 'failed');
+  assert.equal(f.calls.at(-1).body.errorCode, 'SESSION_REVOKED');
+  await f.connector.tick();
+  assert.equal(f.clients[1].logouts, 1); assert.equal(f.vault.load(id).state, 'logged_out');
+});
+
+test('durable replacement flushes file before publication and directory after publication', (t) => {
+  const { root } = storage(t); const path = join(root, 'durable.json'); const events = [];
+  const fs = { ...filesystem,
+    writeFileSync: (...args) => { events.push('write'); return filesystem.writeFileSync(...args); },
+    fsyncSync: fd => { events.push(filesystem.fstatSync(fd).isDirectory() ? 'directory-sync' : 'file-sync'); return filesystem.fsyncSync(fd); },
+    renameSync: (...args) => { events.push('rename'); return filesystem.renameSync(...args); },
+  };
+  atomicWrite(path, 'old', fs); events.length = 0;
+  atomicWrite(path, 'new', fs);
+  assert.deepEqual(events, ['write', 'file-sync', 'rename', 'directory-sync']);
+  assert.equal(readFileSync(path, 'utf8'), 'new');
+  assert.equal(statSync(path).mode & 0o777, 0o600);
+  assert.equal(readdirSync(root).some(name => name.endsWith('.tmp')), false);
+});
+
+test('interrupted write, file flush or rename preserves the prior record and removes temporary files', (t) => {
+  const { root } = storage(t); const path = join(root, 'durable.json');
+  atomicWrite(path, 'old');
+  for (const fail of ['writeFileSync', 'fsyncSync', 'renameSync']) {
+    const fs = { ...filesystem, [fail]: () => { throw new Error('synthetic disk failure'); } };
+    assert.throws(() => atomicWrite(path, 'new', fs), /synthetic disk failure/);
+    assert.equal(readFileSync(path, 'utf8'), 'old');
+    assert.equal(readdirSync(root).some(name => name.endsWith('.tmp')), false);
+  }
+});
+
+test('directory flush failure is reported without acknowledging durability', (t) => {
+  const { root } = storage(t); const path = join(root, 'durable.json');
+  atomicWrite(path, 'old');
+  const fs = { ...filesystem, fsyncSync: fd => {
+    if (filesystem.fstatSync(fd).isDirectory()) throw new Error('synthetic directory failure');
+    filesystem.fsyncSync(fd);
+  } };
+  assert.throws(() => atomicWrite(path, 'new', fs), /synthetic directory failure/);
+  // Publication already happened; retry/restart can read only a complete record.
+  assert.equal(readFileSync(path, 'utf8'), 'new');
+  assert.equal(readdirSync(root).some(name => name.endsWith('.tmp')), false);
+});
+
+
+test('terminal authentication failure remains failed and logs out its pending session', async (t) => {
+  const f = fixture(t, { poll: async () => { throw new Error('AUTH_FAILED'); } });
+  await f.connector.tick();
+  assert.equal(f.current.status, 'failed');
+  assert.equal(f.calls.at(-1).body.errorCode, 'AUTH_FAILED');
+  await f.connector.tick();
+  assert.equal(f.clients[1].logouts, 1); assert.equal(f.vault.load(id).state, 'logged_out');
 });

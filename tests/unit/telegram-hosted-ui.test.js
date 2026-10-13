@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { hostedConnectionError, hostedStatus, prepareHostedConnection } from '../../src/app/staff/telegram-intake/connect/hosted-connection-model.js';
+import { hostedConnectionError, hostedStatus, prepareHostedConnection, hostedRequestError, hostedEmergencyLogout } from '../../src/app/staff/telegram-intake/connect/hosted-connection-model.js';
 
 const workerId = '00000000-0000-4000-8000-000000000001';
 const pending = { serviceOnline: true, state: 'pending', workerId: null, workerOnline: false, errorCode: null };
@@ -80,4 +80,19 @@ test('a ready response arriving after the setup deadline cannot start sign-in', 
     });
     await assert.rejects(prepareHostedConnection(input), /taking longer/);
     assert.equal(calls.some(call => Array.isArray(call) && call[0] === 'start'), false);
+});
+
+test('hosted capacity has actionable fixed copy without trusting provider detail', () => {
+    assert.match(hostedRequestError(429, { code: 'HOSTED_CAPACITY', error: 'private sentinel' }), /connection capacity/);
+    assert.doesNotMatch(hostedRequestError(429, { code: 'HOSTED_CAPACITY', error: 'private sentinel' }), /sentinel/);
+    assert.match(hostedRequestError(429, { code: 'other' }), /temporarily unavailable/);
+});
+
+test('hosted offline and pending logout expose emergency revocation without waiting for an error', () => {
+    assert.equal(hostedEmergencyLogout({ status: 'connected' }, { serviceOnline: false, workerOnline: false }), true);
+    assert.equal(hostedEmergencyLogout({ status: 'connected' }, { serviceOnline: true, workerOnline: false }), true);
+    assert.equal(hostedEmergencyLogout({ status: 'disconnecting' }, { serviceOnline: true, workerOnline: true }), true);
+    assert.equal(hostedEmergencyLogout({ status: 'connected' }, ready), false);
+    assert.equal(hostedEmergencyLogout({ status: 'failed' }, { serviceOnline: false, workerOnline: false }), true);
+    assert.equal(hostedEmergencyLogout({ status: 'disconnected' }, null), false);
 });

@@ -1,23 +1,61 @@
 import { createHash, generateKeyPairSync, randomBytes, createCipheriv, createDecipheriv, privateDecrypt, constants } from 'node:crypto';
-import { mkdirSync, readFileSync, writeFileSync, renameSync, unlinkSync, existsSync, lstatSync, chmodSync, openSync, closeSync, rmSync } from 'node:fs';
-import { join, resolve } from 'node:path';
+import * as filesystem from 'node:fs';
+import { mkdirSync, readFileSync, writeFileSync, unlinkSync, existsSync, lstatSync, chmodSync, openSync, closeSync, rmSync, fstatSync } from 'node:fs';
+import { join, resolve, dirname } from 'node:path';
 
 const idPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 export function privateDirectory(path) {
-  mkdirSync(path, { recursive: true, mode: 0o700 });
-  if (!lstatSync(path).isDirectory() || lstatSync(path).isSymbolicLink()) throw new Error('UNSAFE_LOCAL_DIRECTORY');
+  if (!existsSync(path)) {
+    const parent = dirname(resolve(path));
+    if (!existsSync(parent)) privateDirectory(parent);
+    mkdirSync(path, { mode: 0o700 });
+    syncDirectory(dirname(resolve(path)));
+  }
+  const stat = lstatSync(path);
+  if (!stat.isDirectory() || stat.isSymbolicLink() || stat.uid !== process.getuid()) throw new Error('UNSAFE_LOCAL_DIRECTORY');
   chmodSync(path, 0o700);
 }
 export function readPrivateFile(path, maxBytes = 65536) {
   const stat = lstatSync(path);
   if (!stat.isFile() || stat.isSymbolicLink() || (stat.mode & 0o077) !== 0 || stat.uid !== process.getuid()) throw new Error('UNSAFE_LOCAL_FILE');
   if (stat.size > maxBytes) throw new Error('LOCAL_FILE_TOO_LARGE');
-  return readFileSync(path, 'utf8');
+  if (stat.nlink !== 1) throw new Error('UNSAFE_LOCAL_FILE');
+  const fd = openSync(path, filesystem.constants.O_RDONLY | filesystem.constants.O_NOFOLLOW);
+  try {
+    const opened = fstatSync(fd);
+    if (opened.ino !== stat.ino || opened.dev !== stat.dev || opened.nlink !== 1) throw new Error('UNSAFE_LOCAL_FILE');
+    return readFileSync(fd, 'utf8');
+  } finally { closeSync(fd); }
 }
-function atomicWrite(path, value) {
+function syncDirectory(path, fs = filesystem) {
+  const descriptor = fs.openSync(path, fs.constants.O_RDONLY);
+  try { fs.fsyncSync(descriptor); } finally { fs.closeSync(descriptor); }
+}
+// The old record stays intact until the replacement is fully flushed. A rename
+// followed by directory fsync makes a returned success durable across restart.
+export function atomicWrite(path, value, fs = filesystem) {
+  const parent = dirname(path);
+  const stat = fs.lstatSync(parent);
+  if (!stat.isDirectory() || stat.isSymbolicLink() || stat.uid !== process.getuid() || (stat.mode & 0o077)) throw new Error('UNSAFE_LOCAL_DIRECTORY');
+  if (fs.existsSync(path)) {
+    const target = fs.lstatSync(path);
+    if (!target.isFile() || target.isSymbolicLink() || target.uid !== process.getuid() || (target.mode & 0o077) || target.nlink !== 1) throw new Error('UNSAFE_LOCAL_FILE');
+  }
   const temporary = `${path}.${randomBytes(8).toString('hex')}.tmp`;
-  writeFileSync(temporary, value, { flag: 'wx', mode: 0o600 });
-  renameSync(temporary, path);
+  let descriptor;
+  try {
+    descriptor = fs.openSync(temporary, fs.constants.O_CREAT | fs.constants.O_EXCL | fs.constants.O_WRONLY | fs.constants.O_NOFOLLOW, 0o600);
+    fs.writeFileSync(descriptor, value);
+    fs.fsyncSync(descriptor);
+    fs.closeSync(descriptor); descriptor = undefined;
+    fs.renameSync(temporary, path);
+    syncDirectory(parent, fs);
+  } finally {
+    try { if (descriptor !== undefined) fs.closeSync(descriptor); }
+    finally {
+      try { fs.unlinkSync(temporary); } catch (error) { if (error.code !== 'ENOENT') throw error; }
+    }
+  }
 }
 export function acquireLock(root) {
   privateDirectory(root);
@@ -87,9 +125,13 @@ export function createVault({ root, server, workerId }) {
     },
     removeCvChunks(connectionId, accountId, jobId) {
       if (!idPattern.test(jobId)) throw new Error('INVALID_CV_CHUNK');
+      let parent;
       for (let index = 0; index < 8; index++) {
+        parent = dirname(historyFile(connectionId, accountId, `cv:${jobId}:chunk:${index}`));
+        if (existsSync(parent)) privateDirectory(parent);
         try { unlinkSync(historyFile(connectionId, accountId, `cv:${jobId}:chunk:${index}`)); } catch (error) { if (error.code !== 'ENOENT') throw error; }
       }
+      if (existsSync(parent)) { privateDirectory(parent); syncDirectory(parent); }
     },
     saveHistory(connectionId, accountId, key, record) {
       const json = JSON.stringify(record);
@@ -110,7 +152,10 @@ export function createVault({ root, server, workerId }) {
       return JSON.parse(Buffer.concat([decipher.update(Buffer.from(record.ciphertext, 'base64')), decipher.final()]).toString('utf8'));
     },
     removeHistoryRecord(connectionId, accountId, key) {
-      try { unlinkSync(historyFile(connectionId, accountId, key)); } catch (error) { if (error.code !== 'ENOENT') throw error; }
+      const path = historyFile(connectionId, accountId, key);
+      if (existsSync(dirname(path))) privateDirectory(dirname(path));
+      try { unlinkSync(path); } catch (error) { if (error.code !== 'ENOENT') throw error; }
+      if (existsSync(dirname(path))) syncDirectory(dirname(path));
     },
     removeHistory(connectionId) {
       if (!idPattern.test(connectionId)) throw new Error('INVALID_CONNECTION_ID');

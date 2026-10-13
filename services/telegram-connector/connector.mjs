@@ -1,3 +1,5 @@
+import { validatePoll } from './scheduling.mjs';
+import { validateCleanup, cleanupScratch } from './cleanup.mjs';
 const uuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const states = new Set(['requested', 'qr_pending', 'awaiting_password', 'connected', 'disconnecting', 'disconnected', 'failed']);
 const errors = new Set(['AUTH_FAILED', 'PASSWORD_INVALID', 'LOGIN_EXPIRED', 'SESSION_MISSING', 'SESSION_REVOKED', 'TELEGRAM_UNAVAILABLE', 'LOGOUT_FAILED']);
@@ -5,11 +7,13 @@ function validateTask(task, now) {
   if (!task || !uuid.test(task.id) || !uuid.test(task.leaseToken) || !uuid.test(task.challengeId) || !Number.isSafeInteger(task.generation) || task.generation < 1 || !states.has(task.status) || !Number.isFinite(Date.parse(task.leaseExpiresAt)) || Date.parse(task.leaseExpiresAt) <= now || Date.parse(task.leaseExpiresAt) > now + 125000) throw new Error('INVALID_HOST_RESPONSE');
   return task;
 }
-export function createConnector({ host, vault, createTelegram, now = Date.now, operationTimeoutMs = 15000, onConnectedTick }) {
+export function createConnector({ host, vault, createTelegram, now = Date.now, operationTimeoutMs = 15000, onConnectedTick, efficientPolling = false, cleanupEnabled = false }) {
   let task = null; let client = null; let saved = null; let epoch = 0; let stopped = false;
+  let plan; let wakeTurns = 0; let wakeRequested = false;
   let nextHeartbeat = 0; let nextClaim = 0; let nextKeepalive = 0; let pendingReport = null; let busy = false;
   let connectedProfile = null; let clientAbort = new AbortController();
   let seenCiphertext = null; let nextLogout = 0; let logoutFailures = 0;
+  let nextTelegramRetry = 0; let telegramFailures = 0;
   const close = async () => { clientAbort.abort(); connectedProfile = null; const previous = client; client = null; if (previous) await previous.close().catch(() => {}); };
   const active = (version) => !stopped && version === epoch && task && Date.parse(task.leaseExpiresAt) > now();
   async function operation(fn, version) {
@@ -120,7 +124,7 @@ export function createConnector({ host, vault, createTelegram, now = Date.now, o
     }
     if (task.status === 'connected') {
       if (now() >= nextKeepalive) { connectedProfile = await operation(() => client.profile(), version); nextKeepalive = now() + 60000; }
-      if (onConnectedTick && connectedProfile) await onConnectedTick({ connectionId: task.id, generation: task.generation, connectionLeaseToken: task.leaseToken, connectionLeaseExpiresAt: task.leaseExpiresAt, accountUserId: connectedProfile.telegramUserId, telegram: { ...client.history, cv: client.cv }, signal: clientAbort.signal, isActive: () => active(version) && task.status === 'connected' });
+      if (onConnectedTick && connectedProfile) await onConnectedTick({ connectionId: task.id, generation: task.generation, connectionLeaseToken: task.leaseToken, connectionLeaseExpiresAt: task.leaseExpiresAt, accountUserId: connectedProfile.telegramUserId, plan, wake: wakeTurns > 0, telegram: { ...client.history, cv: client.cv }, signal: clientAbort.signal, isActive: () => active(version) && task.status === 'connected' });
       return;
     }
     if (task.status === 'awaiting_password') {
@@ -149,28 +153,54 @@ export function createConnector({ host, vault, createTelegram, now = Date.now, o
   }
   return {
     get stopped() { return stopped; },
+    wake() { wakeRequested = true; wakeTurns = 3; },
     async tick() {
       if (stopped || busy) return;
       busy = true;
       try {
         if (task && Date.parse(task.leaseExpiresAt) <= now()) { epoch++; task = null; nextClaim = 0; pendingReport = null; await close(); }
-        if (now() >= nextHeartbeat) { await host('heartbeat', { publicKeySpki: vault.publicKeySpki }); nextHeartbeat = now() + 30000; }
-        if (now() >= nextClaim) {
-          const response = await host('claim', {});
+        if (!efficientPolling && now() >= nextHeartbeat) { await host('heartbeat', { publicKeySpki: vault.publicKeySpki }); nextHeartbeat = now() + 30000; }
+        if (now() >= nextClaim || wakeRequested) {
+          wakeRequested = false;
+          const pollStarted = now();
+          const response = efficientPolling ? validatePoll(await host('poll', { publicKeySpki: vault.publicKeySpki })) : await host('claim', {});
           if (!Object.hasOwn(response, 'connection')) throw new Error('INVALID_HOST_RESPONSE');
           const incoming = response.connection === null ? null : validateTask(response.connection, now());
           if (task?.id !== incoming?.id || task?.generation !== incoming?.generation || task?.leaseToken !== incoming?.leaseToken || (incoming?.status === 'failed' && task?.status !== 'failed') || incoming === null) {
             epoch++; await close();
             if (!incoming && task) { const record = vault.load(task.id); if (record?.state === 'logged_out') vault.remove(task.id); }
             pendingReport = null; saved = null; seenCiphertext = null; nextLogout = 0; logoutFailures = 0;
+            nextTelegramRetry = 0; telegramFailures = 0;
           }
           task = incoming;
-          nextClaim = now() + (task?.status === 'connected' ? 20000 : 5000);
+          if (efficientPolling) plan = { ...response.plan };
+          nextClaim = (efficientPolling ? pollStarted : now()) + (efficientPolling ? response.nextPollAfterSeconds * 1000 : task?.status === 'connected' ? 20000 : 5000);
+          if (cleanupEnabled) {
+            const cleanup = validateCleanup(Object.hasOwn(response, 'cleanup') ? { cleanup: response.cleanup } : await host('cleanupClaim', {}));
+            if (cleanup) {
+              // End the current provider epoch before unlinking fenced scratch.
+              epoch++; await close();
+              cleanupScratch(vault, cleanup);
+              nextClaim = 0;
+              const ack = await host('cleanupAck', { removalId: cleanup.removalId, cleanupToken: cleanup.cleanupToken });
+              if (ack?.ok !== true) throw new Error('INVALID_HOST_RESPONSE');
+              nextClaim = 0;
+            }
+          }
         }
-        await work();
+        if (now() >= nextTelegramRetry) { await work(); telegramFailures = 0; nextTelegramRetry = 0; if (wakeTurns > 0) wakeTurns--; }
       } catch (error) {
         if (error.status === 401 || error.status === 403) { stopped = true; epoch++; await close(); throw new Error('ACCESS_DENIED'); }
         if (error.status === 409 || error.message === 'STALE_TASK') { epoch++; await close(); task = null; pendingReport = null; nextClaim = 0; return; }
+        if (error.message === 'TELEGRAM_UNAVAILABLE' && task && active(epoch)) {
+          // Network failures do not revoke authorization. Fence late SDK results
+          // before reopening the durable session, while host claims keep renewing.
+          epoch++; await close();
+          seenCiphertext = null;
+          telegramFailures = Math.min(telegramFailures + 1, 5);
+          nextTelegramRetry = now() + Math.min(30000, 1000 * 2 ** telegramFailures);
+          return;
+        }
         if (errors.has(error.message) && task && active(epoch)) {
           const code = error.message;
           epoch++; await close();

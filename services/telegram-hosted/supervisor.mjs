@@ -1,3 +1,5 @@
+import { createRetiredCleanup } from './retired-cleanup.mjs';
+import { validRunnable, validWake } from '../telegram-connector/scheduling.mjs';
 import { randomUUID } from 'node:crypto';
 import { performance } from 'node:perf_hooks';
 import { fork } from 'node:child_process';
@@ -53,10 +55,25 @@ export function terminateChild(child) {
 
 export function createSupervisor({ control, store, api, connectorEntrypoint,
   spawn = launchConnector, terminate = terminateChild, wall = Date.now,
-  monotonic = () => performance.now(), output = () => {}, maxProcesses = 10 }) {
+  monotonic = () => performance.now(), output = () => {}, maxProcesses = 10, efficientPolling = false }) {
   const instanceId = randomUUID(), children = new Map(), backoff = new Map();
+  let pendingSnapshot = null;
+  let nextMaintenance = 0, maintaining = false;
+  let cleaningRetired = false;
+  const retiredRequests = new Set();
+  const hints = new Map();
   let lease = null, proof = null, closed = false, refreshing = false, reconciling = false, shutdown;
-  const grantMessage = () => ({ type: 'telegram-hosted-lease', leaseToken: proof, deadline: lease.deadline });
+  const grantMessage = id => ({ type: 'telegram-hosted-lease', leaseToken: proof, deadline: lease.deadline, ...(hints.get(id) ?? {}) });
+  const validateSnapshot = response => {
+    if (!response || !Array.isArray(response.requests) || response.requests.length > 10 || response.nextAfter !== null) throw new Error('INVALID_HOST_RESPONSE');
+    const ids = new Set();
+    for (const item of response.requests) {
+      validateRequest(item);
+      if (efficientPolling && (Object.keys(item).length !== 10 || Object.keys(item).some(key => !['requestId','organizationId','ownerUserId','workerId','tokenSha256','state','canRun','wakeEpoch','demand','runnable'].includes(key)))) throw new Error('INVALID_HOST_RESPONSE');
+      if (ids.has(item.requestId) || (efficientPolling && (!validWake(item.wakeEpoch) || !validRunnable(item.runnable) || item.demand !== 'run'))) throw new Error('INVALID_HOST_RESPONSE');
+      ids.add(item.requestId);
+    }
+  };
   const valid = () => {
     if (closed || !lease) return false;
     const elapsedWall = wall() - lease.wall, elapsedMono = monotonic() - lease.monotonic;
@@ -79,12 +96,16 @@ export function createSupervisor({ control, store, api, connectorEntrypoint,
     refreshing = true;
     const started = wall(), startedMono = monotonic();
     try {
-      const result = await control('heartbeat', { instanceId, ...(proof ? { leaseToken: proof } : {}) });
+      const result = await control(efficientPolling ? 'sync' : 'heartbeat', { instanceId, ...(proof ? { leaseToken: proof } : {}) });
       if (closed) return;
       if (!UUID.test(result?.leaseToken ?? '') || !Number.isInteger(result.leaseSeconds)
         || result.leaseSeconds < 1 || result.leaseSeconds > 90
         || !Number.isInteger(result.capacity) || result.capacity < 1 || result.capacity > 10
         || (proof && proof !== result.leaseToken)) throw new Error('INVALID_HOST_RESPONSE');
+      if (efficientPolling) {
+        if (Object.keys(result).length !== 6 || Object.keys(result).some(key => !['leaseToken','leaseSeconds','capacity','protocolVersion','requests','nextAfter'].includes(key)) || result.protocolVersion !== 1) throw new Error('INVALID_HOST_RESPONSE');
+        validateSnapshot(result);
+      }
       proof = result.leaseToken;
       // Use request start, not response time. A lost acknowledgement never
       // extends the last locally acknowledged lease or grants children access.
@@ -95,14 +116,20 @@ export function createSupervisor({ control, store, api, connectorEntrypoint,
       if (lease && !valid()) { await stop(); return; }
       lease = next;
       if (!valid()) { await stop(); return; }
-      for (const { child } of children.values()) {
+      if (efficientPolling) {
+        pendingSnapshot = result;
+        if (hints.size !== result.requests.length || result.requests.some(item => hints.get(item.requestId)?.wakeEpoch !== item.wakeEpoch)) nextMaintenance = 0;
+        hints.clear();
+        for (const item of result.requests) hints.set(item.requestId, { wakeEpoch: item.wakeEpoch, runnable: item.runnable });
+      }
+      for (const [id, { child }] of children) {
         const fail = async () => {
           output('CONNECTOR_IPC_FAILED');
           await terminate(child);
           for (const [id, entry] of children) if (entry.child === child) children.delete(id);
         };
         if (!child.connected) { void fail(); continue; }
-        try { child.send(grantMessage(), error => { if (error) void fail(); }); }
+        try { child.send(grantMessage(id), error => { if (error) void fail(); }); }
         catch { void fail(); }
       }
     } catch (error) {
@@ -111,29 +138,60 @@ export function createSupervisor({ control, store, api, connectorEntrypoint,
         || (proof && error.message === 'LEASE_CONFLICT')) await stop();
     } finally { refreshing = false; }
   };
+  const maintain = async () => {
+    if (!efficientPolling || maintaining || !valid() || wall() < nextMaintenance) return;
+    maintaining = true;
+    // Idle cleanup runs every five minutes. Work mutations wake it promptly;
+    // offline device acknowledgements do not cause an endless busy loop.
+    nextMaintenance = wall() + 300000;
+    try {
+      const result = await control('maintenance', { instanceId, leaseToken: proof });
+      for (const key of ['ownersProcessed', 'batchesPurged', 'messagesPurged', 'bytesFreed', 'queriesExpired', 'queryResultRowsDeleted', 'analysesPurged']) {
+        if (!Number.isSafeInteger(result?.[key]) || result[key] < 0) throw new Error('INVALID_HOST_RESPONSE');
+      }
+      if (typeof result.remainingWork !== 'boolean' || typeof result.removalActionable !== 'boolean') throw new Error('INVALID_HOST_RESPONSE');
+      if (result.nextMaintenanceAfterSeconds !== undefined) {
+        if (!Number.isInteger(result.nextMaintenanceAfterSeconds) || result.nextMaintenanceAfterSeconds < 5 || result.nextMaintenanceAfterSeconds > 300) throw new Error('INVALID_HOST_RESPONSE');
+        nextMaintenance = Math.min(nextMaintenance, wall() + result.nextMaintenanceAfterSeconds * 1000);
+      }
+      if (result.retiredVaultActionable !== undefined && typeof result.retiredVaultActionable !== 'boolean') throw new Error('INVALID_HOST_RESPONSE');
+      retiredCleanup.hint(result.retiredVaultActionable === true);
+      if (result.removalActionable) nextMaintenance = Math.min(nextMaintenance, wall() + 10000);
+    } catch (error) {
+      output('SERVICE_MAINTENANCE_DEFERRED');
+      nextMaintenance = Math.min(nextMaintenance, wall() + 30000);
+      if (['ACCESS_DENIED', 'LEASE_CONFLICT', 'INVALID_HOST_RESPONSE'].includes(error.message)) await stop();
+    } finally { maintaining = false; }
+  };
+  const retiredCleanup = createRetiredCleanup({ control, store, instanceId, proof: () => proof, valid, wall, output,
+    onLeaseLost: () => { void stop(); }, stopRequest: async id => {
+      retiredRequests.add(id);
+      const entry = children.get(id);
+      if (entry) { await terminate(entry.child); children.delete(id); output('CONNECTOR_STOPPED'); }
+    } });
+  const cleanupRetired = async () => {
+    if (cleaningRetired || reconciling || refreshing || closed) return;
+    cleaningRetired = true;
+    try { await retiredCleanup.tick(); } finally { cleaningRetired = false; }
+  };
   const reconcile = async () => {
-    if (reconciling || !valid()) return;
+    if (reconciling || cleaningRetired || !valid()) return;
     reconciling = true;
     const token = proof;
     try {
-      const response = await control('list', { instanceId, leaseToken: token });
+      const response = efficientPolling ? pendingSnapshot : await control('list', { instanceId, leaseToken: token });
+      if (!response) return;
+      if (efficientPolling) pendingSnapshot = null;
       if (!valid() || token !== proof) return;
-      if (!response || !Array.isArray(response.requests) || response.requests.length > 10
-        || response.nextAfter !== null) throw new Error('INVALID_HOST_RESPONSE');
-      const ids = new Set();
-      for (const item of response.requests) {
-        validateRequest(item);
-        if (ids.has(item.requestId)) throw new Error('INVALID_HOST_RESPONSE');
-        ids.add(item.requestId);
-      }
+      validateSnapshot(response);
       // Validate the complete response before changing any running children.
-      const allowed = new Set(response.requests.filter(item => item.canRun).map(item => item.requestId));
+      const allowed = new Set(response.requests.filter(item => item.canRun && !retiredRequests.has(item.requestId)).map(item => item.requestId));
       for (const [id, entry] of children) {
         if (!allowed.has(id)) { await terminate(entry.child); children.delete(id); output('CONNECTOR_STOPPED'); }
       }
       for (const item of response.requests) {
         if (!valid()) return;
-        if (!item.canRun || item.state === 'stopped' || children.has(item.requestId)) continue;
+        if (retiredRequests.has(item.requestId) || !item.canRun || item.state === 'stopped' || children.has(item.requestId)) continue;
         if (children.size >= maxProcesses || (backoff.get(item.requestId)?.next ?? 0) > wall()) continue;
         try {
           const record = store.prepare(item, api);
@@ -141,10 +199,10 @@ export function createSupervisor({ control, store, api, connectorEntrypoint,
             requestId: item.requestId, workerId: record.workerId, tokenSha256: record.tokenSha256 });
           if (!valid() || token !== proof) return;
           if (registered?.workerId !== record.workerId || registered.state !== 'registered') throw new Error('REGISTRATION_CONFLICT');
-          const child = await spawn(connectorEntrypoint, record, grantMessage());
+          const child = await spawn(connectorEntrypoint, record, grantMessage(item.requestId));
           if (!valid() || token !== proof) { await terminate(child); return; }
           if (childStopped(child)) throw new Error('CONNECTOR_START_FAILED');
-          children.set(item.requestId, { child, record });
+          children.set(item.requestId, { child, record, startedAt: wall() });
           output('CONNECTOR_SPAWNED');
           child.on('message', message => {
             const code = connectorStatusCode(message);
@@ -152,8 +210,10 @@ export function createSupervisor({ control, store, api, connectorEntrypoint,
           });
           child.once('exit', () => {
             if (children.get(item.requestId)?.child !== child) return;
+            const entry = children.get(item.requestId);
             children.delete(item.requestId);
-            const failures = Math.min((backoff.get(item.requestId)?.failures ?? 0) + 1, 6);
+            const healthy = entry && wall() - entry.startedAt >= 60000;
+            const failures = healthy ? 1 : Math.min((backoff.get(item.requestId)?.failures ?? 0) + 1, 6);
             backoff.set(item.requestId, { failures, next: wall() + Math.min(60000, 1000 * 2 ** failures) });
             output('CONNECTOR_EXITED');
           });
@@ -170,7 +230,7 @@ export function createSupervisor({ control, store, api, connectorEntrypoint,
       if (['ACCESS_DENIED', 'LEASE_CONFLICT', 'INVALID_HOST_RESPONSE'].includes(error.message)) await stop();
     } finally { reconciling = false; }
   };
-  return { refresh, reconcile, watch, stop,
+  return { refresh, reconcile, maintain, cleanupRetired, retiredCleanupHint: pending => retiredCleanup.hint(pending), watch, stop,
     get stopped() { return closed; },
     snapshot: () => ({ leaseAcknowledged: valid(), runningConnectors: children.size, instanceId }),
   };

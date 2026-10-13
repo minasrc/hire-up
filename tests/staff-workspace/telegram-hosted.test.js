@@ -115,7 +115,7 @@ test('Hosted Telegram browser starts on demand, cancels setup and protects QR/pa
     let starts = 0;
     page.on('request', request => {
         if (request.method() !== 'POST') return;
-        if (request.url() === hostedURL) prepares += 1;
+        if (request.url() === hostedURL && request.postDataJSON()?.action === 'prepare') prepares += 1;
         if (request.url() === connectionURL && request.postDataJSON()?.action === 'connect') starts += 1;
     });
     const noLocalSetup = async () => {
@@ -149,6 +149,7 @@ test('Hosted Telegram browser starts on demand, cancels setup and protects QR/pa
         await worker('heartbeat', { publicKeySpki });
         await page.getByRole('button', { name: 'Retry service status', exact: true }).click();
         await expect(page.getByText('Telegram service available.', { exact: true })).toBeVisible();
+        await expect(page.getByText('Setup cancelled. Click Connect Telegram when you are ready.', { exact: true })).toHaveCount(0);
         assert.equal(starts, 0, 'A ready status after cancellation cannot restart sign-in');
         await page.getByRole('button', { name: 'Connect Telegram', exact: true }).click();
         await expect(page.getByRole('heading', { name: 'Preparing Telegram sign-in', exact: true })).toBeVisible();
@@ -177,8 +178,54 @@ test('Hosted Telegram browser starts on demand, cancels setup and protects QR/pa
         await update({ status: 'connected', profile: { telegramUserId: '123456789', username: 'synthetic_recruiter', displayName: 'Synthetic Recruiter' } });
         await expect(page.getByRole('heading', { name: 'Telegram connected', exact: true })).toBeVisible();
         await expect(page.getByRole('link', { name: 'Choose chats to import', exact: true })).toHaveAttribute('href', '/staff/telegram-intake/chats');
+        // Follow the real hosted browser journey through imported source context.
+        const historyURL = `${baseURL}/api/staff/telegram-history`;
+        const historyWorker = async (action, data = {}) => {
+            const current = (await worker('claim')).connection;
+            const response = await fetch(`${baseURL}/api/telegram-history/worker/${action}`, {
+                method: 'POST', headers: { authorization: `Bearer ${workerToken}`, 'content-type': 'application/json' },
+                body: JSON.stringify({ connectionId: current.id, generation: current.generation, connectionLeaseToken: current.leaseToken, accountUserId: '123456789', ...data }),
+            });
+            assert.equal(response.status, 200, await response.clone().text()); return response.json();
+        };
+        const completePage = (job, records, nextCursor = job.cursor, done = false) => historyWorker('complete', { jobId: job.id, jobLeaseToken: job.leaseToken, pageId: randomUUID(), fromCursor: job.cursor, nextCursor, done, records });
+        const historyAction = async locator => { const response = page.waitForResponse(response => response.url() === historyURL && response.request().method() === 'POST'); await locator.click(); assert.equal((await response).status(), 200); };
+        await page.getByRole('link', { name: 'Choose chats to import', exact: true }).click();
+        await historyAction(page.getByRole('button', { name: 'Discover chats', exact: true }));
+        let dialogPageSent = false;
+        for (let pages = 0; pages < 4; pages += 1) {
+            const job = (await historyWorker('claim')).job;
+            if (!job) break;
+            assert.equal(job.kind, 'dialogs');
+            if (job.cursor.folder === 0 && !dialogPageSent) {
+                await completePage(job, [{ peer: { kind: 'user', id: '9001' }, title: 'Hosted journey chat', username: null, lastMessageAt: null }], { folder: 0, offsetDate: 1700000000, offsetId: '1', offsetPeer: { kind: 'user', id: '9001' }, excludePinned: true });
+                dialogPageSent = true;
+            } else await completePage(job, [], job.cursor, true);
+        }
+        await page.getByRole('button', { name: 'Refresh status', exact: true }).click();
+        await expect(page.getByText('Hosted journey chat', { exact: true })).toBeVisible();
+        await historyAction(page.getByRole('button', { name: 'Import full history', exact: true }));
+        let historyJob = (await historyWorker('claim')).job;
+        await completePage(historyJob, [{ messageId: '1', kind: 'message', sentAt: '2025-01-01T00:00:00Z', editedAt: null, sender: null, text: 'Synthetic hosted Solidity history', attachments: [] }], { beforeMessageId: '1', upperMessageId: '1' });
+        historyJob = (await historyWorker('claim')).job;
+        await completePage(historyJob, [], historyJob.cursor, true);
+        await page.getByRole('button', { name: 'Refresh status', exact: true }).click();
+        await expect(page.getByText(/Last progress:/)).toBeVisible();
+        await expect(page.getByText(/History reached:/)).toBeVisible();
+        await page.getByRole('link', { name: 'View conversation', exact: true }).click();
+        await expect(page.getByRole('dialog')).toContainText('Synthetic hosted Solidity history');
+        await page.getByRole('button', { name: 'Close', exact: true }).click();
+        await page.getByLabel('Message words or phrase', { exact: true }).fill('Solidity');
+        await page.getByRole('button', { name: 'Search messages', exact: true }).click();
+        await expect(page.getByRole('button', { name: 'View conversation', exact: true })).toHaveCount(1);
+        await page.getByRole('link', { name: 'Telegram chats', exact: true }).click();
+        await historyAction(page.getByRole('button', { name: 'Pause sync', exact: true }));
+        await expect(page.getByText('Sync paused', { exact: true })).toBeVisible();
+        await historyAction(page.getByRole('button', { name: 'Resume sync', exact: true }));
+        await page.getByRole('link', { name: 'Telegram connection', exact: true }).click();
         await page.getByRole('button', { name: 'Disconnect Telegram', exact: true }).click();
         await expect(page.getByRole('heading', { name: 'Waiting for Telegram to disconnect', exact: true })).toBeVisible();
+        await expect(page.getByText(/To revoke access immediately, open Telegram on your phone/)).toBeVisible();
         task = (await worker('claim')).connection;
         await update({ status: 'disconnecting', errorCode: 'LOGOUT_FAILED' });
         await expect(page.getByText(/Telegram has not confirmed logout/)).toBeVisible();
@@ -188,6 +235,38 @@ test('Hosted Telegram browser starts on demand, cancels setup and protects QR/pa
         await expect(page.getByRole('heading', { name: 'Telegram disconnected', exact: true })).toBeVisible();
         await expect(page.getByRole('button', { name: 'Connect again', exact: true })).toBeEnabled();
         assert.equal(starts, 1, 'Logout acknowledgment must not trigger automatic sign-in');
+        await page.getByRole('link', { name: 'Search imported conversations', exact: true }).click();
+        await page.getByLabel('Message words or phrase', { exact: true }).fill('Solidity');
+        await page.getByRole('button', { name: 'Search messages', exact: true }).click();
+        await expect(page.getByRole('button', { name: 'View conversation', exact: true })).toHaveCount(1);
+        await page.getByRole('link', { name: 'Telegram chats', exact: true }).click();
+        await expect(page.getByRole('heading', { name: 'Connect Telegram to import chats' })).toBeVisible();
+        await page.getByRole('link', { name: 'Telegram connection', exact: true }).click();
+        await page.getByRole('button', { name: 'Connect again', exact: true }).click();
+        await expect(page.getByRole('heading', { name: 'Preparing Telegram sign-in', exact: true })).toBeVisible();
+        task = (await worker('claim')).connection;
+        await update({ status: 'connected', profile: { telegramUserId: '123456789', username: 'synthetic_recruiter', displayName: 'Synthetic Recruiter' } });
+        await expect(page.getByRole('heading', { name: 'Telegram connected', exact: true })).toBeVisible();
+        await page.getByRole('link', { name: 'Choose chats to import', exact: true }).click();
+        await expect(page.getByText('Hosted journey chat', { exact: true })).toBeVisible();
+        await expect(page.getByRole('link', { name: 'View conversation', exact: true })).toBeVisible();
+        await page.getByRole('link', { name: 'Telegram connection', exact: true }).click();
+        await page.getByRole('button', { name: 'Disconnect Telegram', exact: true }).click();
+        await expect(page.getByRole('heading', { name: 'Waiting for Telegram to disconnect', exact: true })).toBeVisible();
+        task = (await worker('claim')).connection;
+        await update({ status: 'disconnected' });
+        await expect(page.getByRole('heading', { name: 'Telegram disconnected', exact: true })).toBeVisible();
+        await page.getByRole('button', { name:'Retry service status', exact:true }).click();
+        await page.getByText('Reset a lost or revoked connection registration', {exact:true}).click();
+        await expect(page.getByRole('button', {name:'Reset registration',exact:true})).toBeEnabled();
+        const retired=page.waitForResponse(response=>response.url()===hostedURL&&response.request().postDataJSON()?.action==='retire');
+        await page.getByRole('button', {name:'Reset registration',exact:true}).click();
+        assert.equal((await retired).status(),200);
+        await expect(page.getByText('Registration reset. Imported history is preserved. Click Connect Telegram to create a new connection.', {exact:true})).toBeVisible();
+        assert.equal(starts,2,'Retirement cannot start a replacement automatically');
+        const retiredClaim=await fetch(`${baseURL}/api/telegram-connection/worker/claim`,{method:'POST',headers:{authorization:`Bearer ${workerToken}`,'content-type':'application/json'},body:'{}'});
+        assert.equal(retiredClaim.status,403,'Retired worker credentials are immediately refused');
+
         // The existing physical-worker account must never be silently moved.
         const registration = await context.request.post(`${baseURL}/api/staff/telegram-intake/workers`, { data: { name: 'Synthetic existing device' } });
         assert.equal(registration.status(), 201);
@@ -201,8 +280,30 @@ test('Hosted Telegram browser starts on demand, cancels setup and protects QR/pa
         await expect(page.getByRole('button', { name: 'Connect again', exact: true })).toHaveCount(0);
         await page.getByRole('button', { name: 'Cancel sign-in', exact: true }).click();
         await expect(page.getByRole('heading', { name: 'Connection cancelled', exact: true })).toBeVisible();
-        assert.equal(prepares, 2);
+        assert.equal(prepares, 3, 'Reconnect reuses the existing registration; physical-worker setup cannot provision another hosted worker');
         await noLocalSetup();
+        // A revoked enrollment needs explicit Telegram-side confirmation.
+        const newPrepare=await context.request.post(hostedURL,{data:{action:'prepare'}});assert.equal(newPrepare.status(),200);
+        const freshRequest=(await control('list')).requests[0],lostWorker=randomUUID(),lostToken='l'.repeat(64);
+        await control('register',{requestId:freshRequest.requestId,workerId:lostWorker,tokenSha256:createHash('sha256').update(lostToken).digest('hex')});
+        const lostCall=async(action,data={})=>{
+            const response=await fetch(`${baseURL}/api/telegram-connection/worker/${action}`,{method:'POST',headers:{authorization:`Bearer ${lostToken}`,'content-type':'application/json'},body:JSON.stringify(data)});
+            assert.equal(response.status,200,await response.clone().text());return response.json();
+        };
+        await lostCall('heartbeat',{publicKeySpki});
+        assert.equal((await context.request.post(connectionURL,{data:{action:'connect',workerId:lostWorker}})).status(),200);
+        const lostTask=(await lostCall('claim')).connection;
+        await lostCall('update',{connectionId:lostTask.id,generation:lostTask.generation,leaseToken:lostTask.leaseToken,status:'connected',profile:{telegramUserId:'123456789',displayName:'Synthetic recovered owner'}});
+        psql(db,`update app.telegram_workers set revoked_at=clock_timestamp() where id='${lostWorker}'`);
+        await page.reload();
+        await page.getByText('Reset a lost or revoked connection registration',{exact:true}).click();
+        const resetButton=page.getByRole('button',{name:'Reset registration',exact:true});await expect(resetButton).toBeDisabled();
+        await page.getByRole('checkbox',{name:'I revoked the old session, or verified it is absent, in Telegram Settings → Devices.',exact:true}).check();
+        await expect(resetButton).toBeEnabled();
+        const externalReset=page.waitForResponse(response=>response.url()===hostedURL&&response.request().postDataJSON()?.action==='retire');
+        await resetButton.click();assert.equal((await externalReset).status(),200);
+        await expect(page.getByText('Registration reset after your confirmation of revocation in Telegram. Imported history is preserved. Click Connect Telegram to create a new connection.',{exact:true})).toBeVisible();
+        await expect(page.getByText('You confirmed the old session was revoked in Telegram Settings → Devices. The service registration has been retired; imported history remains available.',{exact:true})).toBeVisible();
         // Losing access removes challenge/password state and prevents provisioning.
         await page.evaluate(() => window.dispatchEvent(new Event('staff-session-invalidated')));
         await expect(page.getByRole('button', { name: 'Connect Telegram', exact: true })).toBeDisabled();
