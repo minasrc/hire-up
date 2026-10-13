@@ -57,6 +57,7 @@ export function createSupervisor({ control, store, api, connectorEntrypoint,
   monotonic = () => performance.now(), output = () => {}, maxProcesses = 10, efficientPolling = false }) {
   const instanceId = randomUUID(), children = new Map(), backoff = new Map();
   let pendingSnapshot = null;
+  let nextMaintenance = 0, maintaining = false;
   const hints = new Map();
   let lease = null, proof = null, closed = false, refreshing = false, reconciling = false, shutdown;
   const grantMessage = id => ({ type: 'telegram-hosted-lease', leaseToken: proof, deadline: lease.deadline, ...(hints.get(id) ?? {}) });
@@ -114,6 +115,7 @@ export function createSupervisor({ control, store, api, connectorEntrypoint,
       if (!valid()) { await stop(); return; }
       if (efficientPolling) {
         pendingSnapshot = result;
+        if (hints.size !== result.requests.length || result.requests.some(item => hints.get(item.requestId)?.wakeEpoch !== item.wakeEpoch)) nextMaintenance = 0;
         hints.clear();
         for (const item of result.requests) hints.set(item.requestId, { wakeEpoch: item.wakeEpoch, runnable: item.runnable });
       }
@@ -132,6 +134,29 @@ export function createSupervisor({ control, store, api, connectorEntrypoint,
       if (['ACCESS_DENIED', 'INVALID_HOST_RESPONSE'].includes(error.message)
         || (proof && error.message === 'LEASE_CONFLICT')) await stop();
     } finally { refreshing = false; }
+  };
+  const maintain = async () => {
+    if (!efficientPolling || maintaining || !valid() || wall() < nextMaintenance) return;
+    maintaining = true;
+    // Idle cleanup runs every five minutes. Work mutations wake it promptly;
+    // offline device acknowledgements do not cause an endless busy loop.
+    nextMaintenance = wall() + 300000;
+    try {
+      const result = await control('maintenance', { instanceId, leaseToken: proof });
+      for (const key of ['ownersProcessed', 'batchesPurged', 'messagesPurged', 'bytesFreed', 'queriesExpired', 'queryResultRowsDeleted', 'analysesPurged']) {
+        if (!Number.isSafeInteger(result?.[key]) || result[key] < 0) throw new Error('INVALID_HOST_RESPONSE');
+      }
+      if (typeof result.remainingWork !== 'boolean' || typeof result.removalActionable !== 'boolean') throw new Error('INVALID_HOST_RESPONSE');
+      if (result.nextMaintenanceAfterSeconds !== undefined) {
+        if (!Number.isInteger(result.nextMaintenanceAfterSeconds) || result.nextMaintenanceAfterSeconds < 5 || result.nextMaintenanceAfterSeconds > 300) throw new Error('INVALID_HOST_RESPONSE');
+        nextMaintenance = Math.min(nextMaintenance, wall() + result.nextMaintenanceAfterSeconds * 1000);
+      }
+      if (result.removalActionable) nextMaintenance = Math.min(nextMaintenance, wall() + 10000);
+    } catch (error) {
+      output('SERVICE_MAINTENANCE_DEFERRED');
+      nextMaintenance = Math.min(nextMaintenance, wall() + 30000);
+      if (['ACCESS_DENIED', 'LEASE_CONFLICT', 'INVALID_HOST_RESPONSE'].includes(error.message)) await stop();
+    } finally { maintaining = false; }
   };
   const reconcile = async () => {
     if (reconciling || !valid()) return;
@@ -189,7 +214,7 @@ export function createSupervisor({ control, store, api, connectorEntrypoint,
       if (['ACCESS_DENIED', 'LEASE_CONFLICT', 'INVALID_HOST_RESPONSE'].includes(error.message)) await stop();
     } finally { reconciling = false; }
   };
-  return { refresh, reconcile, watch, stop,
+  return { refresh, reconcile, maintain, watch, stop,
     get stopped() { return closed; },
     snapshot: () => ({ leaseAcknowledged: valid(), runningConnectors: children.size, instanceId }),
   };

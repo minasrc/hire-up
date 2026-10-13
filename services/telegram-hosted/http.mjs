@@ -17,7 +17,7 @@ export function createControlClient({ server, serviceToken, fetchImpl = fetch, t
   const origin = serviceOrigin(server);
   if (!/^[A-Za-z0-9_-]{64}$/.test(serviceToken ?? '')) throw new Error('INVALID_SERVICE_TOKEN');
   return async (action, input = {}) => {
-    if (!['heartbeat', 'sync', 'list', 'register'].includes(action)) throw new Error('INVALID_ACTION');
+    if (!['heartbeat', 'sync', 'list', 'register', 'maintenance'].includes(action)) throw new Error('INVALID_ACTION');
     const body = JSON.stringify({ ...input, action });
     if (Buffer.byteLength(body) > 8192) throw new Error('REQUEST_TOO_LARGE');
     const response = await fetchImpl(`${origin}/api/telegram-hosted/control`, {

@@ -33,11 +33,12 @@ try {
     supervisor = createSupervisor({ control, store, api,
       efficientPolling: true, connectorEntrypoint: resolve(fileURLToPath(new URL('../telegram-connector/run.mjs', import.meta.url))), output });
     watchdog = setInterval(() => supervisor.watch(), 250);
-    renewal = setInterval(() => { void supervisor.refresh().then(() => supervisor.reconcile()); }, 10000);
+    renewal = setInterval(() => { void supervisor.refresh().then(() => supervisor.reconcile()).then(() => supervisor.maintain()); }, 10000);
     // Reconciliation consumes the complete snapshot from each ten-second renewal.
     output('SERVICE_STARTED');
     await supervisor.refresh();
     await supervisor.reconcile();
+    await supervisor.maintain();
     while (!stopping && !supervisor.stopped) await delay(1000, undefined, { signal: abort.signal }).catch(() => {});
   }
 } catch (error) {

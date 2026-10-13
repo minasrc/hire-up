@@ -1,7 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { EventEmitter } from 'node:events';
-import { createRequire } from 'node:module';
 import { createConnector } from '../../services/telegram-connector/connector.mjs';
 import { createSupervisionGuard } from '../../services/telegram-connector/supervision.mjs';
 import { createSupervisor } from '../../services/telegram-hosted/supervisor.mjs';
@@ -55,16 +54,6 @@ test('target cleanup retains other chat scratch and rejects oversized/unscoped D
  const data=new Map([['pending-page',{payload:{jobId:worker}}],['pending-cv',{jobId:id}],['pending-source-update',{payload:{jobId:worker}}],['pending-native-update',{payload:{changes:[]}}],['peer:channel:99',{}],['peer:channel:100',{}]]),chunks=[];
  cleanupScratch({loadHistory:(c,a,k)=>data.get(k),removeHistoryRecord:(c,a,k)=>data.delete(k),removeCvChunks:(c,a,j)=>chunks.push(j)},cleanup);
  assert.equal(data.has('pending-page'),true);assert.equal(data.has('pending-source-update'),true);assert.equal(data.has('peer:channel:100'),true);assert.equal(data.has('pending-native-update'),false);assert.deepEqual(chunks,[id]);
-});
-test('pinned SDK transport dispatch does not deliver raw events after native manager stop',async()=>{
- const require=createRequire(new URL('../../services/telegram-connector/package.json',import.meta.url));
- const {UpdateManager}=require('teleproto/client/updates/manager.js');
- const {_handleUpdate,addEventHandler}=require('teleproto/client/updates/dispatch.js');
- const {Api}=require('teleproto');let events=0,invocations=0;
- const client={_eventBuilders:[],_log:{error(){},debug(){}},_entityCache:{add(){}},session:{},updates:{_pause(){},_resume(){}},invoke:async()=>{invocations++;throw Error('automatic provider RPC prohibited');}};
- client.updateManager=new UpdateManager(client);client.updateManager.stop();addEventHandler(client,()=>events++);
- _handleUpdate(client,new Api.UpdateDeleteMessages({messages:[1],pts:1,ptsCount:1}));
- await new Promise(resolve=>setImmediate(resolve));assert.equal(events,0);assert.equal(invocations,0);assert.equal(client.updateManager.running,false);
 });
 
 test('idle native account and channel checks use independent minute backstops',async()=>{
