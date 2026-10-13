@@ -1,7 +1,6 @@
 #!/usr/bin/env node
 import { resolve, dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { setTimeout as delay } from 'node:timers/promises';
 import { acquireLock, unlockStoppedProcess, readPrivateFile, createVault } from './vault.mjs';
 import { createHostClient } from './http.mjs';
 import { createConnector } from './connector.mjs';
@@ -14,6 +13,7 @@ import { createCvHostClient } from './cv-http.mjs';
 import { createConnectedWork } from './connected-work.mjs';
 import { connectorCredential } from './paired-credential.mjs';
 import { createSupervisionGuard } from './supervision.mjs';
+import { createWakeableSleep } from './wakeable-sleep.mjs';
 
 // Teleproto contains a few direct console calls outside its logger. This standalone
 // process deliberately emits only fixed operational codes via process.stderr.
@@ -29,13 +29,14 @@ const output = (code) => {
 let pendingWake = false;
 let release; let connector; let watchdog; let supervision; let forceStop; let stopping = false;
 const sleepController = new AbortController();
+const tickSleep = createWakeableSleep(sleepController.signal);
 const stop = () => { stopping = true; sleepController.abort(); void connector?.stop(); };
 process.on('unhandledRejection', () => { output('CONNECTOR_RUNTIME_FAILED'); process.exitCode = 1; stop(); });
 process.on('uncaughtException', () => { output('CONNECTOR_RUNTIME_FAILED'); process.exitCode = 1; stop(); });
 try {
   if (Number(process.versions.node.split('.')[0]) !== 22) throw new Error('NODE_22_REQUIRED');
   if (process.env.TELEGRAM_CONNECTOR_SUPERVISED === '1') {
-    supervision = createSupervisionGuard({ onWake: () => { pendingWake = true; connector?.wake(); }, onLost: () => {
+    supervision = createSupervisionGuard({ onWake: () => { pendingWake = true; connector?.wake(); tickSleep.wake(); }, onLost: () => {
       output('SUPERVISION_LOST'); process.exitCode = 1; stop();
       forceStop = setTimeout(() => process.exit(1), 5000);
     } });
@@ -90,7 +91,7 @@ try {
         if (error.message === 'ACCESS_DENIED') process.exitCode = 1;
         failures = Math.min(failures + 1, 5);
       }
-      if (!stopping && !connector.stopped) await delay(failures ? Math.min(30000, 1000 * 2 ** failures) + Math.floor(Math.random() * 500) : 1000, undefined, { signal: sleepController.signal }).catch(() => {});
+      if (!stopping && !connector.stopped) await tickSleep.sleep(failures ? Math.min(30000, 1000 * 2 ** failures) + Math.floor(Math.random() * 500) : 1000);
     }
   }
 } catch (error) {

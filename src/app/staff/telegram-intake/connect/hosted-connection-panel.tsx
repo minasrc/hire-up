@@ -3,7 +3,6 @@
 import { staffWorkspaceFetch } from '@/lib/staff-workspace-fetch';
 
 import { useCallback, useEffect, useRef, useState, type ReactNode, type MutableRefObject } from 'react';
-import Link from 'next/link';
 import { RefreshCw } from 'lucide-react';
 import { Button } from '@/components/staff-ui/button';
 import { Card } from '@/components/staff-ui/card';
@@ -13,14 +12,14 @@ type Enrollment = { requestId: string; workerId: string | null; retirementMode: 
 type Status = { enrollment?: Enrollment | null; serviceOnline: boolean; state: string; workerId: string | null; workerOnline: boolean; errorCode: string | null };
 const endpoint = '/api/staff/telegram-hosted';
 
-function waitForPoll(signal: AbortSignal) {
+function waitForPoll(signal: AbortSignal, delayMs: number) {
     return new Promise<void>((resolve, reject) => {
         let timer: ReturnType<typeof setTimeout>;
         const cleanup = () => { clearTimeout(timer); document.removeEventListener('visibilitychange', visible); signal.removeEventListener('abort', aborted); };
         const aborted = () => { cleanup(); reject(signal.reason); };
         const visible = () => {
             clearTimeout(timer);
-            if (!document.hidden) timer = setTimeout(() => { cleanup(); resolve(); }, 2000);
+            if (!document.hidden) timer = setTimeout(() => { cleanup(); resolve(); }, delayMs);
         };
         signal.addEventListener('abort', aborted, { once: true });
         document.addEventListener('visibilitychange', visible);
@@ -29,9 +28,10 @@ function waitForPoll(signal: AbortSignal) {
     });
 }
 
-export function HostedConnectionPanel({ connection, loaded, disabled, attemptRef, onDenied, onConnect, onReset, children }: {
+export function HostedConnectionPanel({ connection, loaded, disabled, attemptRef, onDenied, onConnect, onReset, children, actions }: {
     connection: { workerId: string; status: string } | null;
     children?: ReactNode;
+    actions?: ReactNode;
     loaded: boolean;
     disabled: boolean;
     attemptRef: MutableRefObject<AbortController | null>;
@@ -52,6 +52,8 @@ export function HostedConnectionPanel({ connection, loaded, disabled, attemptRef
     const busy = phase !== 'idle';
     const active = connection && !['failed', 'disconnected'].includes(connection.status);
     const blocked = connection && connection.status !== 'disconnected' && connection.workerId !== status?.workerId;
+    const signingIn = connection && ['requested', 'qr_pending'].includes(connection.status);
+    const serviceNeedsCheck = Boolean(error || (status && (!status.serviceOnline || status.state === 'unavailable')));
 
     const request = useCallback(async (signal: AbortSignal, prepare = false) => {
         const response = await staffWorkspaceFetch(endpoint, { cache: 'no-store', signal: AbortSignal.any([signal, AbortSignal.timeout(15000)]),
@@ -102,10 +104,11 @@ export function HostedConnectionPanel({ connection, loaded, disabled, attemptRef
         const controller = new AbortController();
         attemptRef.current = controller;
         setPhase('preparing'); actionError.current = false; setError('');
+        const started = Date.now();
         try {
             await prepareHostedConnection({
                 signal: controller.signal, visible: () => !document.hidden,
-                prepare: signal => request(signal, true), read: signal => request(signal), wait: waitForPoll,
+                prepare: signal => request(signal, true), read: signal => request(signal), wait: signal => waitForPoll(signal, Date.now() - started < 10000 ? 250 : 2000),
                 onStatus: next => { if (mounted.current && !controller.signal.aborted) setStatus(next); },
                 start: async (workerId, signal) => {
                     signal.throwIfAborted();
@@ -153,12 +156,15 @@ export function HostedConnectionPanel({ connection, loaded, disabled, attemptRef
         {!busy && active && status?.serviceOnline && status.state !== 'unavailable' && !(status.workerOnline && status.state === 'ready') ? <p role="status">Your Telegram connection is waiting for the service. Your imported history remains available.</p> : null}
         {hostedEmergencyLogout(connection, status) ? <p role="status" className="text-sm text-muted-foreground">To revoke access immediately, open Telegram on your phone → Settings → Devices and terminate this session. Imported history stays in your private workspace.</p> : null}
         {blocked ? <p role="status">This account has an existing connection. Disconnect it below and wait for logout confirmation before starting a hosted connection.</p> : null}
-        {!active || connection?.status === 'requested' ? <Button onClick={() => void connect()} disabled={disabled || busy || Boolean(active) || !loaded || Boolean(blocked) || !status?.serviceOnline || status.state === 'unavailable'}>{busy || connection?.status === 'requested' ? 'Preparing sign-in…' : connection?.status === 'failed' ? 'Retry sign-in' : 'Connect Telegram'}</Button> : null}
-        {phase === 'preparing' ? <Button variant="outline" onClick={() => { attemptRef.current?.abort(); actionError.current = true; setError('Setup cancelled. Click Connect Telegram when you are ready.'); }}>Cancel setup</Button> : null}
         {resetNotice ? <p role="status" className="text-sm">{resetNotice}</p> : null}
         {error ? <p role="alert" className="text-sm">{error}</p> : null}
         {children}
-        <div className="flex flex-wrap gap-3"><Button variant="outline" disabled={busy || disabled} onClick={() => setRefresh(value => value + 1)}><RefreshCw />Retry service status</Button><Button asChild variant="outline"><Link href="/staff/telegram-intake/context">Search imported conversations</Link></Button></div>
+        {serviceNeedsCheck ? <p className="text-sm text-muted-foreground">Service status updates automatically. Check again to see whether the service is available.</p> : null}
+        <div role="group" aria-label="Telegram connection actions" className="grid grid-cols-2 gap-3 [&>button]:h-auto [&>button]:min-h-9 [&>button]:min-w-0 [&>button]:whitespace-normal sm:flex sm:flex-wrap sm:items-center">
+            {!active || signingIn ? <Button onClick={() => void connect()} disabled={disabled || busy || Boolean(active) || !loaded || Boolean(blocked) || !status?.serviceOnline || status.state === 'unavailable'}>{busy || connection?.status === 'requested' ? 'Preparing sign-in…' : connection?.status === 'qr_pending' ? 'Sign-in in progress' : connection?.status === 'failed' ? 'Retry sign-in' : 'Connect Telegram'}</Button> : null}
+            {phase === 'preparing' || phase === 'starting' ? <Button variant="outline" disabled={phase === 'starting'} onClick={() => { attemptRef.current?.abort(); actionError.current = true; setError('Setup cancelled. Click Connect Telegram when you are ready.'); }}>Cancel sign-in</Button> : actions}
+            {serviceNeedsCheck ? <Button className="col-span-2 sm:col-span-1" variant="outline" disabled={busy || disabled} onClick={() => setRefresh(value => value + 1)}><RefreshCw />Check service status</Button> : null}
+        </div>
     </Card>
     {status?.enrollment ? <Card className="p-4"><details className="space-y-3 rounded-md border p-3">
             <summary className="cursor-pointer text-sm font-medium">Advanced recovery options</summary>

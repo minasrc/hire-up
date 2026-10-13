@@ -7,6 +7,7 @@ import { validateRequest } from './store.mjs';
 import { unlockStoppedProcess } from '../telegram-connector/vault.mjs';
 import { existsSync } from 'node:fs';
 import { join } from 'node:path';
+import { hostedWakeCursor } from '../../src/lib/telegram-hosted-wake.js';
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 export const CONNECTOR_STATUS_CODES = Object.freeze(['CONNECTOR_INITIALIZING', 'CONNECTOR_VAULT_READY', 'CONNECTOR_ADAPTER_READY', 'CONNECTOR_WORKERS_READY', 'CONNECTOR_SDK_READY', 'CONNECTOR_HEARTBEAT_ACKNOWLEDGED', 'CONNECTOR_STARTED', 'CONNECTOR_START_FAILED',
@@ -58,7 +59,7 @@ export function createSupervisor({ control, store, api, connectorEntrypoint,
   spawn = launchConnector, terminate = terminateChild, wall = Date.now,
   monotonic = () => performance.now(), output = () => {}, maxProcesses = 10, efficientPolling = false }) {
   const instanceId = randomUUID(), children = new Map(), backoff = new Map();
-  let pendingSnapshot = null;
+  let pendingSnapshot = null, wakeCursor = null;
   let nextMaintenance = 0, maintaining = false;
   let cleaningRetired = false;
   const retiredRequests = new Set();
@@ -119,6 +120,7 @@ export function createSupervisor({ control, store, api, connectorEntrypoint,
       if (!valid()) { await stop(); return; }
       if (efficientPolling) {
         pendingSnapshot = result;
+        wakeCursor = hostedWakeCursor(result.requests);
         if (hints.size !== result.requests.length || result.requests.some(item => hints.get(item.requestId)?.wakeEpoch !== item.wakeEpoch)) nextMaintenance = 0;
         hints.clear();
         for (const item of result.requests) hints.set(item.requestId, { wakeEpoch: item.wakeEpoch, runnable: item.runnable });
@@ -232,6 +234,7 @@ export function createSupervisor({ control, store, api, connectorEntrypoint,
     } finally { reconciling = false; }
   };
   return { refresh, reconcile, maintain, cleanupRetired, retiredCleanupHint: pending => retiredCleanup.hint(pending), watch, stop,
+    wakeScope: () => valid() && wakeCursor ? { instanceId, leaseToken: proof, cursor: wakeCursor } : null,
     get stopped() { return closed; },
     snapshot: () => ({ leaseAcknowledged: valid(), runningConnectors: children.size, instanceId }),
   };

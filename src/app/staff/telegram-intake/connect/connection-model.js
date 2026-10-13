@@ -16,7 +16,8 @@ export function requiresWorkerDisconnect(connection, workerId) {
     return Boolean(connection?.workerPinned && connection.workerId !== workerId);
 }
 
-export function pollingDelay(status) {
+export function pollingDelay(status, elapsedMs = 0) {
+    if (status === 'requested' && elapsedMs < 10000) return 500;
     return ['requested', 'qr_pending', 'awaiting_password', 'disconnecting'].includes(status) ? 2000 : 15000;
 }
 
