@@ -42,3 +42,13 @@ test('disabled rollout ignores stale selection cookies and keeps legacy API scop
         assert.equal((await context(value, second, false)({ subject }, { api: true })).status, 'workspace-changed');
     }
 });
+
+test('document navigation expectation permits only the rendered scope and cannot override a mismatched API header', async () => {
+    const selection = cookie.signStaffWorkspace(secret, subject, second, Date.now() + 3600000);
+    const options = { api: true, expectedWorkspaceId: second };
+    assert.equal((await context(selection, null)({ subject }, options)).organizationId, second);
+    assert.equal((await context(selection, first)({ subject }, options)).status, 'workspace-changed');
+    assert.equal((await context(selection, null)({ subject }, { api: true, expectedWorkspaceId: first })).status, 'workspace-changed');
+    assert.equal((await context(selection, second)({ subject }, { api: true, expectedWorkspaceId: 'invalid' })).status, 'workspace-changed');
+    assert.equal((await context(selection, null)({ subject }, { api: true })).status, 'workspace-changed');
+});

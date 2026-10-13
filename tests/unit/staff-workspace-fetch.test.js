@@ -52,3 +52,27 @@ test('programmatic staff navigation binds its URL to the rendered workspace and 
     globalThis.document = { querySelector: () => ({ content: first, dataset: { multiWorkspace: '0' } }) };
     assert.equal(staffWorkspaceUrl('/staff/jobs?q=rust'), '/staff/jobs?q=rust');
 });
+
+test('a redirect cannot forward a rendered workspace header to another origin', async t => {
+    const { createServer } = await import('node:http');
+    const { once } = await import('node:events');
+    const original = { window: globalThis.window, document: globalThis.document };
+    let destinationCalls = 0, sourceScope;
+    const destination = createServer((req, res) => { destinationCalls++; res.end('must not be requested'); });
+    destination.listen(0, '127.0.0.1'); await once(destination, 'listening');
+    const source = createServer((req, res) => {
+        sourceScope = req.headers['x-staff-workspace-id'];
+        res.writeHead(302, { location: `http://127.0.0.1:${destination.address().port}/private` }); res.end();
+    });
+    source.listen(0, '127.0.0.1'); await once(source, 'listening');
+    t.after(async () => {
+        Object.assign(globalThis, original);
+        await Promise.all([source, destination].map(server => new Promise(resolve => { server.closeAllConnections(); server.close(resolve); })));
+    });
+    const origin = `http://127.0.0.1:${source.address().port}`;
+    globalThis.window = { location: { origin } };
+    globalThis.document = { querySelector: () => ({ content: first }) };
+    await assert.rejects(staffWorkspaceFetch(`${origin}/api/staff/documents/synthetic`, { redirect: 'follow' }), TypeError);
+    assert.equal(sourceScope, first);
+    assert.equal(destinationCalls, 0);
+});

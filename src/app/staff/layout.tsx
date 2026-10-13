@@ -23,7 +23,7 @@ export default async function StaffLayout({ children }: { children: React.ReactN
     const { gate, capabilities } = await loadStaffCapabilities();
     if (gate.stage !== 'verified') {
         return (
-            <WorkspaceBoundary multiWorkspace={multiWorkspaceEnabled()} key={'organizationId' in gate ? gate.organizationId : 'no-workspace'}>
+            <WorkspaceBoundary multiWorkspace={multiWorkspaceEnabled()} organizationId={'organizationId' in gate ? gate.organizationId : undefined} key={'organizationId' in gate ? gate.organizationId : 'no-workspace'}>
                 {'organizationId' in gate && <meta name="staff-workspace-id" content={gate.organizationId} data-multi-workspace={multiWorkspaceEnabled() ? '1' : '0'} />}
                 <main className="staff-scope min-h-screen bg-background font-sans text-sm text-foreground antialiased">
                     {children}
@@ -33,7 +33,7 @@ export default async function StaffLayout({ children }: { children: React.ReactN
     }
 
     return (
-        <WorkspaceBoundary multiWorkspace={multiWorkspaceEnabled()} key={gate.organizationId}>
+        <WorkspaceBoundary multiWorkspace={multiWorkspaceEnabled()} organizationId={gate.organizationId} key={gate.organizationId}>
             <meta name="staff-workspace-id" content={gate.organizationId} data-multi-workspace={multiWorkspaceEnabled() ? '1' : '0'} />
             <StaffSessionProvider
                 key={`${gate.organizationId}:${gate.principal.user_id}`}

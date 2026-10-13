@@ -59,6 +59,7 @@ test('workspace selection fences stale tabs and verifies MFA separately for the 
             STAFF_DATABASE_URL: `postgresql://agora_authz_test:${runtimePassword}@127.0.0.1:${publishedPort(db, 5432)}/postgres`,
             STAFF_ORGANIZATION_ID: AUTHZ_ID.ORG_B, NEXTAUTH_URL: baseURL, NEXTAUTH_SECRET: secret,
             GOOGLE_CLIENT_ID: 'synthetic-workspace-client', GOOGLE_CLIENT_SECRET: 'synthetic-workspace-client-secret',
+            NEXT_PUBLIC_SUPABASE_URL: 'http://127.0.0.1:1', SUPABASE_SERVICE_ROLE_KEY: 'synthetic-unused-storage-key',
             STAFF_MULTI_WORKSPACE_ENABLED: '1', TELEGRAM_INTAKE_ENABLED: '1', GITHUB_ID: '', GITHUB_SECRET: '',
         }, stdio: ['ignore', 'pipe', 'pipe'],
     });
@@ -138,6 +139,19 @@ test('workspace selection fences stale tabs and verifies MFA separately for the 
         const stale = await context.request.get(`${baseURL}/api/staff/workspace`, { headers: { 'x-staff-workspace-id': AUTHZ_ID.ORG_B } });
         assert.equal(stale.status(), 409);
         assert.equal(stale.headers()['x-staff-workspace-changed'], '1');
+        // Native downloads carry the rendered scope in their URL; they cannot
+        // send the AJAX header. Valid scope still requires document permissions.
+        const documentURL = `${baseURL}/api/staff/documents/${randomUUID()}`;
+        const native = await context.request.get(`${documentURL}?_workspace=${AUTHZ_ID.ORG_A}`);
+        assert.equal(native.status(), 404, 'A scoped native GET reaches the fresh document permission check, then reports the nonexistent fixture document');
+        const unbound = await context.request.get(documentURL);
+        assert.equal(unbound.status(), 409, 'A selected workspace cannot use an unbound document request');
+        const wrongDocument = await context.request.get(`${documentURL}?_workspace=${AUTHZ_ID.ORG_B}`, { headers: { 'sec-fetch-dest': 'document' }, maxRedirects: 0 });
+        assert.equal(wrongDocument.status(), 303);
+        assert.equal(wrongDocument.headers().location, '/staff/workspaces');
+        const ambiguous = await context.request.get(`${documentURL}?_workspace=${AUTHZ_ID.ORG_A}&_workspace=${AUTHZ_ID.ORG_A}`, { headers: { 'x-staff-workspace-id': AUTHZ_ID.ORG_A } });
+        assert.equal(ambiguous.status(), 409);
+
         // No localStorage broadcast: a staff link must still discard the old
         // App Router layout and form scope before presenting the new workspace.
         await oldTab.goto(`${baseURL}/staff/candidates`);

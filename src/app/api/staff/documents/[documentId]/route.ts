@@ -1,5 +1,6 @@
 import { createClient } from '@supabase/supabase-js';
 import mammoth from 'mammoth';
+import { documentWorkspaceExpectation } from '@/lib/staff-document-workspace';
 import { getDocumentDownload } from '@/lib/pipeline-operations';
 import {
     staffApiContext,
@@ -19,9 +20,16 @@ export async function GET(
     request: Request,
     { params }: { params: Promise<{ documentId: string }> },
 ) {
-    const context = await staffApiContext();
+    const context = await staffApiContext({ expectedWorkspaceId: documentWorkspaceExpectation(request.url) });
     const denied = staffGateResponse(context);
     if (denied) {
+        if (denied.headers.get('x-staff-workspace-changed') === '1'
+            && request.headers.get('sec-fetch-dest') === 'document') {
+            return new Response(null, { status: 303, headers: {
+                location: '/staff/workspaces',
+                'cache-control': 'private, no-store', 'referrer-policy': 'no-referrer',
+            } });
+        }
         return denied;
     }
     const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;

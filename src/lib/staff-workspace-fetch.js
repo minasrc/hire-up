@@ -37,7 +37,10 @@ export async function staffWorkspaceFetch(input, init) {
     }
     const headers = new Headers(init?.headers ?? (input instanceof Request ? input.headers : undefined));
     if (staffRequest && expected) headers.set('x-staff-workspace-id', expected);
-    const response = await fetch(input, { ...init, headers });
+    // Staff APIs return data. Refuse redirects so the scope header cannot be
+    // forwarded to a storage provider or another origin. File links navigate
+    // natively through the separately scoped document GET route.
+    const response = await fetch(input, { ...init, headers, ...(staffRequest ? { redirect: 'error' } : {}) });
     if (staffRequest && (response.headers.get('x-staff-workspace-changed') === '1' || (expected && expected !== visibleWorkspace()))) {
         await response.body?.cancel().catch(() => {});
         window.dispatchEvent(new Event(WORKSPACE_CHANGED_EVENT));

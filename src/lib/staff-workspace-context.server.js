@@ -8,7 +8,7 @@ export function multiWorkspaceEnabled() {
 
 // A signed selection is a routing preference. Fresh membership and MFA checks
 // still run in the normal page/API gate and in every business transaction.
-export async function staffWorkspaceContext(identity, { api = false } = {}) {
+export async function staffWorkspaceContext(identity, { api = false, expectedWorkspaceId = null } = {}) {
     const enabled = multiWorkspaceEnabled();
     const store = enabled ? await cookies() : null;
     const value = store?.get(STAFF_WORKSPACE_COOKIE)?.value;
@@ -22,7 +22,9 @@ export async function staffWorkspaceContext(identity, { api = false } = {}) {
     }
     if (api) {
         const expected = (await headers()).get('x-staff-workspace-id');
-        if ((expected && expected !== organizationId) || (enabled && selected && !expected)) {
+        if ((expected && expected !== organizationId)
+            || (expectedWorkspaceId !== null && expectedWorkspaceId !== organizationId)
+            || (enabled && selected && !expected && expectedWorkspaceId === null)) {
             return { status: 'workspace-changed' };
         }
     }

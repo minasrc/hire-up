@@ -13,14 +13,15 @@ import { StaffAuthorizationError } from './staff-authorization';
 
 // Staff API boundary: session + resolved principal + active TOTP credential +
 // a valid staff_mfa proof. Data-bearing routes must not run without all four.
-export async function staffApiContext() {
+/** @param {{ expectedWorkspaceId?: string | null }} [options] */
+export async function staffApiContext({ expectedWorkspaceId = null } = {}) {
     const session = await getServerSession(authOptions);
     const identity = staffIdentityFromSession(session);
     if (!identity) {
         return { status: 'unauthorized' };
     }
     const pool = getStaffPool();
-    const workspace = await staffWorkspaceContext(identity, { api: true });
+    const workspace = await staffWorkspaceContext(identity, { api: true, expectedWorkspaceId });
     if (workspace.status !== 'ok') return workspace;
     const organizationId = workspace.organizationId;
     const secret = process.env.NEXTAUTH_SECRET;
