@@ -69,3 +69,18 @@ export function syncStatus(sync, hostedEnabled = false) {
     if (!sync) return '';
     return ({ off: 'Sync off', waiting_for_history: 'Sync starts after history import', reconnect_required: 'Reconnect Telegram to sync', worker_offline: hostedEnabled ? 'Telegram service offline · Sync resumes when it returns' : 'Mac offline · Sync resumes when it returns', up_to_date: 'Sync up to date', queued: 'Sync queued', syncing: 'Syncing new messages', waiting: 'Sync waiting', paused: 'Sync paused', failed: 'Sync needs attention', capacity_paused: 'Sync capacity reached' })[sync.status] || 'Sync needs attention';
 }
+
+export function discoveryPresentation(snapshot) {
+    const hasChats = (snapshot?.totals?.chats ?? 0) > 0;
+    const active = snapshot?.discovery?.status === 'active';
+    const completed = snapshot?.discovery?.status === 'completed';
+    return {
+        hasChats,
+        button: active ? 'Discovering chats…' : hasChats || completed ? 'Refresh chat list' : 'Discover chats',
+        connectionButton: hasChats ? 'Choose chats to import' : 'Discover chats',
+        description: active ? 'Looking for your Telegram chats. Chats appear here as discovery progresses; you can choose which ones to import.'
+            : hasChats ? 'Choose a chat below or mark several chats to import their messages.'
+                : completed ? 'No chats were found for this account. Check that this is the Telegram account you intended to connect, then refresh the chat list.'
+                    : 'Your Telegram account is connected. Discover your chats first, then choose which conversations to import.',
+    };
+}

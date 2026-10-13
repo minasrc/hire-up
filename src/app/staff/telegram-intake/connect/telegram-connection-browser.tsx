@@ -39,7 +39,7 @@ async function request(init?: RequestInit): Promise<Snapshot> {
     return response.json();
 }
 
-type ConnectionBrowserProps = { workspaceId: string; hostedEnabled: boolean; blocked: boolean; onConnectionChange: () => void; onDenied: () => void; onChooseChats: () => void };
+type ConnectionBrowserProps = { workspaceId: string; hostedEnabled: boolean; blocked: boolean; onConnectionChange: () => void; onDenied: () => void; onChooseChats: () => void; chooseChatsLabel?: string };
 
 export function TelegramConnectionBrowser(props: ConnectionBrowserProps) {
     // Scope changes and access denial discard requests and secrets. An explicit
@@ -47,7 +47,7 @@ export function TelegramConnectionBrowser(props: ConnectionBrowserProps) {
     return <ConnectionBrowser key={`${props.workspaceId}:${props.hostedEnabled}:${props.blocked}`} {...props} />;
 }
 
-function ConnectionBrowser({ workspaceId, hostedEnabled, blocked, onConnectionChange, onDenied, onChooseChats }: ConnectionBrowserProps) {
+function ConnectionBrowser({ workspaceId, hostedEnabled, blocked, onConnectionChange, onDenied, onChooseChats, chooseChatsLabel = 'Choose chats to import' }: ConnectionBrowserProps) {
     const [snapshot, setSnapshot] = useState<Snapshot | null>(null);
     const [selectedWorker, setSelectedWorker] = useState('');
     const [password, setPassword] = useState('');
@@ -231,7 +231,7 @@ function ConnectionBrowser({ workspaceId, hostedEnabled, blocked, onConnectionCh
     const connectionActions = connection ? <>
         {passwordAction}
         {(active || connection.status === 'failed') && connection.status !== 'disconnecting' ? <Button variant="outline" disabled={busy || accessDenied} onClick={() => { hostedAttempt.current?.abort(); setPassword(''); void mutate({ action: 'disconnect', connectionId: connection.id, generation: connection.generation }); }}>{['connected', 'failed'].includes(connection.status) ? 'Disconnect Telegram' : 'Cancel sign-in'}</Button> : null}
-        {connection.status === 'connected' ? <Button onClick={onChooseChats}>Choose chats to import</Button> : null}
+        {connection.status === 'connected' ? <Button onClick={onChooseChats}>{chooseChatsLabel}</Button> : null}
     </> : null;
     const connectionPanel = connection ? <ConnectionCard ref={signInPanel} className={`scroll-mt-24 space-y-4 ${hostedEnabled ? ['requested', 'failed', 'disconnected'].includes(connection.status) ? 'border-t border-border pt-5' : '' : 'p-6'}`} aria-busy={busy}>
         <div aria-live="polite">

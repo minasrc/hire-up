@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { connectionGuidance, historyPollingDelay, importActions, importGuidance, importStatus, selectionPayload, syncStatus } from '../../src/app/staff/telegram-intake/chats/history-model.js';
+import { connectionGuidance, discoveryPresentation, historyPollingDelay, importActions, importGuidance, importStatus, selectionPayload, syncStatus } from '../../src/app/staff/telegram-intake/chats/history-model.js';
 
 test('bulk selection only submits visible rows and their current versions', () => {
     const rows = [{ id: 'one', version: 2, title: 'Private title', peer: { id: '123' } }, { id: 'two', version: 5 }];
@@ -75,4 +75,22 @@ test('pending sign-in guidance identifies the remaining approval step without pe
         assert.equal(historyPollingDelay({ connection }), 15000);
     }
     assert.equal(connectionGuidance({ canImport: true, connection: { status: 'connected' } }), null);
+});
+
+
+test('first discovery guides connected users before exposing chat selection', () => {
+    const initial = discoveryPresentation({ account: { id: 'synthetic' }, totals: { chats: 0 }, discovery: { status: 'idle' } });
+    assert.equal(initial.hasChats, false);
+    assert.equal(initial.button, 'Discover chats');
+    assert.equal(initial.connectionButton, 'Discover chats');
+    assert.match(initial.description, /Discover your chats first/);
+    const active = discoveryPresentation({ totals: { chats: 0 }, discovery: { status: 'active' } });
+    assert.equal(active.button, 'Discovering chats…');
+    assert.match(active.description, /as discovery progresses/);
+    const empty = discoveryPresentation({ totals: { chats: 0 }, discovery: { status: 'completed' } });
+    assert.equal(empty.button, 'Refresh chat list');
+    assert.match(empty.description, /No chats were found for this account/);
+    const found = discoveryPresentation({ totals: { chats: 2 }, discovery: { status: 'active' } });
+    assert.equal(found.hasChats, true);
+    assert.equal(found.connectionButton, 'Choose chats to import');
 });
