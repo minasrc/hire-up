@@ -2806,6 +2806,11 @@ test('staff workspace end-to-end in a real browser', async (t) => {
     await runCase('staff time zone settings persist only after explicit acceptance', async () => {
         const context = await browser.newContext({ viewport: { width: 390, height: 844 }, timezoneId: 'America/New_York' });
         const other = await browser.newContext({ timezoneId: 'America/New_York' });
+        // This case tests confirmed preferences and their RSC refresh, not a
+        // dev-only page reload when the preference API cold-compiles.
+        if (serverMode === 'development') {
+            await context.routeWebSocket('**/_next/webpack-hmr*', () => {});
+        }
         let savedVersion = null;
         let settings;
         // Chromium accepts Secure cookies on trustworthy loopback URLs, while
