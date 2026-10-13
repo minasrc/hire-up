@@ -225,7 +225,7 @@ function ConnectionBrowser({ workspaceId, hostedEnabled, blocked, onConnectionCh
 
     const ConnectionCard = hostedEnabled ? 'div' : Card;
     const requestErrorPanel = error ? <div role="alert" className="rounded-lg border border-border p-4 text-sm"><p>{error}</p><Button className="mt-3" variant="outline" disabled={busy} onClick={() => { mutationError.current = false; setAccessDenied(false); setRefresh(value => value + 1); }}><RefreshCw />Retry status</Button></div> : null;
-    const connectionPanel = connection ? <ConnectionCard ref={signInPanel} className={`scroll-mt-24 space-y-4 ${hostedEnabled ? 'border-t border-border pt-5' : 'p-6'}`} aria-busy={busy}>
+    const connectionPanel = connection ? <ConnectionCard ref={signInPanel} className={`scroll-mt-24 space-y-4 ${hostedEnabled ? ['requested', 'failed', 'disconnected'].includes(connection.status) ? 'border-t border-border pt-5' : '' : 'p-6'}`} aria-busy={busy}>
         <div aria-live="polite">
             {connection.status === 'requested' ? <><h2 className="font-semibold">Preparing Telegram sign-in</h2><p className="mt-2 text-sm text-muted-foreground">{hostedEnabled ? 'The service is requesting a sign-in code. It will appear here automatically.' : 'Your Mac is requesting a sign-in code. It will appear here automatically.'}</p></> : null}
             {connection.status === 'qr_pending' ? <><h2 className="font-semibold">Scan with Telegram</h2><p className="mt-2 text-sm text-muted-foreground">On your phone, open Telegram → Settings → Devices → Link Desktop Device, then scan this code.</p></> : null}
