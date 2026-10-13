@@ -75,7 +75,8 @@ export function TelegramHistoryBrowser({ workspaceId, hostedEnabled = false, onb
     const eligibleChats = snapshot?.chats.filter(chat => !chat.removalState || chat.removalState === 'none') ?? [];
     const selectedRows = useRef(new Map<string, Chat>());
     const autoDiscovery = useRef<string | null>(null);
-    const [started, setStarted] = useState(false);
+    const [starting, setStarting] = useState(false);
+    const [importRevision, setImportRevision] = useState(0);
     const allMarked = Boolean(eligibleChats.length && eligibleChats.every(chat => marked.includes(chat.id)));
     const denyRemovalAccess = useCallback(() => {
         requestId.current += 1; currentRead.current?.abort(); currentMutation.current?.abort();
@@ -186,9 +187,11 @@ export function TelegramHistoryBrowser({ workspaceId, hostedEnabled = false, onb
     }
     async function start() {
         const chats = marked.map(id => selectedRows.current.get(id)).filter((chat): chat is Chat => Boolean(chat));
-        if (!chats.length) return;
+        if (!chats.length || blocked) return;
+        setStarting(true); setImportRevision(value => value + 1);
         const success = await act({ action: 'start', selected: true, chats: chats.map(chat => ({ chatId: chat.id, expectedVersion: chat.version })) }, '', true);
-        if (success) { setStarted(true); if (onboarding) router.push('/staff/telegram-intake'); }
+        setStarting(false); setImportRevision(value => value + 1);
+        if (success && onboarding) router.push('/staff/telegram-intake');
     }
     useEffect(() => {
         const account = snapshot?.connection?.accountUserId;
@@ -211,7 +214,7 @@ export function TelegramHistoryBrowser({ workspaceId, hostedEnabled = false, onb
         {error ? <div role="alert" className="flex flex-wrap items-center justify-between gap-3 rounded-lg border p-4 text-sm"><p>{error}</p><Button variant="outline" onClick={refreshStatus} disabled={busy}>Retry</Button></div> : null}
         {snapshot?.canImport ? <details className="rounded-lg border bg-card px-3 py-2"><summary className="cursor-pointer text-sm font-medium"><CheckCircle2 className="mr-2 inline h-4 w-4 text-primary" />Telegram connected</summary><div className="mt-4"><TelegramConnectionBrowser workspaceId={workspaceId} hostedEnabled={hostedEnabled} blocked={denied} onConnectionChange={connectionChanged} onDenied={denyRemovalAccess} onChooseChats={chooseChats} chooseChatsLabel={null} /></div></details>
             : <TelegramConnectionBrowser workspaceId={workspaceId} hostedEnabled={hostedEnabled} blocked={denied} onConnectionChange={connectionChanged} onDenied={denyRemovalAccess} onChooseChats={chooseChats} chooseChatsLabel="Choose chats" />}
-        {started || (snapshot?.totals.selected ?? 0) > 0 ? <ProcessingStatus reviewLink={false} /> : null}
+        {snapshot?.canImport || starting ? <ProcessingStatus key={importRevision} starting={starting} reviewLink={false} /> : null}
         {snapshot?.canImport ? <Card className="overflow-hidden">
             <div className="flex items-center justify-between gap-3 border-b p-4"><h2 ref={chatPanel} tabIndex={-1} className="scroll-mt-24 font-semibold">Your chats</h2><Button ref={discoveryPanel} variant="ghost" size="sm" disabled={blocked || snapshot.discovery.status === 'active'} onClick={() => void act({ action: 'discover' }, 'Updating chats…')} aria-label="Refresh chat list"><RefreshCw className={snapshot.discovery.status === 'active' ? 'motion-safe:animate-spin' : ''} /></Button></div>
             <form className="flex items-center gap-2 p-4" onSubmit={event => { event.preventDefault(); setQuery(search.trim()); setCursors(['']); setLoading(true); }}>
@@ -225,7 +228,7 @@ export function TelegramHistoryBrowser({ workspaceId, hostedEnabled = false, onb
                 </div>)}
             </div>
             {snapshot.nextCursor || cursors.length > 1 ? <div className="flex justify-between border-t p-3"><Button size="sm" variant="ghost" disabled={loading || busy || cursors.length === 1} onClick={() => { setCursors(stack => stack.slice(0, -1)); setLoading(true); }}>Previous</Button><Button size="sm" variant="ghost" disabled={loading || busy || !snapshot.nextCursor} onClick={() => { setCursors(stack => [...stack, snapshot.nextCursor!]); setLoading(true); }}>More chats</Button></div> : null}
-            <div className="sticky bottom-0 flex items-center justify-between gap-3 border-t bg-card p-4"><span className="text-sm text-muted-foreground" role="status">{marked.length} selected{marked.length === 50 ? ' · Maximum 50 per import' : ''}</span><Button disabled={blocked || !marked.length} onClick={() => void start()}>{busy ? 'Starting…' : 'Start'}</Button></div>
+            <div className="sticky bottom-0 flex items-center justify-between gap-3 border-t bg-card p-4"><span className="text-sm text-muted-foreground" role="status">{starting ? 'Starting import…' : marked.length ? `${marked.length} selected` : 'Select chats to start'}{marked.length === 50 ? ' · Maximum 50 per import' : ''}</span><Button disabled={blocked || !marked.length} onClick={() => void start()}>{starting ? 'Starting…' : loading ? 'Loading…' : 'Start'}</Button></div>
         </Card> : null}
         {notice ? <p role="status" className="text-sm text-muted-foreground">{notice}</p> : null}
         {snapshot && snapshot.totals.messages >= snapshot.totals.maxMessages ? <p role="alert" className="text-sm">Storage is full. Review pending proposals to release their sources.</p> : null}

@@ -165,9 +165,10 @@ test('Candidate intake has a compact chat picker and approve/edit/reject review 
     await expect(page.getByRole('heading', { name: 'Candidate proposals', exact: true })).toBeVisible();
     const chats = Array.from({ length: 60 }, (_, index) => ({ id: `a0000000-0000-4000-8000-${String(index + 1).padStart(12, '0')}`, peer: { kind: 'user', id: String(index+1) }, title: `Chat ${index+1}`, username: null, selected: false, version: 1, extractionEnabled: false, extractionPending: false, import: null }));
     let started;
+    let releaseStart;
     await page.route('**/api/staff/telegram-history*', async route => {
         const req = route.request();
-        if (req.method() === 'POST') { started = req.postDataJSON(); return route.fulfill({ json: { ok: true } }); }
+        if (req.method() === 'POST') { started = req.postDataJSON(); await new Promise(resolve => { releaseStart = resolve; }); return route.fulfill({ json: { ok: true } }); }
         const params = new URL(req.url()).searchParams;
         const rows = params.get('view') === 'active' ? [] : params.get('q') ? chats.filter(chat => chat.title === params.get('q')) : params.get('after') ? chats.slice(50) : chats.slice(0,50);
         return route.fulfill({ json: { connection: { id: 'b0000000-0000-4000-8000-000000000001', generation: 1, status: 'connected', accountUserId: '123' }, account: { id: 'c0000000-0000-4000-8000-000000000001', accountUserId: '123' }, canImport: true, blockedReason: null, discovery: { status: 'completed', jobs: [] }, totals: { chats: 60, selected: 0, messages: 0, bytes: 0, maxMessages: 100000, maxBytes: 10000000 }, chats: rows, nextCursor: params.get('after') || params.get('q') ? null : 'next-page' } });
@@ -179,8 +180,16 @@ test('Candidate intake has a compact chat picker and approve/edit/reject review 
     await page.getByRole('button', { name: 'More chats' }).click();
     await page.getByRole('checkbox', { name: 'Select Chat 51', exact: true }).check();
     await expect(page.getByText('2 selected', { exact: true })).toBeVisible();
+    await expect(page.getByRole('status', { name: 'Telegram activity' })).toBeVisible();
+    const startResponse = page.waitForResponse(response => response.url().includes('/api/staff/telegram-history') && response.request().method() === 'POST');
     await page.getByRole('button', { name: 'Start', exact: true }).click();
     await expect.poll(() => started?.action).toBe('start');
+    await expect(page.getByRole('button', { name: 'Starting…', exact: true })).toBeDisabled();
+    await expect(page.getByRole('progressbar', { name: 'Processing Telegram information' })).toBeVisible();
+    releaseStart();
+    await startResponse;
+    await expect(page.getByText('Select chats to start', { exact: true })).toBeVisible();
+    await expect(page.getByRole('status', { name: 'Telegram activity' })).toBeVisible();
     assert.equal(started.chats.length, 2);
     assert.deepEqual(started.chats.map(chat => chat.chatId), [chats[0].id,chats[50].id]);
     await expect(page.getByRole('link', { name: 'Review proposals', exact: true })).toHaveCount(1);
