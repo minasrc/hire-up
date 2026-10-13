@@ -387,7 +387,7 @@ export function StaffTodoList({ writeEnabled, reviewTasks, reviewCount = 0 }: { 
                                 {data.tasks.map((task) => (
                                     <li
                                         key={task.id}
-                                        className="flex items-start gap-3 rounded-lg border border-border px-3 py-2.5"
+                                        className="flex items-start gap-3 rounded-lg border border-border px-3 py-2.5 transition-colors hover:bg-hover focus-within:bg-hover"
                                     >
                                         {writeEnabled ? (
                                             <Checkbox

@@ -7,16 +7,16 @@ import { Card, CardContent } from '@/components/staff-ui/card';
 import { PageHeader } from '@/components/staff-preview/shared';
 import { requireStaffVerified } from '@/lib/staff-gate.server';
 import { loadStaffCapabilities, loadStaffWorkspace } from '@/lib/workspace.server';
-import { ClientsHiring, OverviewMetrics, ReviewQueue } from './overview-sections';
+import { ApplicationReviewTasks, ClientsHiring, OverviewMetrics, overviewReviewLinkClass } from './overview-sections';
 import { StaffTodoList } from './staff-todo-list';
 import { SummaryRetry } from './summary-retry';
 
 export const dynamic = 'force-dynamic';
 export const metadata = { title: 'Overview · Agora staff' };
-type SummarySection = 'metrics' | 'review' | 'clients';
+type SummarySection = 'metrics' | 'clients';
 
 function OverviewLoading({ section }: { section: SummarySection | 'tasks' }) {
-    const label = { metrics: 'overview', review: 'review queue', clients: 'hiring clients', tasks: 'tasks' }[section];
+    const label = { metrics: 'overview', clients: 'hiring clients', tasks: 'tasks' }[section];
     return (
         <div role="status" aria-busy="true" aria-label={`Loading ${label}`} className="staff-loading-reveal">
             <span className="sr-only">Loading {label}…</span>
@@ -49,12 +49,11 @@ async function OverviewSection({ section }: { section: SummarySection }) {
         ) : null;
     }
     if (section === 'metrics') return <OverviewMetrics summary={summary} />;
-    if (section === 'review') return <ReviewQueue summary={summary} />;
     return <ClientsHiring summary={summary} />;
 }
 
 async function OverviewTasks() {
-    const { capabilities, gate } = await loadStaffCapabilities();
+    const [{ capabilities, gate }, { summary }] = await Promise.all([loadStaffCapabilities(), loadStaffWorkspace()]);
     let reviewTasks = null;
     let reviewCount = 0;
     if (capabilities?.telegram && gate.stage === 'verified') {
@@ -65,17 +64,17 @@ async function OverviewTasks() {
         if (inbox && inbox.counts.all > 0) {
             reviewCount = inbox.counts.all;
             reviewTasks = (
-                <div aria-label="Candidate proposal tasks" className="rounded-lg bg-muted/40 p-3">
-                    <Link href="/staff/telegram-intake" className="flex items-center gap-2 rounded text-sm font-medium outline-none focus-visible:ring-2 focus-visible:ring-ring">
+                <div aria-label="Candidate proposal tasks" className="rounded-lg border border-border p-2">
+                    <Link href="/staff/telegram-intake" className={`${overviewReviewLinkClass} font-medium`}>
                         <Send className="h-4 w-4" aria-hidden="true" />
                         Review candidate proposals
                         <span className="ml-auto text-muted-foreground">{inbox.counts.all}</span>
                         <ArrowRight className="h-4 w-4" aria-hidden="true" />
                     </Link>
-                    <ul className="mt-2 space-y-1">
+                    <ul className="mt-1 space-y-1">
                         {inbox.drafts.slice(0, 5).map(draft => (
                             <li key={draft.id}>
-                                <Link href={`/staff/telegram-intake?draft=${draft.id}`} className="flex items-center justify-between gap-3 rounded px-2 py-1.5 text-sm outline-none hover:bg-background focus-visible:ring-2 focus-visible:ring-ring">
+                                <Link href={`/staff/telegram-intake?draft=${draft.id}`} className={`${overviewReviewLinkClass} justify-between`}>
                                     <span className="truncate">{[draft.fields.firstName, draft.fields.lastName].filter(Boolean).join(' ') || 'Unnamed candidate'}</span>
                                     <span className="shrink-0 text-xs text-muted-foreground">{draft.existingCandidate ? 'Profile update' : 'New candidate'}</span>
                                 </Link>
@@ -88,6 +87,10 @@ async function OverviewTasks() {
         if (!inbox) {
             reviewTasks = <Link href="/staff/telegram-intake" className="text-sm underline">Check candidate proposals</Link>;
         }
+    }
+    if (summary?.capabilities.applications && summary.attention.reviewApplications !== null) {
+        reviewCount += summary.attention.reviewApplications;
+        reviewTasks = <>{reviewTasks}<ApplicationReviewTasks summary={summary} /></>;
     }
     if (capabilities?.tasks === true) {
         return <StaffTodoList writeEnabled={capabilities.writeTasks === true} reviewTasks={reviewTasks} reviewCount={reviewCount} />;
@@ -119,9 +122,6 @@ export default async function StaffOverviewPage() {
                 <div className="space-y-6 lg:col-span-2">
                     <Suspense fallback={<OverviewLoading section="tasks" />}>
                         <OverviewTasks />
-                    </Suspense>
-                    <Suspense fallback={<OverviewLoading section="review" />}>
-                        <OverviewSection section="review" />
                     </Suspense>
                 </div>
                 <Suspense fallback={<OverviewLoading section="clients" />}>

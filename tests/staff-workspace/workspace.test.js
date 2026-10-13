@@ -477,12 +477,12 @@ test('staff workspace end-to-end in a real browser', async (t) => {
         await page.getByRole('link', { name: /^Open roles 0$/ }).waitFor();
 
         await page.getByText('To-do').waitFor();
-        await page.getByRole('heading', { name: 'Awaiting review' }).waitFor();
+        await page.getByLabel('Application review tasks').waitFor();
         await page.getByRole('heading', { name: 'Clients hiring' }).waitFor();
-        await page.getByRole('link', { name: 'Synthetic Candidate B' }).waitFor();
-        // Tasks load independently of the server-rendered overview. Wait for
-        // their empty state instead of asserting against the loading snapshot.
-        await page.getByRole('main').last().getByText('You’re up to date', { exact: true }).waitFor();
+        await page.getByLabel('Application review tasks').getByRole('link', { name: /Synthetic Candidate B/ }).waitFor();
+        await expect(page.getByRole('tab', { name: 'All 1', exact: true })).toBeVisible();
+        await expect(page.getByRole('tab', { name: 'Review 1', exact: true })).toBeVisible();
+        await expect(page.getByText('You’re up to date', { exact: true })).not.toBeVisible();
     });
 
     await runCase('candidate and application pagination navigate without losing full totals', async () => {
