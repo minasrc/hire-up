@@ -63,7 +63,7 @@ grant select,insert,update on app.telegram_chat_removals to app_executor;
 create policy telegram_chat_removal_owner on app.telegram_chat_removals to app_executor using(organization_id=app.context_uuid_v1('app.organization_id') and owner_user_id=app.context_uuid_v1('app.actor_id')) with check(organization_id=app.context_uuid_v1('app.organization_id') and owner_user_id=app.context_uuid_v1('app.actor_id'));
 -- Only the execution-only global maintenance function uses this queue policy.
 create policy telegram_chat_removal_queue on app.telegram_chat_removals for select to app_executor using(completed_at is null);
-grant trigger on app.telegram_history_chats,app.telegram_history_jobs,app.telegram_history_messages,app.telegram_extraction_jobs,app.telegram_cv_jobs,app.cv_analyses,app.telegram_drafts to app_executor;
+grant trigger on app.telegram_history_chats,app.telegram_history_jobs,app.telegram_history_messages,app.telegram_extraction_jobs,app.telegram_cv_jobs,app.cv_analyses,app.telegram_drafts,app.telegram_upload_cleanup to app_executor;
 grant create on schema app to app_executor;
 reset role;
 set local role app_executor;
@@ -148,6 +148,33 @@ create trigger telegram_chat_removal_extraction before insert or update on app.t
 create trigger telegram_chat_removal_cv before insert or update on app.telegram_cv_jobs for each row execute function app.telegram_chat_removal_guard_v1();
 create trigger telegram_chat_removal_analysis before insert or update on app.cv_analyses for each row execute function app.telegram_chat_removal_guard_v1();
 create trigger telegram_chat_removal_approval before update of status on app.telegram_drafts for each row execute function app.telegram_chat_removal_guard_v1();
+create function app.telegram_chat_removal_reservation_guard_v1() returns trigger
+language plpgsql security definer set search_path=pg_catalog,app,pg_temp as $$
+declare affected record;
+begin
+    if new.available_at <= clock_timestamp()+interval '30 minutes' then return new; end if;
+    -- The request holds this same chat row FOR UPDATE before its reservation
+    -- snapshot. Earlier reserves finish first; later reserves wait and reject.
+    for affected in
+        select chat.id, chat.removal_state from app.telegram_history_chats chat
+        where exists(select 1 from app.telegram_drafts draft
+            join app.telegram_extraction_jobs job on job.chat_id=chat.id
+                and job.organization_id=draft.organization_id and job.owner_user_id=draft.owner_user_id
+            cross join lateral app.telegram_retention_drafts_v1(job.id) refs
+            where refs.id=draft.id and draft.status<>'approved'
+                and new.organization_id=draft.organization_id and new.owner_user_id=draft.owner_user_id
+                and new.object_key like 'staff/'||draft.organization_id||'/'||draft.candidate_target_id||'/%')
+        order by chat.id for share of chat
+    loop
+        if affected.removal_state<>'none' then
+            raise exception 'Draft source is being removed' using errcode='40001';
+        end if;
+    end loop;
+    return new;
+end $$;
+revoke all on function app.telegram_chat_removal_reservation_guard_v1() from public;
+create trigger telegram_chat_removal_reservation before insert on app.telegram_upload_cleanup
+    for each row execute function app.telegram_chat_removal_reservation_guard_v1();
 create function app.telegram_chat_removal_request_v1(p_chat uuid,p_version bigint,p_operation uuid,p_confirmation text) returns jsonb language plpgsql security definer set search_path=pg_catalog,app,pg_temp as $$
 declare
     ch app.telegram_history_chats;
@@ -179,6 +206,19 @@ begin
     end if;
     select count(*),coalesce(sum(stored_bytes),0) into n,b from app.telegram_history_messages where chat_id=ch.id;
     insert into app.telegram_chat_removals(organization_id,owner_user_id,chat_id,operation_id,expected_version,total_messages,total_bytes,cleanup_worker_id) values(ch.organization_id,ch.owner_user_id,ch.id,p_operation,p_version,n,b,(select worker_id from app.telegram_connections where id=(select connection_id from app.telegram_history_accounts where id=ch.account_id)));
+    -- Reservations may already have an in-flight private upload. Retain the
+    -- original one-hour available_at fence and wait for storage disposition.
+    insert into app.telegram_chat_removal_objects(organization_id,owner_user_id,removal_id,object_key)
+    select distinct cleanup.organization_id,cleanup.owner_user_id,removal.id,cleanup.object_key
+    from app.telegram_chat_removals removal
+    join app.telegram_extraction_jobs job on job.chat_id=removal.chat_id
+    cross join lateral app.telegram_retention_drafts_v1(job.id) refs
+    join app.telegram_drafts draft on draft.id=refs.id and draft.status<>'approved'
+    join app.telegram_upload_cleanup cleanup on cleanup.organization_id=draft.organization_id
+        and cleanup.owner_user_id=draft.owner_user_id
+        and cleanup.object_key like 'staff/'||draft.organization_id||'/'||draft.candidate_target_id||'/%'
+    where removal.chat_id=ch.id and removal.completed_at is null
+    on conflict do nothing;
     update app.telegram_history_chats set selected=false,extraction_enabled=false,extraction_pending=false,removal_state='pending',version=version+1,next_sync_at=null where id=ch.id;
     update app.telegram_history_jobs set status='cancelled',lease_token=null,lease_expires_at=null,error_code='CHAT_REMOVAL' where chat_id=ch.id;
     -- Close all current leases atomically; the bounded worker removes their content.
@@ -523,6 +563,6 @@ grant execute on function app.telegram_chat_removal_cleanup_claim_v1(text),app.t
 grant execute on function app.telegram_maintenance_v1(integer) to app_telegram_maintenance;
 reset role;
 set local role app_owner;
-revoke trigger on app.telegram_history_chats,app.telegram_history_jobs,app.telegram_history_messages,app.telegram_extraction_jobs,app.telegram_cv_jobs,app.cv_analyses,app.telegram_drafts from app_executor;
+revoke trigger on app.telegram_history_chats,app.telegram_history_jobs,app.telegram_history_messages,app.telegram_extraction_jobs,app.telegram_cv_jobs,app.cv_analyses,app.telegram_drafts,app.telegram_upload_cleanup from app_executor;
 revoke create on schema app from app_executor;
 commit;

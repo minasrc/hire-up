@@ -96,3 +96,7 @@ issue a provider-account deletion request. An online extraction worker discards
 its separate pending result queue when the server returns the terminal 409 fence.
 An offline AI worker may retain its private pending queue until it resumes; that
 queue is outside the connector cleanup acknowledgement described here.
+
+Hosted storage cleanup retains outstanding draft upload reservations until their original one-hour upload window expires. Removal remains pending during that window. Cleanup probes all draft and candidate blob references independently of the removed owner’s current permissions; retained copies are dispositioned from the cleanup queue and remain separately managed. Failed storage calls retain the deleting fence and retry after a durable 60-second defer. Removed keys remain private tombstones against new blob bindings. The Mac receives only bounded aggregate scheduling metadata, never storage keys.
+
+Reservation/removal races serialize on the affected chat: reservation INSERT takes a shared chat lock, while removal takes its update lock before capturing existing reservations. An earlier reservation commits before capture; a later reservation waits and rejects after removal commits. The request does not lock every affected draft.

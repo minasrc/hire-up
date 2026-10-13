@@ -60,10 +60,51 @@ test('explicit owner removal fences writes, purges bounded private copies and re
   const operation = input => telegramChatRemovalOperation(pool, identity, org, { chatId: id.chat, ...input });
   const worker = async (sql, args) => { const c=await workerPool.connect();try { await c.query('begin;set local role app_telegram_worker');const r=(await c.query(sql,args)).rows[0].result;await c.query('commit');return r; } catch(e) { await c.query('rollback');throw e; }finally { c.release(); } };
   const maintenance = async () => { const c=await maintenancePool.connect();try { await c.query('begin;set local role app_telegram_maintenance');const r=(await c.query('select app.telegram_maintenance_v1(5) result')).rows[0].result;await c.query('commit');return r; }catch(e) {await c.query('rollback');throw e;}finally {c.release();} };
+  const reservationKey=psql(db, `select 'staff/'||organization_id||'/'||candidate_target_id||'/${randomUUID()}.pdf' from app.telegram_drafts where id='${id.draft}'`).trim();
+
   const preview = await operation({ action:'preview' });assert.equal(preview.messages,1105);assert.equal(preview.unapprovedDrafts,1);assert.equal(preview.approvedCandidates,1);
   assert.throws(() => operation({action:'request',expectedVersion:preview.version,operationId:id.operation,confirmation:'no'}));
   const request={action:'request',expectedVersion:preview.version,operationId:id.operation,confirmation:'remove_imported_history'};
-  const pending=await operation(request);assert.equal(pending.state,'pending');assert.deepEqual(await operation(request),pending);
+  let releaseEarly, releaseRequest, earlyReady, requestReady;
+  const earlyHeld=new Promise(resolve=>{releaseEarly=resolve;});
+  const requestHeld=new Promise(resolve=>{releaseRequest=resolve;});
+  const earlyStarted=new Promise(resolve=>{earlyReady=resolve;});
+  const requestCaptured=new Promise(resolve=>{requestReady=resolve;});
+  let requestPid, latePid;
+  const waitBlocked=async pid=>{
+    const deadline=Date.now()+5000;
+    while(Date.now()<deadline){
+      if(psql(db,`select cardinality(pg_blocking_pids(${pid}))>0`).trim()==='t') return;
+      await new Promise(resolve=>setTimeout(resolve,20));
+    }
+    assert.fail('Expected concurrent reservation/removal lock contention');
+  };
+  const early=withStaffTransaction(pool,identity,org,['candidates.read','candidates.write'],async({client})=>{
+    await client.query('select app.telegram_reserve_upload_v1($1,1,$2)',[id.draft,reservationKey]);
+    earlyReady();await earlyHeld;
+  });
+  await earlyStarted;
+  const removal=withStaffTransaction(pool,identity,org,['candidates.read','candidates.write'],async({client})=>{
+    requestPid=(await client.query('select pg_backend_pid() pid')).rows[0].pid;
+    const result=(await client.query('select app.telegram_chat_removal_request_v1($1,$2,$3,$4) result',[id.chat,preview.version,id.operation,'remove_imported_history'])).rows[0].result;
+    requestReady();await requestHeld;return result;
+  });
+  while(!requestPid) await new Promise(resolve=>setTimeout(resolve,10));
+  await waitBlocked(requestPid);
+  releaseEarly();await early;await requestCaptured;
+  const lateKey=reservationKey.replace(/[^/]+$/,`${randomUUID()}.pdf`);
+  const late=withStaffTransaction(pool,identity,org,['candidates.read','candidates.write'],async({client})=>{
+    latePid=(await client.query('select pg_backend_pid() pid')).rows[0].pid;
+    await client.query('select app.telegram_reserve_upload_v1($1,1,$2)',[id.draft,lateKey]);
+  });
+  const rejected=assert.rejects(late,error=>error.code==='40001');
+  while(!latePid) await new Promise(resolve=>setTimeout(resolve,10));
+  await waitBlocked(latePid);
+  releaseRequest();const pending=await removal;await rejected;
+  assert.equal(psql(db,`select count(*) from app.telegram_upload_cleanup where object_key='${lateKey}'`).trim(),'0','post-capture reservation waits then rejects');
+  assert.equal(pending.state,'pending');assert.deepEqual(await operation(request),pending);
+  assert.equal(psql(db, `select count(*) from app.telegram_chat_removal_objects where object_key='${reservationKey}'`).trim(),'1','outstanding reservation enters removal ledger before source purge');
+  assert.equal(psql(db, `select available_at>now()+interval '50 minutes' from app.telegram_upload_cleanup where object_key='${reservationKey}'`).trim(),'t','reservation upload window stays intact');
   await assert.rejects(operation({...request,expectedVersion:preview.version+1}),e=>e.code==='40001');
   const deniedIdentity={provider:'google',issuer:'https://accounts.google.com',subject:'1001'};
   await assert.rejects(telegramChatRemovalOperation(pool,deniedIdentity,AUTHZ_ID.ORG_A,{action:'preview',chatId:id.chat}),e=>e.code==='P0002');
@@ -86,7 +127,7 @@ test('explicit owner removal fences writes, purges bounded private copies and re
   const nextCleanup=(await worker('select app.telegram_chat_removal_cleanup_claim_v1($1) result',[token])).cleanup;assert.equal(nextCleanup.cvJobIds.length,1);assert.notEqual(nextCleanup.cleanupToken,cleanup.cleanupToken);
   await worker('select app.telegram_chat_removal_cleanup_ack_v1($1,$2,$3) result',[token,cleanup.removalId,cleanup.cleanupToken]);
   await worker('select app.telegram_chat_removal_cleanup_ack_v1($1,$2,$3) result',[token,nextCleanup.removalId,nextCleanup.cleanupToken]);status=await operation({action:'status'});assert.equal(status.removal.deviceCleanupPending,false);assert.equal(status.state,'device_pending');
-  psql(db, `delete from app.telegram_upload_cleanup where object_key='staff/${org}/synthetic/private-cv.pdf';`);await maintenance();status=await operation({action:'status'});assert.equal(status.state,'completed');
+  psql(db, `delete from app.telegram_upload_cleanup where object_key in('staff/${org}/synthetic/private-cv.pdf','${reservationKey}');`);await maintenance();status=await operation({action:'status'});assert.equal(status.state,'completed');
   await assert.rejects(operation({action:'reimport',expectedVersion:status.version,operationId:id.operation}),e=>e.code==='40001');
   const reimport={action:'reimport',expectedVersion:status.version,operationId:randomUUID()};const fresh=await operation(reimport);assert.equal(fresh.state,'reimport_requested');assert.deepEqual(await operation(reimport),fresh);
   await assert.rejects(worker('select app.telegram_history_complete_v1($1,$2,1,$3,\'123456\',$4,$5,$6::jsonb) result',[token,id.connection,id.connectionLease,id.job,randomUUID(),JSON.stringify(oldPage)]),e=>e.code==='40001');
