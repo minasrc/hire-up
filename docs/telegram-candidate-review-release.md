@@ -16,3 +16,9 @@ Apply `20261013180000_telegram_candidate_review.sql` before deploying these appl
 ## Focused verification
 
 Node 22: `npm run typecheck`. Focused database and browser checks: `node --test tests/database/telegram-candidate-review.test.js tests/staff-workspace/telegram-candidate-flow.test.js`. These use disposable local PostgreSQL databases and synthetic authenticated sessions. Browser screenshots are saved under `test-results/candidate-flow-*.png`.
+
+## Local interactive demo
+
+With Node 22 and Docker Desktop running, run `npm run dev:telegram-fixture` from this checkout and open `http://127.0.0.1:3013/`. The launcher signs you into a disposable workspace with sample chats, new candidate proposals, and an existing candidate update. Approve, edit, reject, and manual matching use the real database operations. Stop the launcher with Ctrl+C to remove its temporary database; restarting resets the sample data.
+
+The demo does not sign into a real Telegram account, process live messages, or run an embedding worker. Live import and ranked search require the existing configured workers.

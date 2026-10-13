@@ -1,6 +1,6 @@
 import { spawn } from 'node:child_process';
 import { createHash, randomUUID } from 'node:crypto';
-import { readFileSync } from 'node:fs';
+import { readFileSync, readdirSync } from 'node:fs';
 import { createServer } from 'node:http';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -22,6 +22,9 @@ import {
 import { createSyntheticDocx, createSyntheticPdf } from '../tests/support/cv-fixtures.js';
 import { STAFF_MFA_COOKIE, createStaffMfaProof } from '../src/lib/staff-mfa-cookie.js';
 
+import { seedTelegramDemo } from './telegram-demo-fixture.mjs';
+
+const telegramDemo = process.env.STAFF_TELEGRAM_FIXTURE === '1';
 const root = fileURLToPath(new URL('../', import.meta.url));
 const migrations = [
     '20260922090000_foundation_roles.sql',
@@ -84,11 +87,13 @@ async function main() {
         stopAndRemoveContainer(db);
     };
     try {
-        for (const name of migrations) {
+        const selectedMigrations = telegramDemo ? readdirSync(join(root, 'supabase/migrations')).filter(name => name >= '20260922090000_foundation_roles.sql' && name.endsWith('.sql')).sort() : migrations;
+        for (const name of selectedMigrations) {
             psql(db, readFileSync(join(root, 'supabase', 'migrations', name), 'utf8'));
         }
         const password = installStaffFixture(db);
         psql(db, clientJobFixtureSql);
+        if (telegramDemo) await seedTelegramDemo(db, password);
         const jobDocument = JSON.stringify({ type: 'doc', content: [
             { type: 'heading', attrs: { level: 2 }, content: [
                 { type: 'text', text: 'The role' },
@@ -194,6 +199,7 @@ async function main() {
                     NODE_ENV: 'development', NEXT_TELEMETRY_DISABLED: '1',
                     NODE_OPTIONS: `--require ${join(root, 'tests', 'staff-workspace', 'google-token-preload.cjs')}`,
                     STAFF_DATABASE_URL: `postgresql://agora_authz_test:${password}@127.0.0.1:${publishedPort(db, 5432)}/postgres`,
+                    TELEGRAM_INTAKE_ENABLED: telegramDemo ? '1' : '',
                     STAFF_ORGANIZATION_ID: AUTHZ_ID.ORG_B,
                     NEXTAUTH_URL: baseURL, NEXTAUTH_SECRET: secret,
                     GOOGLE_CLIENT_ID: 'synthetic-workspace-client',
@@ -216,7 +222,7 @@ async function main() {
         });
         entry = createServer((_request, response) => {
             response.writeHead(302, {
-                location: `${baseURL}/staff/candidates`,
+                location: `${baseURL}${telegramDemo ? '/staff/telegram-intake' : '/staff/candidates'}`,
                 'cache-control': 'no-store',
                 'set-cookie': [
                     `next-auth.session-token=${token}; Path=/; HttpOnly; SameSite=Lax`,
@@ -227,6 +233,7 @@ async function main() {
         });
         const entryPort = await listen(entry, Number(process.env.STAFF_FIXTURE_PORT || 3013));
         console.log(`\nOpen http://127.0.0.1:${entryPort}/ to try the staff preview with synthetic data.`);
+        if (telegramDemo) console.log('Telegram demo: sample chats and proposals. Live importing and ranked search require configured workers.');
         console.log('Ctrl+C removes the temporary database.');
         await new Promise((resolve) => {
             process.once('SIGINT', resolve);
