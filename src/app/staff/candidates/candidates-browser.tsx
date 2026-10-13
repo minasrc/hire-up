@@ -3,6 +3,7 @@
 import { staffWorkspaceUrl } from '@/lib/staff-workspace-fetch';
 
 import Link from 'next/link';
+import { useSyncExternalStore } from 'react';
 import { useRouter } from 'next/navigation';
 import { FileText, LoaderCircle, Search, X } from 'lucide-react';
 
@@ -38,6 +39,10 @@ export interface CandidateRow {
     location?: string | null;
 }
 
+const subscribeToHydration = () => () => {};
+const clientSnapshot = () => true;
+const serverSnapshot = () => false;
+
 const formatDate = (iso: string) => <StaffDate value={iso} />;
 
 const parseFilters = (params: { get(name: string): string | null }) =>
@@ -69,6 +74,7 @@ export function CandidatesBrowser({
     semanticSearchEnabled?: boolean;
 }) {
     const router = useRouter();
+    const clientReady = useSyncExternalStore(subscribeToHydration, clientSnapshot, serverSnapshot);
     const { filters, update: navigate, pending } = useDirectoryNavigation(
         '/staff/candidates', parseFilters, serializeFilters);
     const query = filters.query;
@@ -96,6 +102,7 @@ export function CandidatesBrowser({
                         />
                         <Input
                             id="candidate-search"
+                            disabled={!clientReady}
                             className="pl-9"
                             placeholder="Search by name, email, or describe a candidate…"
                             value={query}
