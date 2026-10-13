@@ -77,6 +77,8 @@ test('Telegram history UI discovers, selects and resumes private full-history im
     const browser = await chromium.launch();
     t.after(() => browser.close());
     const context = await browser.newContext();
+    // Production has no dev HMR reload when the removal route compiles for the first time.
+    await context.routeWebSocket('**/_next/webpack-hmr*', () => {});
     await context.addCookies([
         { name: 'next-auth.session-token', value: token, url: baseURL },
         { name: STAFF_MFA_COOKIE, value: proof, url: baseURL },
@@ -272,6 +274,23 @@ test('Telegram history UI discovers, selects and resumes private full-history im
         await page.screenshot({ path: join(root, 'test-results/staff-workspace-telegram-history-imported.png'), fullPage: true });
         await page.setViewportSize({ width: 390, height: 844 });
         assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth + 2), 'Mobile page must not overflow horizontally');
+        for (const name of ['View conversation', 'Pause sync', 'Remove imported history']) {
+            const control = page.getByRole(name === 'View conversation' ? 'link' : 'button', { name, exact: true });
+            await expect(control).toBeVisible();
+            const bounds = await control.boundingBox();
+            assert.ok(bounds && bounds.x >= 0 && bounds.x + bounds.width <= 392, `${name} must be reachable without horizontal scrolling`);
+        }
+        await clickAction(page.getByRole('button', { name: 'Pause sync', exact: true }));
+        await expect(page.getByText('Sync paused', { exact: true })).toBeVisible();
+        await clickAction(page.getByRole('button', { name: 'Resume sync', exact: true }));
+        await page.getByText('Import progress details', { exact: true }).click();
+        await expect(page.getByText(/Last progress:/)).toBeVisible();
+        await expect(page.getByText(/History reached:/)).toBeVisible();
+        await page.getByText('Import progress details', { exact: true }).click();
+        await page.getByRole('button', { name: 'Remove imported history', exact: true }).click();
+        await expect(page.getByRole('dialog', { name: 'Remove imported history', exact: true }).getByRole('button', { name: 'Confirm removal', exact: true })).toBeVisible();
+        await page.getByRole('dialog', { name: 'Remove imported history', exact: true }).getByRole('button', { name: 'Close', exact: true }).click();
+        await expect(page.getByRole('dialog', { name: 'Remove imported history', exact: true })).toBeHidden();
         await page.screenshot({ path: join(root, 'test-results/staff-workspace-telegram-history-mobile.png'), fullPage: true });
         await page.setViewportSize({ width: 1280, height: 720 });
 
