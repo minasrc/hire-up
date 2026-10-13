@@ -31,3 +31,27 @@ test('idle maintenance is bounded to five-minute cadence; actionable removal acc
     now += 10000; await supervisor.refresh(); await supervisor.maintain(); assert.equal(calls, 3);
     await supervisor.stop(); await supervisor.maintain(); assert.equal(calls, 3);
 });
+
+test('lease-bound maintenance wakes retired cleanup and completed cleanup stops claiming when idle', async () => {
+    let now = 1700000000000, pending = true;
+    const events = [];
+    const row = { requestId: id, workerId: null, organizationId: id, ownerUserId: id, cleanupToken: id };
+    const supervisor = createSupervisor({ efficientPolling: true, wall: () => now, monotonic: () => now,
+        store: { eraseRetired: async () => { events.push('erase'); } },
+        control: async action => {
+            if (action === 'sync') return { protocolVersion: 1, leaseToken: id, leaseSeconds: 89, capacity: 10, requests: [], nextAfter: null };
+            if (action === 'maintenance') return { ...result, retiredVaultActionable: pending };
+            events.push(action);
+            if (action === 'retiredCleanupClaim') return { protocolVersion: 1, requests: pending ? [row] : [] };
+            assert.equal(action, 'retiredCleanupAck'); pending = false; return { ok: true };
+        } });
+    await supervisor.refresh(); await supervisor.reconcile(); await supervisor.maintain(); await supervisor.cleanupRetired();
+    assert.deepEqual(events, ['retiredCleanupClaim', 'erase', 'retiredCleanupAck']);
+    now += 10000; await supervisor.refresh(); await supervisor.reconcile(); await supervisor.maintain(); await supervisor.cleanupRetired();
+    assert.equal(events.filter(action => action === 'retiredCleanupClaim').length, 2, 'one empty claim confirms the queue drained');
+    for (let second = 20; second <= 310; second += 10) {
+        now += 10000; await supervisor.refresh(); await supervisor.reconcile(); await supervisor.maintain(); await supervisor.cleanupRetired();
+    }
+    assert.equal(events.filter(action => action === 'retiredCleanupClaim').length, 2, 'idle maintenance adds no retired-cleanup polling');
+    await supervisor.stop();
+});

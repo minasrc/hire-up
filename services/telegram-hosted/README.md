@@ -193,3 +193,31 @@ replacement children. The service verifies that the retired process is stopped,
 erases only that registration's private directory and flushes the deletion before
 acknowledging it. Unsafe paths or uncertain process state remain pending. Reset
 cannot restore a lost encryption key or prove Telegram-side revocation itself.
+
+## Retired private-state cleanup
+
+After `20261013170000`, retirement queues deletion of that exact old request's
+private directory. The supervisor first observes child exit and verifies any
+orphan PID lock represents a stopped process. It uses only the configured
+service root and canonical request UUID, checks deployment/worker/owner metadata,
+rejects links or unsafe files, erases the retired directory asynchronously, and
+flushes the parent directory before acknowledging the service's durable proof.
+An old encryption key is unnecessary for deleting the entire known retired
+scope. Active request directories and imported database history are preserved.
+
+Retired cleanup claims contain at most five identity records and no file paths.
+Fair claim ordering prevents an unverifiable old directory from indefinitely
+hiding later work. A live or unknown process/path stays pending with a fixed
+operational code and a five-minute retry. Lost acknowledgements retry the same
+proof and verified absence; they cannot recreate an old registration. Cleanup
+adds no idle polling requests: the existing maintenance aggregate provides its
+wake hint.
+
+Conversation removal keeps primary-worker cleanup evidence separate from old
+retired-vault obligations. A new worker's acknowledgement never proves an old
+worker's bytes were erased. Completion waits for both, plus server and storage
+purge. Future removal requests inherit any still-unverified retired scopes;
+verified whole-scope purge can cover later work because retired credentials are
+permanently fenced. Migration repair reopens only still-removed completed chats
+with missing old-scope proof, preserving explicit fresh reimports. Private
+backups remain governed by the operator's backup retention policy.
