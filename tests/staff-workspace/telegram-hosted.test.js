@@ -150,7 +150,7 @@ test('Hosted Telegram browser starts on demand, cancels setup and protects QR/pa
         await control('register', { requestId: requests[0].requestId, workerId, tokenSha256: createHash('sha256').update(workerToken).digest('hex') });
         await worker('heartbeat', { publicKeySpki });
         await page.getByRole('button', { name: 'Retry service status', exact: true }).click();
-        await expect(page.getByText('Telegram service available.', { exact: true })).toBeVisible();
+        await expect(page.getByRole('button', { name: 'Connect Telegram', exact: true })).toBeEnabled();
         await expect(page.getByText('Setup cancelled. Click Connect Telegram when you are ready.', { exact: true })).toHaveCount(0);
         assert.equal(starts, 0, 'A ready status after cancellation cannot restart sign-in');
         await page.getByRole('button', { name: 'Connect Telegram', exact: true }).click();

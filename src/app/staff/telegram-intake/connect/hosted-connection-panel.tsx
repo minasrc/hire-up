@@ -4,7 +4,7 @@ import { staffWorkspaceFetch } from '@/lib/staff-workspace-fetch';
 
 import { useCallback, useEffect, useRef, useState, type ReactNode, type MutableRefObject } from 'react';
 import Link from 'next/link';
-import { Cloud, RefreshCw } from 'lucide-react';
+import { RefreshCw } from 'lucide-react';
 import { Button } from '@/components/staff-ui/button';
 import { Card } from '@/components/staff-ui/card';
 import { hostedStatus, prepareHostedConnection, hostedRequestError, hostedEmergencyLogout, hostedRetirementInput, retirementMessage } from './hosted-connection-model';
@@ -147,10 +147,10 @@ export function HostedConnectionPanel({ connection, loaded, disabled, attemptRef
     }
 
     return <><Card className="space-y-4 p-6" aria-busy={busy}>
-        <div className="flex items-start gap-3"><Cloud className="mt-1 h-5 w-5 shrink-0" /><div><h2 className="font-semibold">Hosted Telegram connection</h2><p className="mt-1 text-sm text-muted-foreground">Connect here, then scan the sign-in code with Telegram on your phone. The service keeps your connection running.</p></div></div>
         {!status && !error ? <p role="status">Checking Telegram service…</p> : null}
         {status && (!status.serviceOnline || status.state === 'unavailable') ? <p role="status">The Telegram service is temporarily offline or unavailable. Your imported history remains available.</p> : null}
-        {status?.serviceOnline && status.state !== 'unavailable' ? <p role="status">{busy ? phase === 'starting' ? 'Starting Telegram sign-in…' : 'Preparing your Telegram connection…' : status.workerOnline && status.state === 'ready' ? 'Telegram service available.' : active ? 'Your Telegram connection is waiting for the service. Your imported history remains available.' : status.state === 'pending' ? 'Telegram setup is pending. Click Connect Telegram to continue when you are ready.' : 'Telegram service available. Click Connect Telegram to begin.'}</p> : null}
+        {busy && phase !== 'retiring' ? <p role="status">{phase === 'starting' ? 'Starting Telegram sign-in…' : 'Preparing your Telegram connection…'}</p> : null}
+        {!busy && active && status?.serviceOnline && status.state !== 'unavailable' && !(status.workerOnline && status.state === 'ready') ? <p role="status">Your Telegram connection is waiting for the service. Your imported history remains available.</p> : null}
         {hostedEmergencyLogout(connection, status) ? <p role="status" className="text-sm text-muted-foreground">To revoke access immediately, open Telegram on your phone → Settings → Devices and terminate this session. Imported history stays in your private workspace.</p> : null}
         {blocked ? <p role="status">This account has an existing connection. Disconnect it below and wait for logout confirmation before starting a hosted connection.</p> : null}
         {!active || connection?.status === 'requested' ? <Button onClick={() => void connect()} disabled={disabled || busy || Boolean(active) || !loaded || Boolean(blocked) || !status?.serviceOnline || status.state === 'unavailable'}>{busy || connection?.status === 'requested' ? 'Preparing sign-in…' : connection?.status === 'failed' ? 'Retry sign-in' : 'Connect Telegram'}</Button> : null}
