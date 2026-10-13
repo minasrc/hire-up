@@ -280,7 +280,7 @@ test('Hosted Telegram browser starts on demand, cancels setup and protects QR/pa
         await expect(page.getByRole('button', { name: 'Connect again', exact: true })).toHaveCount(0);
         await page.getByRole('button', { name: 'Cancel sign-in', exact: true }).click();
         await expect(page.getByRole('heading', { name: 'Connection cancelled', exact: true })).toBeVisible();
-        assert.equal(prepares, 4);
+        assert.equal(prepares, 3, 'Reconnect reuses the existing registration; physical-worker setup cannot provision another hosted worker');
         await noLocalSetup();
         // A revoked enrollment needs explicit Telegram-side confirmation.
         const newPrepare=await context.request.post(hostedURL,{data:{action:'prepare'}});assert.equal(newPrepare.status(),200);

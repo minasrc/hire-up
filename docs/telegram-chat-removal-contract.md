@@ -88,7 +88,7 @@ cannot list global removal scopes or call deletion helpers. The staff API uses
 maintenance entry point after its own service lease validation.
 
 Completion covers the imported-history server records, the original connector's
-scoped encrypted cache and its queued private storage objects. It does not mean
+scoped encrypted cache and any outstanding retired-registration caches and its queued private storage objects. It does not mean
 that backups or every external system have erased every physical copy. The pilot
 runs with AI processing off. When AI processing is enabled, external provider
 retention follows that provider's separately configured policy; removal does not
@@ -97,6 +97,17 @@ its separate pending result queue when the server returns the terminal 409 fence
 An offline AI worker may retain its private pending queue until it resumes; that
 queue is outside the connector cleanup acknowledgement described here.
 
-Hosted storage cleanup retains outstanding draft upload reservations until their original one-hour upload window expires. Removal remains pending during that window. Cleanup probes all draft and candidate blob references independently of the removed owner’s current permissions; retained copies are dispositioned from the cleanup queue and remain separately managed. Failed storage calls retain the deleting fence and retry after a durable 60-second defer. Removed keys remain private tombstones against new blob bindings. The Mac receives only bounded aggregate scheduling metadata, never storage keys.
+Hosted storage cleanup retains outstanding draft upload reservations until their
+original one-hour upload window expires. Removal remains pending during that
+window. Cleanup probes all draft and candidate blob references independently of
+the removed owner’s current permissions; retained copies are dispositioned from
+the cleanup queue and remain separately managed. Failed storage calls retain the
+deleting fence and retry after a durable 60-second defer. Removed keys remain
+private tombstones against new blob bindings. The Mac receives only bounded
+aggregate scheduling metadata, never storage keys.
 
-Reservation/removal races serialize on the affected chat: reservation INSERT takes a shared chat lock, while removal takes its update lock before capturing existing reservations. An earlier reservation commits before capture; a later reservation waits and rejects after removal commits. The request does not lock every affected draft.
+Reservation/removal races serialize on the affected chat: reservation INSERT
+takes a shared chat lock, while removal takes its update lock before capturing
+existing reservations. An earlier reservation commits before capture; a later
+reservation waits and rejects after removal commits. The request does not lock
+every affected draft.

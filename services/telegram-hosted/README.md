@@ -151,8 +151,11 @@ With fast responses and no queued work, supervisor control falls from 25,920
 to 8,640 requests/day. Ten enrolled idle children add 14,400 polls/day. A quiet
 account plus one quiet selected channel per owner adds approximately 57,600
 native claim/completion requests/day, including independent lane scheduling hints.
-This is approximately 80,640 requests/day, about a 90% reduction from the previous roughly 817,920 empty requests
-per day; it is a request estimate, not a bill estimate. More channels, source
+Idle maintenance adds 288 requests/day. With no provider jobs the total is
+approximately 23,328 requests/day; with a quiet account and one quiet selected
+channel per owner it is approximately 80,928 requests/day. These are respectively
+about 97% and 90% below the previous roughly 817,920 empty requests/day.
+These are request estimates, not bill estimates. More channels, source
 repair, imports, browser tabs, retries and retention cleanup add real work.
 Every request still validates current permissions and revocation. Worker
 last-seen timestamps are written at most every thirty seconds and expiry is
@@ -183,9 +186,10 @@ attestation; the website does not claim it performed remote logout.
 
 Reset requires the existing authenticated owner session and MFA gate. It revokes
 the old worker token immediately, fences the old connection generation, and
-retains encrypted old service files rather than replacing uncertain credentials.
-Clicking Connect then requests a fresh enrollment/worker; reset alone does not
-start sign-in. The next complete supervisor snapshot stops retired children
-before starting replacement children. Keep old private files until the operator
-can safely archive them under the deployment's retention/backup policy. Reset
+queues the retired registration's private files for deletion. Clicking Connect
+then requests a fresh enrollment/worker; reset alone does not start sign-in. The
+next complete supervisor snapshot stops retired children before starting
+replacement children. The service verifies that the retired process is stopped,
+erases only that registration's private directory and flushes the deletion before
+acknowledging it. Unsafe paths or uncertain process state remain pending. Reset
 cannot restore a lost encryption key or prove Telegram-side revocation itself.
