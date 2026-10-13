@@ -22,3 +22,10 @@ workspace that rendered its form, and a mismatched selection is rejected before
 business operations. It adds no polling or global fetch patch. A future move to
 workspace-ID route contexts could support fast client navigation with explicit
 layout scope.
+
+Native document links carry the rendered workspace in the read-only document
+GET URL. StaffDocumentLink receives that scope synchronously from
+WorkspaceBoundary during server rendering, so early clicks, downloads and new
+tabs are fenced without depending on hydration or DOM metadata. The document
+API treats this query value as an expectation and checks the signed selection
+before returning bytes or a private storage redirect. Legacy links carry no hint.

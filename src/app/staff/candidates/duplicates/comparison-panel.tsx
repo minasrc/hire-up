@@ -1,5 +1,7 @@
 'use client';
 
+import { StaffDocumentLink } from '@/components/staff-ui/staff-document-link';
+
 import type { ReactNode } from 'react';
 import Link from 'next/link';
 import { Download, UserRound } from 'lucide-react';
@@ -129,10 +131,10 @@ function Profile({
                         {document.scanState !== 'clean' ? ` · ${document.scanState}` : ''}
                     </p>
                     {!demo && capabilities.downloadDocuments && document.lifecycle === 'active'
-                        ? <a href={`/api/staff/documents/${document.documentId}`}
+                        ? <StaffDocumentLink documentId={document.documentId}
                             className="inline-flex items-center gap-1 text-xs text-primary underline underline-offset-4">
                             <Download className="h-3 w-3" aria-hidden="true" /> Download CV
-                        </a> : null}
+                        </StaffDocumentLink> : null}
                 </li>)}</ul>}
         </div>
         <div>

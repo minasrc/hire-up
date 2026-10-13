@@ -1,11 +1,17 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { createContext, useContext, useEffect, useState } from 'react';
 import { Button } from '@/components/staff-ui/button';
 import { workspaceNavigationUrl } from './workspace-navigation-model';
 import { WORKSPACE_CHANGED_EVENT } from '@/lib/staff-workspace-fetch';
 
-export function WorkspaceBoundary({ children, multiWorkspace = false }: { children: React.ReactNode; multiWorkspace?: boolean }) {
+const StaffWorkspaceContext = createContext<string | null>(null);
+
+export function useStaffWorkspaceId() {
+    return useContext(StaffWorkspaceContext);
+}
+
+export function WorkspaceBoundary({ children, multiWorkspace = false, organizationId }: { children: React.ReactNode; multiWorkspace?: boolean; organizationId?: string }) {
     const [changed, setChanged] = useState(false);
     useEffect(() => {
         const invalidate = () => setChanged(true);
@@ -43,5 +49,5 @@ export function WorkspaceBoundary({ children, multiWorkspace = false }: { childr
             <Button asChild variant="outline"><a href="/staff/workspaces">Choose workspace</a></Button>
         </div>
     </main>;
-    return children;
+    return <StaffWorkspaceContext.Provider value={multiWorkspace ? organizationId ?? null : null}>{children}</StaffWorkspaceContext.Provider>;
 }
