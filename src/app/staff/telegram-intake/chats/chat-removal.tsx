@@ -3,6 +3,7 @@
 import { staffWorkspaceFetch } from '@/lib/staff-workspace-fetch';
 
 import { useEffect, useRef, useState } from 'react';
+import { Trash2 } from 'lucide-react';
 import { Button } from '@/components/staff-ui/button';
 import { Dialog, DialogContent, DialogDescription, DialogTitle } from '@/components/staff-ui/dialog';
 import { removalError, removalPending, removalStatus, removalPayload, removalOperation } from './removal-model';
@@ -29,11 +30,12 @@ type Preview = {
 };
 const endpoint = '/api/staff/telegram-removal';
 
-export function ChatRemoval({ chatId, title, state = 'none', receipt, disabled, accessBlocked, connected, onChanged, onDenied }: {
+export function ChatRemoval({ chatId, title, state = 'none', receipt, disabled, accessBlocked, connected, onChanged, onDenied, compact = false }: {
     chatId: string;
     title: string;
     state?: State;
     receipt?: RemovalReceipt | null;
+    compact?: boolean;
     disabled: boolean;
     accessBlocked: boolean;
     connected: boolean;
@@ -160,7 +162,7 @@ export function ChatRemoval({ chatId, title, state = 'none', receipt, disabled, 
     }
 
     return <div className="space-y-2">
-        {status ? <p role="status" className="max-w-sm text-xs text-muted-foreground">
+        {status && !compact ? <p role="status" className="max-w-sm text-xs text-muted-foreground">
             {status}
             {removalPending(state) && receipt
                 ? ` ${receipt.removedMessages.toLocaleString()} of ${receipt.totalMessages.toLocaleString()} messages removed.`
@@ -174,10 +176,11 @@ export function ChatRemoval({ chatId, title, state = 'none', receipt, disabled, 
             {!connected ? <p className="text-xs text-muted-foreground">
                 Reconnect the same Telegram account to import this chat again.
             </p> : null}
-        </> : <Button size="sm" variant="ghost"
+        </> : <Button size={compact ? 'icon' : 'sm'} variant="ghost"
+            aria-label={compact ? `Remove imported history for ${title}` : undefined} title={compact ? 'Remove imported history' : undefined}
             disabled={disabled || accessBlocked || busy || removalPending(state)}
             onClick={() => void loadPreview('request')}>
-            Remove imported history
+            {compact ? <Trash2 className="h-4 w-4" aria-hidden="true" /> : 'Remove imported history'}
         </Button>}
         <Dialog open={open} onOpenChange={changeOpen}>
             <DialogContent className="max-h-[90dvh] overflow-y-auto">

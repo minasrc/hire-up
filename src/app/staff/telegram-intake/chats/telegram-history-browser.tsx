@@ -5,13 +5,16 @@ import { staffWorkspaceFetch } from '@/lib/staff-workspace-fetch';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { CheckCircle2, MessageSquare, RefreshCw, Search } from 'lucide-react';
 import { Button } from '@/components/staff-ui/button';
+import { InitialsAvatar } from '@/components/staff-preview/shared';
+import { Badge } from '@/components/staff-ui/badge';
+import { Tabs, TabsList, TabsTrigger } from '@/components/staff-ui/tabs';
 import { Card } from '@/components/staff-ui/card';
 import { Input } from '@/components/staff-ui/input';
 import { Label } from '@/components/staff-ui/label';
 import { ProcessingStatus } from '../processing-status';
 import { ChatRemoval, type RemovalReceipt } from './chat-removal';
 import { TelegramConnectionBrowser } from '../connect/telegram-connection-browser';
-import { chatDisplayTitle, discoveryPresentation, historyPollingDelay, importGuidance } from './history-model';
+import { chatDisplayTitle, discoveryPresentation, historyPollingDelay } from './history-model';
 
 type Job = { id?: string; jobId?: string; status: string; importedMessages?: number; importedBytes?: number; errorCode: string | null; retryAt: string | null };
 type Chat = { id: string; peer: { kind: string; id: string }; title: string; lastMessageAt?: string | null; username: string | null; selected: boolean; historyCompleted?: boolean; progress?: { lastProgressAt: string | null; oldestImportedAt: string | null; newestImportedAt: string | null }; removalState?: 'none' | 'pending' | 'device_pending' | 'completed'; removal?: RemovalReceipt | null; version: number; extractionEnabled: boolean; extractionPending: boolean; import: Job | null; sync?: { enabled: boolean; status: string; lastSyncedAt: string | null; nextSyncAt: string | null; checkpoint: string } };
@@ -19,7 +22,7 @@ type Snapshot = {
     connection: { id: string; generation: number; status: string; accountUserId: string | null } | null;
     account: { id: string; accountUserId: string } | null; canImport: boolean; blockedReason: string | null;
     discovery: { status: string; jobs: Job[] };
-    totals: { chats: number; selected: number; messages: number; bytes: number; maxMessages: number; maxBytes: number };
+    totals: { chats: number; selected: number; messages: number; bytes: number; maxMessages: number; maxBytes: number; available?: number; connected?: number };
     chats: Chat[]; nextCursor: string | null;
 };
 
@@ -43,7 +46,7 @@ async function request(url: string, init?: RequestInit) {
 
 export function TelegramHistoryBrowser({ workspaceId, hostedEnabled = false, onboarding = false }: { workspaceId: string; hostedEnabled?: boolean; onboarding?: boolean }) {
     const [snapshot, setSnapshot] = useState<Snapshot | null>(null);
-    const view = 'all';
+    const [view, setView] = useState<'available' | 'connected'>('available');
     const [search, setSearch] = useState('');
     const [query, setQuery] = useState('');
     const [cursors, setCursors] = useState<string[]>(['']);
@@ -69,8 +72,10 @@ export function TelegramHistoryBrowser({ workspaceId, hostedEnabled = false, onb
     const blocked = !snapshot?.canImport || busy || loading || denied;
     const discovery = discoveryPresentation(snapshot);
     const showChats = discovery.hasChats;
-    const eligibleChats = snapshot?.chats.filter(chat => !chat.removalState || chat.removalState === 'none') ?? [];
+    const visibleChats = snapshot?.chats.filter(chat => view === 'available' ? !chat.selected && !chat.import && (!chat.removalState || chat.removalState === 'none') : chat.selected || Boolean(chat.import) || Boolean(chat.removalState && chat.removalState !== 'none')) ?? [];
+    const eligibleChats = visibleChats.filter(chat => !chat.selected && !chat.import && (!chat.removalState || chat.removalState === 'none'));
     const selectedRows = useRef(new Map<string, Chat>());
+    const initialGroupChosen = useRef(false);
     const autoDiscovery = useRef<string | null>(null);
     const [imported, setImported] = useState(false);
     const [proposalCount, setProposalCount] = useState(0);
@@ -115,6 +120,10 @@ export function TelegramHistoryBrowser({ workspaceId, hostedEnabled = false, onb
             visibleAccount.current = account;
             pollingSnapshot.current = result;
             setSnapshot(result);
+            if (!initialGroupChosen.current && result.account) {
+                initialGroupChosen.current = true;
+                if (view === 'available' && result.totals.available === 0 && (result.totals.connected ?? 0) > 0) setView('connected');
+            }
             if (!actionError.current) setError('');
         } catch (failure) {
             if (id !== requestId.current || controller.signal.aborted || !mounted.current) return;
@@ -171,6 +180,7 @@ export function TelegramHistoryBrowser({ workspaceId, hostedEnabled = false, onb
             return true;
         } catch (failure) {
             if (!mounted.current || controller.signal.aborted || revision !== requestId.current) return;
+            if (failure instanceof HistoryError && failure.status === 409 && payload.action === 'start') { setMarked([]); selectedRows.current.clear(); }
             actionError.current = true;
             setError(failure instanceof Error ? failure.message : 'Unable to apply this action.');
             if (failure instanceof HistoryError && [401, 403, 404, 428].includes(failure.status)) { setDenied(true); setSnapshot(null); setMarked([]); }
@@ -190,7 +200,7 @@ export function TelegramHistoryBrowser({ workspaceId, hostedEnabled = false, onb
         setStarting(true); setImportRevision(value => value + 1);
         const success = await act({ action: 'start', selected: true, chats: chats.map(chat => ({ chatId: chat.id, expectedVersion: chat.version })) }, '', true);
         setStarting(false); setImportRevision(value => value + 1);
-        if (success) setImported(true);
+        if (success) { setImported(true); setView('connected'); setCursors(['']); setSearch(''); setQuery(''); }
     }
     useEffect(() => {
         const account = snapshot?.connection?.accountUserId;
@@ -214,24 +224,35 @@ export function TelegramHistoryBrowser({ workspaceId, hostedEnabled = false, onb
         {snapshot?.canImport ? <details className="rounded-lg border bg-card px-3 py-2"><summary className="cursor-pointer text-sm font-medium"><CheckCircle2 className="mr-2 inline h-4 w-4 text-primary" />Telegram connected</summary><div className="mt-4"><TelegramConnectionBrowser workspaceId={workspaceId} hostedEnabled={hostedEnabled} blocked={denied} onConnectionChange={connectionChanged} onDenied={denyRemovalAccess} onChooseChats={chooseChats} chooseChatsLabel={null} /></div></details>
             : <TelegramConnectionBrowser workspaceId={workspaceId} hostedEnabled={hostedEnabled} blocked={denied} onConnectionChange={connectionChanged} onDenied={denyRemovalAccess} onChooseChats={chooseChats} chooseChatsLabel="Choose chats" />}
         {snapshot?.canImport || starting ? <ProcessingStatus key={importRevision} starting={starting} imported={imported} reviewLink onProposalCount={setProposalCount} /> : null}
+        {snapshot?.canImport ? <Tabs value={view} onValueChange={value => {
+            if (busy) return; currentRead.current?.abort(); requestId.current += 1;
+            setView(value as 'available' | 'connected'); setMarked([]); setCursors(['']); setLoading(true);
+        }} aria-label="Chat groups"><TabsList><TabsTrigger value="available">Available ({snapshot.totals.available ?? snapshot.totals.chats - snapshot.totals.selected})</TabsTrigger><TabsTrigger value="connected">Connected ({snapshot.totals.connected ?? snapshot.totals.selected})</TabsTrigger></TabsList></Tabs> : null}
         {snapshot?.canImport ? <Card className="overflow-hidden">
             <div className="flex items-center justify-between gap-3 border-b p-4"><h2 ref={chatPanel} tabIndex={-1} className="scroll-mt-24 font-semibold">Your chats</h2><Button ref={discoveryPanel} variant="ghost" size="sm" disabled={blocked || snapshot.discovery.status === 'active'} onClick={() => void act({ action: 'discover' }, 'Updating chats…')} aria-label="Refresh chat list"><RefreshCw className={snapshot.discovery.status === 'active' ? 'motion-safe:animate-spin' : ''} /></Button></div>
             <form className="flex items-center gap-2 p-4" onSubmit={event => { event.preventDefault(); setQuery(search.trim()); setCursors(['']); setLoading(true); }}>
                 <Label htmlFor="telegram-chat-search" className="sr-only">Search chats</Label><Input id="telegram-chat-search" value={search} maxLength={100} onChange={event => setSearch(event.target.value)} placeholder="Search chats…" /><Button type="submit" variant="outline" size="icon" aria-label="Search chats" disabled={busy}><Search /></Button>
             </form>
-            {eligibleChats.length ? <label className="flex cursor-pointer items-center gap-3 border-b px-4 pb-3 text-sm"><input type="checkbox" checked={allMarked} disabled={busy || loading} onChange={event => mark(eligibleChats.map(chat => chat.id), event.target.checked)} className="h-4 w-4 accent-primary" />Select this page</label> : null}
+            {view === 'available' && eligibleChats.length ? <label className="flex cursor-pointer items-center gap-3 border-b px-4 pb-3 text-sm"><input type="checkbox" checked={allMarked} disabled={busy || loading} onChange={event => mark(eligibleChats.map(chat => chat.id), event.target.checked)} className="h-4 w-4 accent-primary" />Select this page</label> : null}
             <div aria-busy={loading || busy} className="divide-y">
-                {!showChats || !snapshot.chats.length ? <div className="flex flex-col items-center gap-3 p-10 text-center"><MessageSquare className="h-7 w-7 text-muted-foreground" /><p role="status" className="text-sm text-muted-foreground">{snapshot.discovery.status === 'active' || loading ? 'Loading your chats…' : query ? 'No matching chats' : 'No chats found yet'}</p>{snapshot.discovery.status !== 'active' && !loading && !query ? <Button onClick={() => void act({ action: 'discover' }, 'Loading your chats…')} disabled={blocked}>Load chats</Button> : null}</div> : snapshot.chats.map(chat => <div key={chat.id} className="flex items-center gap-3 px-4 py-3 hover:bg-muted/40">
-                    <label className="flex min-w-0 flex-1 cursor-pointer items-center gap-3"><input type="checkbox" aria-label={`Select ${chatDisplayTitle(chat, snapshot.account?.accountUserId)}`} checked={marked.includes(chat.id)} disabled={busy || loading || Boolean(chat.removalState && chat.removalState !== 'none') || (marked.length >= 50 && !marked.includes(chat.id))} onChange={event => mark([chat.id], event.target.checked)} className="h-4 w-4 shrink-0 accent-primary" /><span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-muted"><MessageSquare className="h-4 w-4" /></span><span className="min-w-0"><span className="block truncate text-sm font-medium">{chatDisplayTitle(chat, snapshot.account?.accountUserId)}</span>{chat.selected ? <span className="block text-xs text-muted-foreground">Connected for candidate updates</span> : chat.username ? <span className="block text-xs text-muted-foreground">@{chat.username}</span> : null}</span></label>
-                    {chat.import?.errorCode ? <details className="text-xs"><summary className="cursor-pointer">Needs attention</summary><p className="max-w-48 pt-2">{importGuidance(chat.import)}</p><Button size="sm" variant="outline" disabled={blocked} onClick={() => void act({ action: 'resume', chatId: chat.id, expectedVersion: chat.version }, 'Retrying…')}>Retry</Button></details> : chat.selected ? <CheckCircle2 className="h-4 w-4 shrink-0 text-primary" aria-label="Chat connected" /> : null}
-                </div>)}
+                {!showChats || !visibleChats.length ? <div className="flex flex-col items-center gap-3 p-10 text-center"><MessageSquare className="h-7 w-7 text-muted-foreground" /><p role="status" className="text-sm text-muted-foreground">{snapshot.discovery.status === 'active' || loading ? 'Loading your chats…' : query ? 'No matching chats' : view === 'connected' ? 'No connected chats yet' : 'No new chats available'}</p>{snapshot.discovery.status !== 'active' && !loading && !query && snapshot.totals.chats === 0 ? <Button onClick={() => void act({ action: 'discover' }, 'Loading your chats…')} disabled={blocked}>Load chats</Button> : null}</div> : visibleChats.map(chat => {
+                    const removing = chat.removalState === 'pending' || chat.removalState === 'device_pending';
+                    const removed = chat.removalState === 'completed';
+                    const paused = ['paused', 'cancelled', 'capacity_paused', 'failed'].includes(chat.import?.status ?? '') || !chat.selected;
+                    const status = removing ? 'Removing' : removed ? 'Removed' : chat.import?.errorCode || ['failed', 'capacity_paused'].includes(chat.import?.status ?? '') ? 'Needs attention' : paused ? 'Paused' : ['queued', 'leased', 'waiting'].includes(chat.import?.status ?? '') ? 'Syncing' : chat.historyCompleted || chat.import?.status === 'completed' ? 'Synced' : 'Syncing';
+                    return <div key={chat.id} className="flex flex-wrap items-center gap-3 px-4 py-3 hover:bg-hover">
+                        {view === 'available' ? <label className="flex min-w-0 flex-1 cursor-pointer items-center gap-3"><input type="checkbox" aria-label={`Select ${chatDisplayTitle(chat, snapshot.account?.accountUserId)}`} checked={marked.includes(chat.id)} disabled={busy || loading || chat.selected || Boolean(chat.import) || (marked.length >= 50 && !marked.includes(chat.id))} onChange={event => mark([chat.id], event.target.checked)} className="h-4 w-4 shrink-0 accent-primary" /><InitialsAvatar name={chatDisplayTitle(chat, snapshot.account?.accountUserId)} /><span className="truncate text-sm font-medium">{chatDisplayTitle(chat, snapshot.account?.accountUserId)}</span></label>
+                            : <><InitialsAvatar name={chatDisplayTitle(chat, snapshot.account?.accountUserId)} /><span className="min-w-0 flex-1 truncate text-sm font-medium">{chatDisplayTitle(chat, snapshot.account?.accountUserId)}</span><Badge variant="secondary">{status}</Badge></>}
+                        {view === 'connected' ? <div className="flex items-center gap-2">{!removing && !removed ? <Button size="sm" variant="outline" aria-label={`${paused ? 'Resume' : 'Pause'} ${chatDisplayTitle(chat, snapshot.account?.accountUserId)}`} disabled={blocked} onClick={() => void act({ action: paused ? 'resume' : 'pause', chatId: chat.id, expectedVersion: chat.version }, paused ? 'Sync resumed.' : 'Sync paused.')}>{paused ? 'Resume' : 'Pause'}</Button> : null}<ChatRemoval compact chatId={chat.id} title={chat.title} state={chat.removalState} receipt={chat.removal} disabled={busy || loading} accessBlocked={denied} connected={Boolean(snapshot.canImport)} onChanged={refreshStatus} onDenied={denyRemovalAccess} /></div> : null}
+                    </div>;
+                })}
             </div>
             {snapshot.nextCursor || cursors.length > 1 ? <div className="flex justify-between border-t p-3"><Button size="sm" variant="ghost" disabled={loading || busy || cursors.length === 1} onClick={() => { setCursors(stack => stack.slice(0, -1)); setLoading(true); }}>Previous</Button><Button size="sm" variant="ghost" disabled={loading || busy || !snapshot.nextCursor} onClick={() => { setCursors(stack => [...stack, snapshot.nextCursor!]); setLoading(true); }}>More chats</Button></div> : null}
-            <div className="sticky bottom-0 flex items-center justify-between gap-3 border-t bg-card p-4"><span className="text-sm text-muted-foreground" role="status">{starting ? 'Starting import…' : marked.length ? `${marked.length} selected` : 'Select chats to start'}{marked.length === 50 ? ' · Maximum 50 per import' : ''}</span><Button disabled={blocked || !marked.length} onClick={() => void start()}>{starting ? 'Starting…' : loading ? 'Loading…' : 'Start'}</Button></div>
+            {view === 'available' && ((snapshot.totals.available ?? snapshot.totals.chats - snapshot.totals.selected) > 0 || marked.length > 0) ? <div className="sticky bottom-0 flex items-center justify-between gap-3 border-t bg-card p-4"><span className="text-sm text-muted-foreground" role="status">{starting ? 'Starting import…' : marked.length ? `${marked.length} selected` : 'Select chats to start'}{marked.length === 50 ? ' · Maximum 50 per import' : ''}</span><Button disabled={blocked || !marked.length} onClick={() => void start()}>{starting ? 'Starting…' : loading ? 'Loading…' : 'Start'}</Button></div> : null}
         </Card> : null}
         {notice ? <p role="status" className="text-sm text-muted-foreground">{notice}</p> : null}
         {snapshot && snapshot.totals.messages >= snapshot.totals.maxMessages ? <p role="alert" className="text-sm">Storage is full. Review pending proposals to release their sources.</p> : null}
-        {showChats ? <details className="text-sm text-muted-foreground"><summary className="cursor-pointer">Connected chats</summary><div className="mt-3 space-y-3">{snapshot?.chats.filter(chat => chat.selected || (chat.removalState && chat.removalState !== 'none')).map(chat => <div key={chat.id} className="flex flex-wrap items-center justify-between gap-2 rounded-lg border p-3"><span>{chatDisplayTitle(chat, snapshot.account?.accountUserId)}</span><div className="flex flex-wrap gap-2"><Button size="sm" variant="outline" disabled={blocked} onClick={() => void act({ action: chat.import?.status === 'paused' ? 'resume' : 'pause', chatId: chat.id, expectedVersion: chat.version }, 'Chat updated.')}>{chat.import?.status === 'paused' ? 'Resume' : 'Pause'}</Button><ChatRemoval chatId={chat.id} title={chat.title} state={chat.removalState} receipt={chat.removal} disabled={busy || loading} accessBlocked={denied} connected={Boolean(snapshot.canImport)} onChanged={refreshStatus} onDenied={denyRemovalAccess} /></div></div>)}</div></details> : null}
+
         </div>
     </section>;
 }

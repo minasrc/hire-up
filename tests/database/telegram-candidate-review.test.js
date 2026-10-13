@@ -9,7 +9,7 @@ import { CJ_SUBJECTS, clientJobFixtureSql } from '../support/client-job-workflow
 import { createTelegramDraft, listTelegramDrafts, getTelegramDraft, decideTelegramDraft, updateTelegramDraft, refreshTelegramReview, registerTelegramWorker, matchTelegramReview, telegramReviewMatches } from '../../src/lib/telegram-intake-operations.js';
 import { withStaffTransaction } from '../../src/lib/staff-authorization.js';
 import { saveCandidateProfile, getCandidateProfile } from '../../src/lib/candidate-profile-operations.js';
-import { telegramHistoryAction, telegramHistoryStatus, telegramOnboardingComplete } from '../../src/lib/telegram-history-operations.js';
+import { telegramHistoryAction, telegramHistoryStatus, telegramHistoryRecentStatus, telegramOnboardingComplete } from '../../src/lib/telegram-history-operations.js';
 import { normalizeTelegramDraftFields } from '../../src/lib/telegram-intake-contracts.js';
 
 const owner = { provider: 'google', issuer: 'https://accounts.google.com', subject: CJ_SUBJECTS.ADMIN };
@@ -107,6 +107,9 @@ test('Telegram proposals create candidates without CVs, update exact matches, fe
         insert into app.telegram_history_limits(organization_id,owner_user_id,stored_chats) values('${org}','${AUTHZ_ID.USER_ADMIN2}',1);
         insert into app.telegram_history_accounts(id,organization_id,owner_user_id,connection_id,account_user_id) values('${account}','${org}','${AUTHZ_ID.USER_ADMIN2}','${connection}','123');
         insert into app.telegram_history_chats(id,organization_id,owner_user_id,account_id,peer_kind,peer_id,title) values('${chat}','${org}','${AUTHZ_ID.USER_ADMIN2}','${account}','user','456','Candidate chat');`);
+    const availableBefore = await telegramHistoryRecentStatus(...args, { view: 'available' });
+    assert.equal(availableBefore.totals.available, 1);
+    assert.equal(availableBefore.totals.connected, 0);
     await assert.rejects(() => telegramHistoryAction(...args, { action: 'start', chats: [{ chatId: chat, expectedVersion: 1 }, { chatId: randomUUID(), expectedVersion: 1 }] }));
     let history = await telegramHistoryStatus(...args);
     assert.equal(history.chats[0].selected, false, 'failed Start rolls back selection');
@@ -118,6 +121,18 @@ test('Telegram proposals create candidates without CVs, update exact matches, fe
     psql(db, `update app.telegram_history_chats set selected=false where id='${chat}';`);
     assert.equal(await telegramOnboardingComplete(...args), true, 'deselecting chats never resets onboarding');
     assert.equal(history.chats[0].extractionEnabled, true, 'one Start enables automatic extraction');
+    assert.equal((await telegramHistoryRecentStatus(...args, { view: 'available' })).chats.length, 0);
+    const connected = await telegramHistoryRecentStatus(...args, { view: 'connected' });
+    assert.equal(connected.totals.connected, 1);
+    await assert.rejects(() => telegramHistoryAction(...args, { action: 'start', chats: [{ chatId: chat, expectedVersion: history.chats[0].version }] }), error => error.code === '40001');
+    await telegramHistoryAction(...args, { action: 'pause', chatId: chat, expectedVersion: history.chats[0].version });
+    history = await telegramHistoryStatus(...args);
+    assert.equal(history.chats[0].import.status, 'paused');
+    assert.equal((await telegramHistoryRecentStatus(...args, { view: 'available' })).chats.length, 0, 'paused chats remain connected');
+    psql(db, `update app.telegram_history_chats set extraction_enabled=false where id='${chat}';`);
+    await telegramHistoryAction(...args, { action: 'resume', chatId: chat, expectedVersion: history.chats[0].version });
+    history = await telegramHistoryStatus(...args);
+    assert.equal(history.chats[0].extractionEnabled, true, 'Resume continues candidate extraction too');
     psql(db, `insert into app.telegram_extraction_subjects(organization_id,owner_user_id,identity_key,draft_id,reviewed_fields) values('${org}','${AUTHZ_ID.USER_ADMIN2}','email:existing.flow@example.test','${update.id}','{}');`);
     const addProposal = headline => {
         const job = randomUUID();

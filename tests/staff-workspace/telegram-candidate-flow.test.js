@@ -173,10 +173,24 @@ test('Candidate intake has a compact chat picker and approve/edit/reject review 
     let releaseStart;
     await page.route('**/api/staff/telegram-history*', async route => {
         const req = route.request();
-        if (req.method() === 'POST') { started = req.postDataJSON(); await new Promise(resolve => { releaseStart = resolve; }); return route.fulfill({ json: { ok: true } }); }
+        if (req.method() === 'POST') {
+            const action = req.postDataJSON();
+            if (action.action === 'start') {
+                started = action; await new Promise(resolve => { releaseStart = resolve; });
+                for (const selected of action.chats) Object.assign(chats.find(chat => chat.id === selected.chatId), { selected: true, historyCompleted: true, import: { status: 'completed', errorCode: null }, version: 2 });
+            } else {
+                const chat = chats.find(chat => chat.id === action.chatId);
+                chat.import.status = action.action === 'pause' ? 'paused' : 'completed'; chat.version += 1;
+            }
+            return route.fulfill({ json: { ok: true } });
+        }
         const params = new URL(req.url()).searchParams;
-        const rows = params.get('view') === 'active' ? [] : params.get('q') ? chats.filter(chat => chat.title === params.get('q')) : params.get('after') ? chats.slice(50) : chats.slice(0,50);
-        return route.fulfill({ json: { connection: { id: 'b0000000-0000-4000-8000-000000000001', generation: 1, status: 'connected', accountUserId: '123' }, account: { id: 'c0000000-0000-4000-8000-000000000001', accountUserId: '123' }, canImport: true, blockedReason: null, discovery: { status: 'completed', jobs: [] }, totals: { chats: 60, selected: 0, messages: 0, bytes: 0, maxMessages: 100000, maxBytes: 10000000 }, chats: rows, nextCursor: params.get('after') || params.get('q') ? null : 'next-page' } });
+        const available = chats.filter(chat => !chat.selected);
+        const connected = chats.filter(chat => chat.selected);
+        const group = params.get('view') === 'connected' ? connected : available;
+        const filtered = params.get('q') ? group.filter(chat => chat.title === params.get('q')) : group;
+        const rows = params.get('view') === 'active' ? [] : params.get('after') ? filtered.slice(50) : filtered.slice(0, 50);
+        return route.fulfill({ json: { connection: { id: 'b0000000-0000-4000-8000-000000000001', generation: 1, status: 'connected', accountUserId: '123' }, account: { id: 'c0000000-0000-4000-8000-000000000001', accountUserId: '123' }, canImport: true, blockedReason: null, discovery: { status: 'completed', jobs: [] }, totals: { chats: 60, selected: connected.length, available: available.length, connected: connected.length, messages: 0, bytes: 0, maxMessages: 100000, maxBytes: 10000000 }, chats: rows, nextCursor: !params.get('after') && filtered.length > 50 ? 'next-page' : null } });
     });
     await page.goto(`${baseURL}/staff/telegram-intake/chats`);
     await expect(page.getByRole('heading', { name: 'Choose chats', exact: true })).toBeVisible();
@@ -193,7 +207,19 @@ test('Candidate intake has a compact chat picker and approve/edit/reject review 
     await expect(page.getByRole('progressbar', { name: 'Processing Telegram information' })).toBeVisible();
     releaseStart();
     await startResponse;
-    await expect(page.getByText('Select chats to start', { exact: true })).toBeVisible();
+    await expect(page.getByRole('tab', { name: 'Connected (2)', exact: true })).toHaveAttribute('aria-selected', 'true');
+    await expect(page.getByRole('checkbox')).toHaveCount(0);
+    await expect(page.getByRole('button', { name: 'Start', exact: true })).toHaveCount(0);
+    await expect(page.getByText('Synced', { exact: true })).toHaveCount(2);
+    await page.getByRole('button', { name: 'Pause Chat 1', exact: true }).click();
+    await expect(page.getByRole('button', { name: 'Resume Chat 1', exact: true })).toBeVisible();
+    await expect(page.getByText('Paused', { exact: true })).toBeVisible();
+    await page.getByRole('button', { name: 'Resume Chat 1', exact: true }).click();
+    await expect(page.getByRole('button', { name: 'Pause Chat 1', exact: true })).toBeVisible();
+    await page.getByRole('tab', { name: 'Available (58)', exact: true }).click();
+    await expect(page.getByRole('checkbox', { name: 'Select Chat 1', exact: true })).toHaveCount(0);
+    await expect(page.getByRole('checkbox', { name: 'Select Chat 2', exact: true })).toBeVisible();
+    await page.getByRole('tab', { name: 'Connected (2)', exact: true }).click();
     await expect(page.getByRole('status', { name: 'Telegram activity' })).toBeVisible();
     assert.equal(started.chats.length, 2);
     assert.deepEqual(started.chats.map(chat => chat.chatId), [chats[0].id,chats[50].id]);
