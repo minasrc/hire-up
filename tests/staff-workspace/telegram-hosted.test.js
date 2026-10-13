@@ -178,6 +178,51 @@ test('Hosted Telegram browser starts on demand, cancels setup and protects QR/pa
         await update({ status: 'connected', profile: { telegramUserId: '123456789', username: 'synthetic_recruiter', displayName: 'Synthetic Recruiter' } });
         await expect(page.getByRole('heading', { name: 'Telegram connected', exact: true })).toBeVisible();
         await expect(page.getByRole('link', { name: 'Choose chats to import', exact: true })).toHaveAttribute('href', '/staff/telegram-intake/chats');
+        // Follow the real hosted browser journey through imported source context.
+        const historyURL = `${baseURL}/api/staff/telegram-history`;
+        const historyWorker = async (action, data = {}) => {
+            const current = (await worker('claim')).connection;
+            const response = await fetch(`${baseURL}/api/telegram-history/worker/${action}`, {
+                method: 'POST', headers: { authorization: `Bearer ${workerToken}`, 'content-type': 'application/json' },
+                body: JSON.stringify({ connectionId: current.id, generation: current.generation, connectionLeaseToken: current.leaseToken, accountUserId: '123456789', ...data }),
+            });
+            assert.equal(response.status, 200, await response.clone().text()); return response.json();
+        };
+        const completePage = (job, records, nextCursor = job.cursor, done = false) => historyWorker('complete', { jobId: job.id, jobLeaseToken: job.leaseToken, pageId: randomUUID(), fromCursor: job.cursor, nextCursor, done, records });
+        const historyAction = async locator => { const response = page.waitForResponse(response => response.url() === historyURL && response.request().method() === 'POST'); await locator.click(); assert.equal((await response).status(), 200); };
+        await page.getByRole('link', { name: 'Choose chats to import', exact: true }).click();
+        await historyAction(page.getByRole('button', { name: 'Discover chats', exact: true }));
+        let dialogPageSent = false;
+        for (let pages = 0; pages < 4; pages += 1) {
+            const job = (await historyWorker('claim')).job;
+            if (!job) break;
+            assert.equal(job.kind, 'dialogs');
+            if (job.cursor.folder === 0 && !dialogPageSent) {
+                await completePage(job, [{ peer: { kind: 'user', id: '9001' }, title: 'Hosted journey chat', username: null, lastMessageAt: null }], { folder: 0, offsetDate: 1700000000, offsetId: '1', offsetPeer: { kind: 'user', id: '9001' }, excludePinned: true });
+                dialogPageSent = true;
+            } else await completePage(job, [], job.cursor, true);
+        }
+        await page.getByRole('button', { name: 'Refresh status', exact: true }).click();
+        await expect(page.getByText('Hosted journey chat', { exact: true })).toBeVisible();
+        await historyAction(page.getByRole('button', { name: 'Import full history', exact: true }));
+        let historyJob = (await historyWorker('claim')).job;
+        await completePage(historyJob, [{ messageId: '1', kind: 'message', sentAt: '2025-01-01T00:00:00Z', editedAt: null, sender: null, text: 'Synthetic hosted Solidity history', attachments: [] }], { beforeMessageId: '1', upperMessageId: '1' });
+        historyJob = (await historyWorker('claim')).job;
+        await completePage(historyJob, [], historyJob.cursor, true);
+        await page.getByRole('button', { name: 'Refresh status', exact: true }).click();
+        await expect(page.getByText(/Last progress:/)).toBeVisible();
+        await expect(page.getByText(/History reached:/)).toBeVisible();
+        await page.getByRole('link', { name: 'View conversation', exact: true }).click();
+        await expect(page.getByRole('dialog')).toContainText('Synthetic hosted Solidity history');
+        await page.getByRole('button', { name: 'Close', exact: true }).click();
+        await page.getByLabel('Message words or phrase', { exact: true }).fill('Solidity');
+        await page.getByRole('button', { name: 'Search messages', exact: true }).click();
+        await expect(page.getByRole('button', { name: 'View conversation', exact: true })).toHaveCount(1);
+        await page.getByRole('link', { name: 'Telegram chats', exact: true }).click();
+        await historyAction(page.getByRole('button', { name: 'Pause sync', exact: true }));
+        await expect(page.getByText('Sync paused', { exact: true })).toBeVisible();
+        await historyAction(page.getByRole('button', { name: 'Resume sync', exact: true }));
+        await page.getByRole('link', { name: 'Telegram connection', exact: true }).click();
         await page.getByRole('button', { name: 'Disconnect Telegram', exact: true }).click();
         await expect(page.getByRole('heading', { name: 'Waiting for Telegram to disconnect', exact: true })).toBeVisible();
         await expect(page.getByText(/To revoke access immediately, open Telegram on your phone/)).toBeVisible();
@@ -190,6 +235,27 @@ test('Hosted Telegram browser starts on demand, cancels setup and protects QR/pa
         await expect(page.getByRole('heading', { name: 'Telegram disconnected', exact: true })).toBeVisible();
         await expect(page.getByRole('button', { name: 'Connect again', exact: true })).toBeEnabled();
         assert.equal(starts, 1, 'Logout acknowledgment must not trigger automatic sign-in');
+        await page.getByRole('link', { name: 'Search imported conversations', exact: true }).click();
+        await page.getByLabel('Message words or phrase', { exact: true }).fill('Solidity');
+        await page.getByRole('button', { name: 'Search messages', exact: true }).click();
+        await expect(page.getByRole('button', { name: 'View conversation', exact: true })).toHaveCount(1);
+        await page.getByRole('link', { name: 'Telegram chats', exact: true }).click();
+        await expect(page.getByRole('heading', { name: 'Connect Telegram to import chats' })).toBeVisible();
+        await page.getByRole('link', { name: 'Telegram connection', exact: true }).click();
+        await page.getByRole('button', { name: 'Connect again', exact: true }).click();
+        await expect(page.getByRole('heading', { name: 'Preparing Telegram sign-in', exact: true })).toBeVisible();
+        task = (await worker('claim')).connection;
+        await update({ status: 'connected', profile: { telegramUserId: '123456789', username: 'synthetic_recruiter', displayName: 'Synthetic Recruiter' } });
+        await expect(page.getByRole('heading', { name: 'Telegram connected', exact: true })).toBeVisible();
+        await page.getByRole('link', { name: 'Choose chats to import', exact: true }).click();
+        await expect(page.getByText('Hosted journey chat', { exact: true })).toBeVisible();
+        await expect(page.getByRole('link', { name: 'View conversation', exact: true })).toBeVisible();
+        await page.getByRole('link', { name: 'Telegram connection', exact: true }).click();
+        await page.getByRole('button', { name: 'Disconnect Telegram', exact: true }).click();
+        await expect(page.getByRole('heading', { name: 'Waiting for Telegram to disconnect', exact: true })).toBeVisible();
+        task = (await worker('claim')).connection;
+        await update({ status: 'disconnected' });
+        await expect(page.getByRole('heading', { name: 'Telegram disconnected', exact: true })).toBeVisible();
         // The existing physical-worker account must never be silently moved.
         const registration = await context.request.post(`${baseURL}/api/staff/telegram-intake/workers`, { data: { name: 'Synthetic existing device' } });
         assert.equal(registration.status(), 201);
@@ -203,7 +269,7 @@ test('Hosted Telegram browser starts on demand, cancels setup and protects QR/pa
         await expect(page.getByRole('button', { name: 'Connect again', exact: true })).toHaveCount(0);
         await page.getByRole('button', { name: 'Cancel sign-in', exact: true }).click();
         await expect(page.getByRole('heading', { name: 'Connection cancelled', exact: true })).toBeVisible();
-        assert.equal(prepares, 2);
+        assert.equal(prepares, 3);
         await noLocalSetup();
         // Losing access removes challenge/password state and prevents provisioning.
         await page.evaluate(() => window.dispatchEvent(new Event('staff-session-invalidated')));
