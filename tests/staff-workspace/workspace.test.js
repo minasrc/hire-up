@@ -2946,6 +2946,13 @@ test('staff workspace end-to-end in a real browser', async (t) => {
             const userPage = await recovered.newPage();
             await userPage.goto(`${baseURL}/staff`, { waitUntil: 'domcontentloaded' });
             await userPage.waitForURL(/\/staff\/mfa\/enroll/, { waitUntil: 'domcontentloaded', timeout: 30_000 });
+            // Compile the enrollment API outside its response assertion budget,
+            // just as the reset API above. The delayed real response below still
+            // verifies that a slow submission consumes exactly one fresh code.
+            const warmEnroll = await fetch(`${baseURL}/api/staff/mfa/enroll`, {
+                method: 'POST', headers: { 'content-type': 'application/json' }, body: '{}',
+            });
+            assert.equal(warmEnroll.status, 401);
             const secret = psql(container, `select secret from app.totp_credentials where organization_id = '${ORG_ID}' and user_id = '${CJ_ID.USER_B_REC}' and status = 'pending'`).trim();
             let enrollmentSubmissions = 0;
             await userPage.route('**/api/staff/mfa/enroll', async route => {
