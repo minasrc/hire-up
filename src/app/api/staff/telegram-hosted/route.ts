@@ -1,5 +1,5 @@
 import { staffApiContext, staffGateResponse } from '@/lib/staff-api.server';
-import { telegramHostedPrepare, telegramHostedStatus } from '@/lib/telegram-hosted-operations';
+import { telegramHostedPrepare, telegramHostedRetire, telegramHostedStatus } from '@/lib/telegram-hosted-operations';
 import { telegramHostedConfiguration, telegramHostedFeatureResponse, telegramHostedErrorResponse, telegramHostedJson } from '@/lib/telegram-hosted-http';
 import { readTelegramJson, telegramJson, telegramOriginAllowed } from '@/lib/telegram-intake-http';
 export const runtime = 'nodejs';
@@ -10,7 +10,9 @@ async function handle(request: Request) {
     try {
         const { serviceId } = telegramHostedConfiguration();
         const args = [context.pool, context.identity, context.organizationId, serviceId] as const;
-        return telegramHostedJson(request.method === 'GET' ? await telegramHostedStatus(...args) : await telegramHostedPrepare(...args, await readTelegramJson(request, 1024)));
+        if (request.method === 'GET') return telegramHostedJson(await telegramHostedStatus(...args));
+        const input = await readTelegramJson(request, 1024);
+        return telegramHostedJson(input?.action === 'retire' ? await telegramHostedRetire(...args, input) : await telegramHostedPrepare(...args, input));
     } catch (error) { return telegramHostedErrorResponse(error); }
 }
 export const GET = handle;

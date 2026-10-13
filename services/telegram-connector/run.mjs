@@ -26,6 +26,7 @@ const output = (code) => {
     process.send({ type: 'telegram-connector-status', code }, () => {});
   }
 };
+let pendingWake = false;
 let release; let connector; let watchdog; let supervision; let forceStop; let stopping = false;
 const sleepController = new AbortController();
 const stop = () => { stopping = true; sleepController.abort(); void connector?.stop(); };
@@ -34,7 +35,7 @@ process.on('uncaughtException', () => { output('CONNECTOR_RUNTIME_FAILED'); proc
 try {
   if (Number(process.versions.node.split('.')[0]) !== 22) throw new Error('NODE_22_REQUIRED');
   if (process.env.TELEGRAM_CONNECTOR_SUPERVISED === '1') {
-    supervision = createSupervisionGuard({ onLost: () => {
+    supervision = createSupervisionGuard({ onWake: () => { pendingWake = true; connector?.wake(); }, onLost: () => {
       output('SUPERVISION_LOST'); process.exitCode = 1; stop();
       forceStop = setTimeout(() => process.exit(1), 5000);
     } });
@@ -57,7 +58,7 @@ try {
     let heartbeatAcknowledged = false;
     const host = async (action, body) => {
       const result = await connectionHost(action, body);
-      if (action === 'heartbeat' && !heartbeatAcknowledged) {
+      if (['heartbeat', 'poll'].includes(action) && !heartbeatAcknowledged) {
         heartbeatAcknowledged = true;
         output('CONNECTOR_HEARTBEAT_ACKNOWLEDGED');
       }
@@ -76,7 +77,8 @@ try {
     output('CONNECTOR_WORKERS_READY');
     const createTelegram = await createTelegramFactory(config);
     output('CONNECTOR_SDK_READY');
-    connector = createConnector({ host, vault, createTelegram, onConnectedTick: createConnectedWork({ history, cv, updates }) });
+    connector = createConnector({ host, vault, createTelegram, efficientPolling: true, cleanupEnabled: true, onConnectedTick: createConnectedWork({ history, cv, updates }) });
+    if (pendingWake) connector.wake();
     process.once('SIGINT', stop); process.once('SIGTERM', stop);
     watchdog = setInterval(() => { void connector.checkLease().catch(() => output('LEASE_CLOSED')); }, 1000);
     let failures = 0;

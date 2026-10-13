@@ -1,3 +1,4 @@
+import { validGrant } from './scheduling.mjs';
 import { performance } from 'node:perf_hooks';
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -6,7 +7,8 @@ const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 // Check both clocks: macOS suspend and a wall-clock adjustment must fail closed.
 export function createSupervisionGuard({ channel = process, wall = Date.now,
   monotonic = () => performance.now(), onLost, interval = setInterval, clear = clearInterval,
-  initialTimeoutMs = 15000 } = {}) {
+  initialTimeoutMs = 15000, onWake } = {}) {
+  let wakeEpoch = null;
   let grant = null, closed = false, timer, initialTimer;
   let resolveReady, rejectReady;
   const ready = new Promise((resolve, reject) => { resolveReady = resolve; rejectReady = reject; });
@@ -31,7 +33,7 @@ export function createSupervisionGuard({ channel = process, wall = Date.now,
   };
   const receive = message => {
     if (closed) return;
-    if (!message || message.type !== 'telegram-hosted-lease' || !UUID.test(message.leaseToken ?? '')
+    if (!validGrant(message) || message.type !== 'telegram-hosted-lease' || !UUID.test(message.leaseToken ?? '')
       || !Number.isSafeInteger(message.deadline)) { lose(); return; }
     // An expired grant cannot be resurrected by a delayed IPC renewal.
     if (grant && !check()) return;
@@ -41,6 +43,10 @@ export function createSupervisionGuard({ channel = process, wall = Date.now,
       monotonic: monotonic(), budget };
     clearTimeout(initialTimer);
     resolveReady();
+    if (message.wakeEpoch !== undefined) {
+      const changed = wakeEpoch !== message.wakeEpoch; wakeEpoch = message.wakeEpoch;
+      if (changed || Object.values(message.runnable).some(Boolean)) onWake?.();
+    }
   };
   channel.on('message', receive);
   channel.on('disconnect', lose);

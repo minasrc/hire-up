@@ -17,6 +17,8 @@ export function telegramHostedAuthorized(request, secret) {
 }
 export function telegramHostedErrorResponse(error) {
     const status = error instanceof TelegramHostedError ? error.status : ({ FORBIDDEN: 403, UNAUTHORIZED: 401, '42501': 403, '40001': 409, '23505': 409, P0002: 404, '22023': 400, '53300': 429 })[error?.code] ?? (error?.name === 'ClientJobContractError' ? 400 : 503);
+    if (error?.code === '55000') return telegramJson({ error: 'Revoke the old session in Telegram Settings → Devices before resetting this connection.', code: 'TELEGRAM_REVOCATION_REQUIRED' }, 409);
+    if (error?.code === '53300') return telegramJson({ error: 'Hosted Telegram connection capacity is reached.', code: 'HOSTED_CAPACITY' }, 429);
     return telegramJson({ error: status === 503 ? 'Hosted Telegram is temporarily unavailable.' : 'Hosted Telegram request rejected.' }, status);
 }
 export function telegramHostedJson(value) {

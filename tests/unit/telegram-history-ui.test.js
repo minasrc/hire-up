@@ -51,3 +51,9 @@ test('hosted sync guidance retains offline recovery without local device setup',
     assert.match(syncStatus({ status: 'worker_offline' }), /Mac offline/);
     assert.equal(importGuidance({ errorCode: 'PEER_CACHE_MISSING' }).includes('Mac'), false);
 });
+
+test('completed history keeps sync labels while incremental work is paused or active', () => {
+    for (const status of ['queued', 'leased', 'waiting']) assert.equal(importActions({ historyCompleted: true, selected: true, import: { status } })[0].label, 'Pause sync');
+    for (const status of ['paused', 'capacity_paused', 'failed', 'cancelled']) assert.equal(importActions({ historyCompleted: true, selected: true, import: { status } })[0].label, 'Resume sync');
+    assert.equal(importActions({ historyCompleted: false, import: { status: 'paused' } })[0].label, 'Resume import');
+});

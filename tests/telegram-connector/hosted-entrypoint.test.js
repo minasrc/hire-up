@@ -14,17 +14,20 @@ test('actual supervised connector starts SDK and acknowledges synthetic hosted h
   assert.equal(process.versions.node.split('.')[0], '22');
   const root = mkdtempSync(join(realpathSync(tmpdir()), 'connector-entrypoint-'));
   chmodSync(root, 0o700);
-  let heartbeats = 0, claims = 0;
+  let polls = 0;
   const token = 'S'.repeat(64);
   const server = createServer(async (req, res) => {
     const chunks = []; for await (const chunk of req) chunks.push(chunk);
     assert.equal(req.headers.authorization, `Bearer ${token}`);
     const body = JSON.parse(Buffer.concat(chunks));
     let response;
-    if (req.url === '/api/telegram-connection/worker/heartbeat') {
-      assert.match(body.publicKeySpki, /^[A-Za-z0-9+/]+=*$/); heartbeats++; response = { ok: true };
-    } else if (req.url === '/api/telegram-connection/worker/claim') {
-      claims++; response = { connection: null };
+    if (req.url === '/api/telegram-connection/worker/poll') {
+      assert.match(body.publicKeySpki, /^[A-Za-z0-9+/]+=*$/);
+      assert.deepEqual(Object.keys(body), ['publicKeySpki']);
+      polls++;
+      response = { protocolVersion: 1, connection: null,
+        plan: { history: false, cv: false, source: false, nativeAccount: false, nativeChannels: false },
+        nextPollAfterSeconds: 60, cleanup: null };
     } else { res.writeHead(404); res.end(); return; }
     res.writeHead(200, { 'content-type': 'application/json' }); res.end(JSON.stringify(response));
   });
@@ -60,9 +63,7 @@ test('actual supervised connector starts SDK and acknowledges synthetic hosted h
   const grant = () => { if (child.connected) child.send({ type: 'telegram-hosted-lease', leaseToken, deadline: Date.now() + 10000 }, () => {}); };
   await once(child, 'spawn'); grant(); renewal = setInterval(grant, 300);
   await ready;
-  assert.ok(heartbeats > 0); assert.ok(codes.includes('CONNECTOR_SDK_READY'));
-  const claimDeadline = Date.now() + 5000;
-  while (claims === 0 && Date.now() < claimDeadline) await new Promise(resolve => setTimeout(resolve, 25));
-  assert.ok(claims > 0);
+  assert.equal(polls, 1, 'An idle connector starts with one combined heartbeat/work poll');
+  assert.ok(codes.includes('CONNECTOR_SDK_READY'));
   assert.equal(child.exitCode, null); assert.equal(child.signalCode, null);
 });

@@ -41,3 +41,9 @@ test('hosted control uses configured service scope and exact role, rolls back fa
     assert.deepEqual(calls[1].args, [service, instanceId, leaseToken, null]);
     assert.equal(calls[2].sql, 'rollback'); assert(released);
 });
+
+test('capacity response exposes only the safe public capacity code', async () => {
+    const response = telegramHostedErrorResponse(Object.assign(new Error('private sentinel'), { code: '53300', detail: 'private detail' }));
+    assert.equal(response.status, 429);
+    assert.deepEqual(await response.json(), { error: 'Hosted Telegram connection capacity is reached.', code: 'HOSTED_CAPACITY' });
+});

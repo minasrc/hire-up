@@ -22,12 +22,13 @@ export function importGuidance(job) {
 
 export function importActions(chat) {
     const status = chat.import?.status;
+    const historyCompleted = chat.historyCompleted || status === 'completed';
     if (!status) return [{ action: 'select', selected: true, label: 'Import full history' }];
     if (chat.sync?.enabled && status === 'completed') return [{ action: 'pause', label: 'Pause sync' }, { action: 'cancel', label: 'Deselect chat' }];
-    if (activeStatuses.has(status)) return [{ action: 'pause', label: 'Pause' }, { action: 'cancel', label: 'Cancel import' }];
+    if (activeStatuses.has(status)) return [{ action: 'pause', label: historyCompleted ? 'Pause sync' : 'Pause' }, { action: 'cancel', label: historyCompleted ? 'Deselect chat' : 'Cancel import' }];
     if (pausedStatuses.has(status) || status === 'cancelled') return [
-        { action: 'resume', label: 'Resume import' },
-        ...(chat.selected ? [{ action: 'cancel', label: 'Cancel import' }] : []),
+        { action: 'resume', label: historyCompleted ? 'Resume sync' : 'Resume import' },
+        ...(chat.selected ? [{ action: 'cancel', label: historyCompleted ? 'Deselect chat' : 'Cancel import' }] : []),
     ];
     return [{ action: 'select', selected: !chat.selected, label: chat.selected ? 'Deselect chat' : 'Select chat' }];
 }

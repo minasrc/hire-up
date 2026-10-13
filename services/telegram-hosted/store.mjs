@@ -1,3 +1,4 @@
+import { eraseRetiredDirectory } from './retired-store.mjs';
 import { constants, lstatSync, fstatSync, mkdirSync, openSync, closeSync, readFileSync,
   writeFileSync, fsyncSync, linkSync, unlinkSync, existsSync, readdirSync } from 'node:fs';
 import { dirname, join, resolve, parse } from 'node:path';
@@ -79,6 +80,7 @@ export function createServiceStore(config) {
   if (savedScope.version !== 1 || savedScope.server !== scope.server || savedScope.serviceId !== scope.serviceId) throw new Error('LOCAL_SCOPE_CONFLICT');
   return {
     root,
+    eraseRetired(row) { return eraseRetiredDirectory({ workers, scope, row, privateDirectory, readPrivateJson }); },
     prepare(item, api) {
       validateRequest(item);
       const directory = privateDirectory(join(workers, item.requestId));

@@ -70,12 +70,13 @@ export function createHistoryWorker({ host, vault, now = Date.now, randomId = ra
       if (busy || !active(context)) return { status: 'stale' };
       const currentScope = `${context.connectionId}:${context.accountUserId}:${context.generation}`;
       if (scope !== currentScope) { scope = currentScope; nextPoll = 0; pageLimit = 100; limitJob = null; }
-      if (now() < nextPoll) return { status: 'idle' };
+      if (now() < nextPoll && !context.wake) return { status: 'idle' };
       busy = true;
       let job;
       try {
         const pending = loadPending(context);
         if (pending) return await reconcilePending(context, pending);
+        if (context.plan?.history === false) return { status: 'idle' };
         const response = await host('claim', proof(context));
         requireActive(context);
         job = response.job;
