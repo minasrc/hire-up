@@ -241,7 +241,7 @@ test('Telegram extraction protects recruiter edits, reviews evidence and approve
     }
     try {
         await page.goto(`${baseURL}/staff/telegram-intake/chats`);
-        await expect(page.getByRole('heading', { name: 'Connect Telegram to import chats' })).toBeVisible();
+        await expect(page.getByRole('button', { name: 'Connect Telegram', exact: true })).toBeVisible();
         await page.getByLabel('Mark Synthetic candidate conversation', { exact: true }).check();
         await waitForAction(page.getByRole('button', { name: 'Start automatic extraction', exact: true }).first(), 'setExtraction');
         await page.getByRole('link', { name: 'Extraction progress', exact: true }).click();

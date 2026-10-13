@@ -126,6 +126,8 @@ test('Hosted Telegram browser starts on demand, cancels setup and protects QR/pa
     };
     try {
         await page.goto(`${baseURL}/staff/telegram-intake/connect`);
+        await expect(page).toHaveURL(`${baseURL}/staff/telegram-intake/chats#telegram-connection`);
+        await expect(page.getByRole('heading', { name: 'Telegram', exact: true })).toBeVisible();
         await expect(page.getByText('The Telegram service is temporarily offline or unavailable. Your imported history remains available.', { exact: true })).toBeVisible();
         await expect(page.getByRole('button', { name: 'Connect Telegram', exact: true })).toBeDisabled();
         await noLocalSetup();
@@ -183,7 +185,11 @@ test('Hosted Telegram browser starts on demand, cancels setup and protects QR/pa
         await expect(page.getByText('This sign-in attempt expired. Start a new connection.', { exact: true })).toBeVisible();
         await expect(page.getByRole('button', { name: 'Retry sign-in', exact: true })).toBeEnabled();
         await expect(page.getByRole('button', { name: 'Connect again', exact: true })).toHaveCount(0);
+        const beforeRetry = page.url();
+        await expect(page.getByRole('button', { name: 'Retry sign-in', exact: true })).toHaveCount(1);
+        await expect(page.getByRole('link', { name: 'Retry sign-in', exact: true })).toHaveCount(0);
         await page.getByRole('button', { name: 'Retry sign-in', exact: true }).click();
+        assert.equal(page.url(), beforeRetry, 'Retry starts sign-in directly without navigation');
         await expect(page.getByRole('heading', { name: 'Preparing Telegram sign-in', exact: true })).toBeVisible();
         assert.equal(starts, 2, 'Only an explicit retry starts the replacement attempt');
         task = (await worker('claim')).connection;
@@ -193,13 +199,26 @@ test('Hosted Telegram browser starts on demand, cancels setup and protects QR/pa
         await update({ status: 'awaiting_password', passwordHint: 'Synthetic hint' });
         const password = page.getByLabel('Telegram two-step verification password', { exact: true });
         await expect(password).toBeVisible();
-        await page.goto(`${baseURL}/staff/telegram-intake/chats`);
+        await page.reload();
         await expect(page.getByRole('heading', { name: 'Complete Telegram two-step verification', exact: true })).toBeVisible();
         await expect(page.getByRole('button', { name: 'Discover chats', exact: true })).toBeDisabled();
-        await expect(page.getByRole('link', { name: 'Continue sign-in', exact: true })).toBeVisible();
-        await page.getByRole('link', { name: 'Continue sign-in', exact: true }).click();
+        await expect(page.getByRole('link', { name: 'Continue sign-in', exact: true })).toHaveCount(0);
+        await expect(page.getByRole('link', { name: 'Telegram connection', exact: true })).toHaveCount(0);
         await expect(password).toBeVisible();
         assert.equal(starts, 2, 'Continuing pending sign-in must reuse the existing connection');
+        // Denial from the history endpoint clears both controllers. An explicit
+        // retry must recover the same pending challenge, with no retained secret.
+        await password.fill('synthetic discarded secret');
+        const historyReadPattern = '**/api/staff/telegram-history?*';
+        await page.route(historyReadPattern, route => route.fulfill({ status: 428, contentType: 'application/json', body: '{}' }));
+        await page.getByRole('button', { name: 'Refresh status', exact: true }).click();
+        await expect(password).toHaveCount(0);
+        await expect(page.getByRole('button', { name: 'Discover chats', exact: true })).toBeDisabled();
+        await page.unroute(historyReadPattern);
+        await page.getByRole('button', { name: 'Retry status', exact: true }).click();
+        await expect(password).toBeVisible();
+        await expect(password).toHaveValue('');
+        assert.equal(starts, 2, 'Access recovery must not start a new Telegram connection');
         await password.fill('synthetic hosted secret');
         const submission = page.waitForResponse(response => response.url() === connectionURL && response.request().postDataJSON()?.action === 'password');
         await page.getByRole('button', { name: 'Continue securely', exact: true }).click();
@@ -214,7 +233,8 @@ test('Hosted Telegram browser starts on demand, cancels setup and protects QR/pa
         task = (await worker('claim')).connection;
         await update({ status: 'connected', profile: { telegramUserId: '123456789', username: 'synthetic_recruiter', displayName: 'Synthetic Recruiter' } });
         await expect(page.getByRole('heading', { name: 'Telegram connected', exact: true })).toBeVisible();
-        await expect(page.getByRole('link', { name: 'Choose chats to import', exact: true })).toHaveAttribute('href', '/staff/telegram-intake/chats');
+        await expect(page.getByRole('button', { name: 'Discover chats', exact: true })).toBeEnabled();
+        await expect(page.getByRole('button', { name: 'Choose chats to import', exact: true })).toBeEnabled();
         // Follow the real hosted browser journey through imported source context.
         const historyURL = `${baseURL}/api/staff/telegram-history`;
         const historyWorker = async (action, data = {}) => {
@@ -227,7 +247,9 @@ test('Hosted Telegram browser starts on demand, cancels setup and protects QR/pa
         };
         const completePage = (job, records, nextCursor = job.cursor, done = false) => historyWorker('complete', { jobId: job.id, jobLeaseToken: job.leaseToken, pageId: randomUUID(), fromCursor: job.cursor, nextCursor, done, records });
         const historyAction = async locator => { const response = page.waitForResponse(response => response.url() === historyURL && response.request().method() === 'POST'); await locator.click(); assert.equal((await response).status(), 200); };
-        await page.getByRole('link', { name: 'Choose chats to import', exact: true }).click();
+        const beforeChooseChats = page.url();
+        await page.getByRole('button', { name: 'Choose chats to import', exact: true }).click();
+        assert.equal(page.url(), beforeChooseChats, 'Choosing chats stays on the sign-in page');
         await historyAction(page.getByRole('button', { name: 'Discover chats', exact: true }));
         let dialogPageSent = false;
         for (let pages = 0; pages < 4; pages += 1) {
@@ -260,7 +282,6 @@ test('Hosted Telegram browser starts on demand, cancels setup and protects QR/pa
         await historyAction(page.getByRole('button', { name: 'Pause sync', exact: true }));
         await expect(page.getByText('Sync paused', { exact: true })).toBeVisible();
         await historyAction(page.getByRole('button', { name: 'Resume sync', exact: true }));
-        await page.getByRole('link', { name: 'Telegram connection', exact: true }).click();
         await page.getByRole('button', { name: 'Disconnect Telegram', exact: true }).click();
         await expect(page.getByRole('heading', { name: 'Waiting for Telegram to disconnect', exact: true })).toBeVisible();
         await expect(page.getByText(/To revoke access immediately, open Telegram on your phone/)).toBeVisible();
@@ -278,17 +299,15 @@ test('Hosted Telegram browser starts on demand, cancels setup and protects QR/pa
         await page.getByRole('button', { name: 'Search messages', exact: true }).click();
         await expect(page.getByRole('button', { name: 'View conversation', exact: true })).toHaveCount(1);
         await page.getByRole('link', { name: 'Telegram chats', exact: true }).click();
-        await expect(page.getByRole('heading', { name: 'Connect Telegram to import chats' })).toBeVisible();
-        await page.getByRole('link', { name: 'Telegram connection', exact: true }).click();
+        await expect(page.getByRole('button', { name: 'Connect Telegram', exact: true })).toBeEnabled();
         await page.getByRole('button', { name: 'Connect Telegram', exact: true }).click();
         await expect(page.getByRole('heading', { name: 'Preparing Telegram sign-in', exact: true })).toBeVisible();
         task = (await worker('claim')).connection;
         await update({ status: 'connected', profile: { telegramUserId: '123456789', username: 'synthetic_recruiter', displayName: 'Synthetic Recruiter' } });
         await expect(page.getByRole('heading', { name: 'Telegram connected', exact: true })).toBeVisible();
-        await page.getByRole('link', { name: 'Choose chats to import', exact: true }).click();
+        await page.getByRole('button', { name: 'Choose chats to import', exact: true }).click();
         await expect(page.getByText('Hosted journey chat', { exact: true })).toBeVisible();
         await expect(page.getByRole('link', { name: 'View conversation', exact: true })).toBeVisible();
-        await page.getByRole('link', { name: 'Telegram connection', exact: true }).click();
         await page.getByRole('button', { name: 'Disconnect Telegram', exact: true }).click();
         await expect(page.getByRole('heading', { name: 'Waiting for Telegram to disconnect', exact: true })).toBeVisible();
         task = (await worker('claim')).connection;
@@ -344,9 +363,11 @@ test('Hosted Telegram browser starts on demand, cancels setup and protects QR/pa
         await expect(page.getByText('You confirmed the old session was revoked in Telegram Settings → Devices. The service registration has been retired; imported history remains available.',{exact:true})).toBeVisible();
         // Losing access removes challenge/password state and prevents provisioning.
         await page.evaluate(() => window.dispatchEvent(new Event('staff-session-invalidated')));
-        await expect(page.getByRole('button', { name: 'Connect Telegram', exact: true })).toBeDisabled();
+        await expect(page.getByRole('button', { name: 'Connect Telegram', exact: true })).toHaveCount(0);
         await expect(page.getByRole('img', { name: 'Telegram sign-in QR code', exact: true })).toHaveCount(0);
         await expect(password).toHaveCount(0);
+        await expect(page.getByText('Hosted journey chat', { exact: true })).toHaveCount(0);
+        await expect(page.getByRole('button', { name: 'Discover chats', exact: true })).toBeDisabled();
         assert.deepEqual(pageErrors, []);
         mkdirSync(join(root, 'test-results'), { recursive: true });
         await page.screenshot({ path: join(root, 'test-results/staff-workspace-telegram-hosted.png'), fullPage: true });

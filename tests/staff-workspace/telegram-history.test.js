@@ -155,13 +155,17 @@ test('Telegram history UI discovers, selects and resumes private full-history im
         await telegramNav.click();
         await expect(page).toHaveURL(`${baseURL}/staff/telegram-intake/chats`);
         await expect(telegramNav).toHaveAttribute('aria-current', 'page');
-        await page.getByRole('link', { name: 'Telegram connection', exact: true }).click();
-        await expect(page.getByRole('heading', { name: 'Connect Telegram', exact: true })).toBeVisible();
+        await expect(page.getByRole('heading', { name: 'Telegram connected', exact: true })).toBeVisible();
         await expect(telegramNav).toHaveAttribute('aria-current', 'page');
         await telegramNav.click();
         await page.getByRole('link', { name: 'Search conversations', exact: true }).click();
         await expect(page.getByRole('heading', { name: 'Search conversations', exact: true })).toBeVisible();
         await expect(telegramNav).toHaveAttribute('aria-current', 'page');
+        const telegramBreadcrumb = page.getByRole('navigation', { name: 'Breadcrumb', exact: true }).getByRole('link', { name: 'Telegram', exact: true });
+        await expect(telegramBreadcrumb).toHaveAttribute('href', '/staff/telegram-intake/chats');
+        await telegramBreadcrumb.click();
+        await expect(page).toHaveURL(`${baseURL}/staff/telegram-intake/chats`);
+        await expect(page.getByRole('heading', { name: 'Telegram', exact: true })).toBeVisible();
         await page.setViewportSize({ width: 390, height: 844 });
         await page.getByRole('button', { name: 'Open navigation', exact: true }).click();
         const mobileNavigation = page.getByRole('dialog', { name: 'Navigation', exact: true });
@@ -169,7 +173,7 @@ test('Telegram history UI discovers, selects and resumes private full-history im
         await expect(mobileNavigation).toBeHidden();
         await expect(page).toHaveURL(`${baseURL}/staff/telegram-intake/chats`);
         await page.setViewportSize({ width: 1280, height: 720 });
-        await expect(page.getByRole('heading', { name: 'Telegram chats', exact: true })).toBeVisible();
+        await expect(page.getByRole('heading', { name: 'Telegram', exact: true })).toBeVisible();
         await clickAction(page.getByRole('button', { name: 'Discover chats', exact: true }));
         await expect(page.getByText(/Discovering chats in the background/)).toBeVisible();
         const dialogs = Array.from({ length: 55 }, (_, index) => ({
@@ -296,7 +300,7 @@ test('Telegram history UI discovers, selects and resumes private full-history im
 
         await disconnectAccount();
         await refresh();
-        await expect(page.getByRole('heading', { name: 'Connect Telegram to import chats' })).toBeVisible();
+        await expect(page.getByRole('button', { name: 'Connect Telegram', exact: true })).toBeVisible();
         await expect(page.getByText('4 messages stored', { exact: true })).toBeVisible();
         await expect(page.getByRole('link', { name: 'View conversation', exact: true })).toHaveAttribute('href', /\/staff\/telegram-intake\/context\?chatId=[0-9a-f-]+$/);
         await expect(page.getByRole('button', { name: 'Deselect chat', exact: true })).toBeDisabled();
