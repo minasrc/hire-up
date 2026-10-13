@@ -1,8 +1,9 @@
 import { spawn } from 'node:child_process';
 import { createHash, randomUUID } from 'node:crypto';
-import { readFileSync, readdirSync } from 'node:fs';
+import { readFileSync, readdirSync, mkdtempSync, writeFileSync, rmSync } from 'node:fs';
 import { createServer } from 'node:http';
 import { join } from 'node:path';
+import { tmpdir } from 'node:os';
 import { fileURLToPath } from 'node:url';
 import { encode } from 'next-auth/jwt';
 
@@ -22,8 +23,10 @@ import {
 import { createSyntheticDocx, createSyntheticPdf } from '../tests/support/cv-fixtures.js';
 import { STAFF_MFA_COOKIE, createStaffMfaProof } from '../src/lib/staff-mfa-cookie.js';
 
+import { verifyProxyModel, providerBaseUrl, providerTokenFile } from './telegram-proxy.mjs';
 import { seedTelegramDemo } from './telegram-demo-fixture.mjs';
 
+const telegramAI = process.env.STAFF_TELEGRAM_AI === '1';
 const telegramDemo = process.env.STAFF_TELEGRAM_FIXTURE === '1';
 const root = fileURLToPath(new URL('../', import.meta.url));
 const migrations = [
@@ -72,14 +75,21 @@ async function waitForServer(url) {
 
 async function main() {
     assertLocalTestEnvironment();
+    if (telegramAI) await verifyProxyModel();
     const db = await startPostgresContainer('staffpreview', POSTGRES_17_IMAGE, {
         publish: true,
     });
     let next;
     let storage;
     let entry;
+    let extraction;
+    let extractionDirectory;
+    let sampleImportTimer;
     const cleanup = () => {
         next?.kill('SIGTERM');
+        extraction?.kill('SIGTERM');
+        clearInterval(sampleImportTimer);
+        if (extractionDirectory) rmSync(extractionDirectory, { recursive: true, force: true });
         storage?.closeAllConnections();
         storage?.close();
         entry?.closeAllConnections();
@@ -93,7 +103,16 @@ async function main() {
         }
         const password = installStaffFixture(db);
         psql(db, clientJobFixtureSql);
-        if (telegramDemo) await seedTelegramDemo(db, password);
+        const demo = telegramDemo ? await seedTelegramDemo(db, password, { liveExtraction: telegramAI }) : null;
+        if (telegramAI) {
+            psql(db, 'grant app_telegram_worker to agora_authz_test;');
+            // In this demo, sample messages are already imported. Complete only
+            // their synthetic history jobs; candidate extraction uses the real API.
+            sampleImportTimer = setInterval(() => {
+                psql(db, `update app.telegram_history_jobs set status='completed' where kind='history' and status='queued';
+                    update app.telegram_history_chats set history_completed=true,next_sync_at=now()+interval '1 hour' where selected and not history_completed;`);
+            }, 2000);
+        }
         const jobDocument = JSON.stringify({ type: 'doc', content: [
             { type: 'heading', attrs: { level: 2 }, content: [
                 { type: 'text', text: 'The role' },
@@ -200,6 +219,8 @@ async function main() {
                     NODE_OPTIONS: `--require ${join(root, 'tests', 'staff-workspace', 'google-token-preload.cjs')}`,
                     STAFF_DATABASE_URL: `postgresql://agora_authz_test:${password}@127.0.0.1:${publishedPort(db, 5432)}/postgres`,
                     TELEGRAM_INTAKE_ENABLED: telegramDemo ? '1' : '',
+                    TELEGRAM_EXTRACTION_CONTEXT_ENABLED: telegramAI ? 'true' : '',
+                    TELEGRAM_WORKER_DATABASE_URL: telegramAI ? `postgresql://agora_authz_test:${password}@127.0.0.1:${publishedPort(db, 5432)}/postgres` : '',
                     STAFF_ORGANIZATION_ID: AUTHZ_ID.ORG_B,
                     NEXTAUTH_URL: baseURL, NEXTAUTH_SECRET: secret,
                     GOOGLE_CLIENT_ID: 'synthetic-workspace-client',
@@ -211,6 +232,15 @@ async function main() {
                 stdio: 'inherit',
             });
         await waitForServer(`${baseURL}/dev/duplicate-review`);
+        if (telegramAI) {
+            extractionDirectory = mkdtempSync(join(tmpdir(), 'telegram-ai-demo-'));
+            const workerTokenFile = join(extractionDirectory, 'worker.token');
+            writeFileSync(workerTokenFile, demo.workerToken + '\n', { mode: 0o600 });
+            const workerConfig = join(extractionDirectory, 'config.json');
+            writeFileSync(workerConfig, JSON.stringify({ serverUrl: baseURL, workerTokenFile, providerBaseUrl, providerModel: await verifyProxyModel(), providerTokenFile, stateDirectory: join(extractionDirectory, 'state') }), { mode: 0o600 });
+            extraction = spawn(process.execPath, [join(root, 'services/telegram-extraction-worker/cli.mjs'), '--config', workerConfig], { cwd: root, stdio: 'inherit' });
+            extraction.once('exit', code => { if (code) console.error('Extraction worker stopped. Check proxy sign-in and restart the demo.'); });
+        }
         const token = await encode({ token: {
             name: 'Admin Two', email: 'admin-two@synthetic.test',
             sub: '1002', provider: 'google', providerAccountId: '1002',
@@ -233,7 +263,7 @@ async function main() {
         });
         const entryPort = await listen(entry, Number(process.env.STAFF_FIXTURE_PORT || 3013));
         console.log(`\nOpen http://127.0.0.1:${entryPort}/ to try the staff preview with synthetic data.`);
-        if (telegramDemo) console.log('Telegram demo: sample chats and proposals. Live importing and ranked search require configured workers.');
+        if (telegramDemo) console.log(telegramAI ? 'AI demo: select sample chats and click Start. Candidate proposals are generated through CLIProxyAPI using GPT-6 Luna.' : 'Telegram demo: sample chats and proposals. Live importing and ranked search require configured workers.');
         console.log('Ctrl+C removes the temporary database.');
         await new Promise((resolve) => {
             process.once('SIGINT', resolve);

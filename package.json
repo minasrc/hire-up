@@ -43,7 +43,13 @@
     "test:telegram-context": "node --test --test-concurrency=1 tests/database/telegram-context.test.js tests/database/telegram-candidate-context.test.js tests/staff-workspace/telegram-context.test.js",
     "test:telegram-source-updates": "node --test --test-concurrency=1 tests/database/telegram-source-updates-runtime.test.js tests/database/telegram-source-refresh-runtime.test.js tests/database/telegram-native-account-runtime.test.js tests/database/telegram-native-channel-runtime.test.js",
     "test:telegram-context-eval": "node tests/evals/telegram-context/run.mjs",
-    "dev:telegram-fixture": "STAFF_TELEGRAM_FIXTURE=1 node scripts/dev-staff-fixture.mjs"
+    "dev:telegram-fixture": "STAFF_TELEGRAM_FIXTURE=1 node scripts/dev-staff-fixture.mjs",
+    "proxy:setup": "node scripts/telegram-proxy.mjs setup",
+    "proxy:start": "node scripts/telegram-proxy.mjs start",
+    "proxy:login": "node scripts/telegram-proxy.mjs login",
+    "proxy:check": "node scripts/telegram-proxy.mjs check",
+    "dev:telegram-ai": "STAFF_TELEGRAM_FIXTURE=1 STAFF_TELEGRAM_AI=1 node scripts/dev-staff-fixture.mjs",
+    "telegram:extract": "node scripts/telegram-extraction.mjs"
   },
   "dependencies": {
     "@heroui/accordion": "^2.2.25",

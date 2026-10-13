@@ -22,3 +22,9 @@ Node 22: `npm run typecheck`. Focused database and browser checks: `node --test 
 With Node 22 and Docker Desktop running, run `npm run dev:telegram-fixture` from this checkout and open `http://127.0.0.1:3013/`. The launcher signs you into a disposable workspace with sample chats, new candidate proposals, and an existing candidate update. Approve, edit, reject, and manual matching use the real database operations. Stop the launcher with Ctrl+C to remove its temporary database; restarting resets the sample data.
 
 The demo does not sign into a real Telegram account, process live messages, or run an embedding worker. Live import and ranked search require the existing configured workers.
+
+## Live extraction demo
+
+`npm run proxy:setup` installs the pinned, checksum-verified CLIProxyAPI release. `npm run proxy:login` authorizes model access, and `npm run proxy:start` keeps the loopback backend running. `npm run proxy:check` checks GPT-6 Luna availability. Then run `npm run dev:telegram-ai` and open `http://127.0.0.1:3013/`. Select the sample chats and press Start: the real extraction worker sends their synthetic messages to GPT-6 Luna and new proposals appear as each batch completes.
+
+The review page uses an inline candidate list and detail pane with independent scrolling. Background arrivals refresh the list without resetting open profile edits.
