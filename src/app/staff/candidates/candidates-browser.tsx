@@ -1,5 +1,7 @@
 'use client';
 
+import { staffWorkspaceUrl } from '@/lib/staff-workspace-fetch';
+
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { FileText, Search, X } from 'lucide-react';
@@ -116,7 +118,7 @@ export function CandidatesBrowser({
                     <CandidateUploadDialog
                         options={profileOptions}
                         onCreated={(candidateId) =>
-                            router.push(`/staff/candidates/${candidateId}`)}
+                            router.push(staffWorkspaceUrl(`/staff/candidates/${candidateId}`))}
                     />
                 ) : null}
             </div>

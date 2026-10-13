@@ -19,9 +19,10 @@ function subject(kind, respond) {
     const navigation = [], requests = [], events = [], states = [];
     const recovery = createStaffAuthRecovery((type, detail) => events.push({ type, detail }));
     const mutation = {};
+    const request = async (url, options) => { requests.push({ url, body: JSON.parse(options.body) }); return respond(); };
     runInNewContext(mutationCode, { exports: mutation, Error, Event, CustomEvent,
-        require: name => { assert.equal(name, './staff-auth-recovery'); return { staffAuthRecovery: recovery }; },
-        fetch: async (url, options) => { requests.push({ url, body: JSON.parse(options.body) }); return respond(); },
+        require: name => { if (name === '@/lib/staff-workspace-fetch') return { staffWorkspaceFetch: request }; assert.equal(name, './staff-auth-recovery'); return { staffAuthRecovery: recovery }; },
+        fetch: request,
         window: { dispatchEvent: event => events.push(event) },
     });
     const components = names => Object.fromEntries(names.map(name => [name, name]));
@@ -42,6 +43,7 @@ function subject(kind, respond) {
         '@/lib/client-job-contracts.js': contracts,
         '@/lib/client-form-errors.js': { mapClientFieldErrors },
         '@/lib/staff-mutation': mutation,
+        '@/lib/staff-workspace-fetch': { staffWorkspaceUrl: href => href, refreshStaffWorkspace: router => router.refresh() },
     };
     const exports = {};
     runInNewContext(formCode, { exports, Error,

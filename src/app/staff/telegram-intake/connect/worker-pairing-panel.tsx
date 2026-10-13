@@ -1,5 +1,7 @@
 'use client';
 
+import { staffWorkspaceFetch } from '@/lib/staff-workspace-fetch';
+
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { Button } from '@/components/staff-ui/button';
 import { Card } from '@/components/staff-ui/card';
@@ -22,7 +24,7 @@ class PairingFailure extends Error {
     constructor(public status: number, public code: string, public retryAfterSeconds?: number) { super(pairingError(code, retryAfterSeconds)); }
 }
 async function request(url: string, init?: RequestInit) {
-    const response = await fetch(url, { cache: 'no-store', ...init });
+    const response = await staffWorkspaceFetch(url, { cache: 'no-store', ...init });
     const body = await response.json().catch(() => ({}));
     if (!response.ok) throw new PairingFailure(response.status, body.code ?? (response.status === 401 ? 'UNAUTHORIZED' : response.status === 403 ? 'FORBIDDEN' : ''), body.retryAfterSeconds);
     return body;

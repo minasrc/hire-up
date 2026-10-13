@@ -1,4 +1,6 @@
 'use client';
+
+import { staffWorkspaceFetch } from '@/lib/staff-workspace-fetch';
 import { useEffect, useRef, useState } from 'react';
 import { Badge } from '@/components/staff-ui/badge';
 import { Button } from '@/components/staff-ui/button';
@@ -39,7 +41,7 @@ export function CvAnalysisReview({ draft, dirty, busy, conflict, onDraft, onBusy
                 setSnapshot(result.documentRevision === draft.documentRevision ? result : null);
                 const fingerprint = JSON.stringify([result.documentRevision, result.analysisReviewRequired, result.current, result.proposals.map(item => item.id)]);
                 if (fingerprint !== latestFingerprint.current && !callbacks.current.busy && !callbacks.current.conflict) {
-                    const response = await fetch(`/api/staff/telegram-intake/drafts/${draft.id}`, { cache: 'no-store', signal: controller.signal });
+                    const response = await staffWorkspaceFetch(`/api/staff/telegram-intake/drafts/${draft.id}`, { cache: 'no-store', signal: controller.signal });
                     const body = await response.json(); if (!response.ok) throw new AnalysisError(response.status);
                     if (!stopped && !controller.signal.aborted && !callbacks.current.busy && !callbacks.current.conflict) { callbacks.current.onDraft(body.result ?? body); latestFingerprint.current = fingerprint; }
                 }

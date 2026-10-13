@@ -52,6 +52,7 @@ test('background authors remain their actual authors and context attachments do 
 test('real extraction access handling clears snapshots on MFA and permission loss, while feature-off stays local', async () => {
     const apiSource = readFileSync(new URL('../../src/app/staff/telegram-intake/extraction/extraction-api.ts', import.meta.url), 'utf8');
     const apiCompiled = ts.transpileModule(apiSource, { compilerOptions: { module: ts.ModuleKind.ESNext, target: ts.ScriptTarget.ES2022 } }).outputText
+        .replace("'@/lib/staff-workspace-fetch'", JSON.stringify(new URL('../../src/lib/staff-workspace-fetch.js', import.meta.url).href))
         .replace("'@/lib/staff-auth-recovery'", JSON.stringify(new URL('../../src/lib/staff-auth-recovery.js', import.meta.url).href))
         .replace("'./private-snapshot-guard'", JSON.stringify(new URL('../../src/app/staff/telegram-intake/extraction/private-snapshot-guard.js', import.meta.url).href));
     const { ExtractionError, extractionAccessLost } = await import(`data:text/javascript;base64,${Buffer.from(apiCompiled).toString('base64')}`);

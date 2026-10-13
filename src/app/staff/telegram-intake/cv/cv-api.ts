@@ -1,3 +1,4 @@
+import { staffWorkspaceFetch } from '@/lib/staff-workspace-fetch';
 export const cvEndpoint = '/api/staff/telegram-cv';
 export class CvRequestError extends Error {
     constructor(public status: number) {
@@ -9,7 +10,7 @@ export class CvRequestError extends Error {
     }
 }
 export async function cvRequest(url: string, init?: RequestInit) {
-    const response = await fetch(url, { cache: 'no-store', ...init });
+    const response = await staffWorkspaceFetch(url, { cache: 'no-store', ...init });
     const body = await response.json().catch(() => null);
     if (!response.ok || !body) throw new CvRequestError(response.status || 503);
     return body;

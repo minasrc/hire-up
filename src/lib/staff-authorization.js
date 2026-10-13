@@ -22,6 +22,7 @@ const KNOWN_PERMISSION_KEYS = new Set([
     'privacy.manage',
     'roles.manage',
     'staff.manage',
+    'workspaces.create',
 ]);
 
 // Static commands use one simple-protocol exchange. Keep untrusted values in

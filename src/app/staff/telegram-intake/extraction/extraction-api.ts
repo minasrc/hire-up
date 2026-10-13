@@ -1,3 +1,4 @@
+import { staffWorkspaceFetch } from '@/lib/staff-workspace-fetch';
 import { privateAccessDenied } from './private-snapshot-guard';
 import { staffAuthRecovery } from '@/lib/staff-auth-recovery';
 export const extractionEndpoint = '/api/staff/telegram-extraction';
@@ -12,7 +13,7 @@ export class ExtractionError extends Error {
     }
 }
 export async function extractionRequest(url = extractionEndpoint, init?: RequestInit) {
-    const response = await fetch(url, { cache: 'no-store', ...init });
+    const response = await staffWorkspaceFetch(url, { cache: 'no-store', ...init });
     const body = await response.json().catch(() => null);
     if (!response.ok) throw new ExtractionError(response.status, body?.fieldErrors ?? body?.fields);
     if (!body) throw new ExtractionError(503);

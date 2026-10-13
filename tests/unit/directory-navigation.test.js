@@ -28,6 +28,7 @@ function setup() {
         hasAttribute(name) { return this.attributes.includes(name); }
     }
     const imports = {
+        '@/lib/staff-workspace-fetch': { staffWorkspaceUrl: href => href },
         react: {
             useEffect: (effect) => effects.push(effect),
             useRef: (current) => ({ current }),

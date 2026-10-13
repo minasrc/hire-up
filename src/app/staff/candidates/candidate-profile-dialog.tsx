@@ -1,5 +1,7 @@
 'use client';
 
+import { staffWorkspaceFetch } from '@/lib/staff-workspace-fetch';
+
 import { useRef, useState, type ReactNode } from 'react';
 import Link from 'next/link';
 import { Pencil, Plus } from 'lucide-react';
@@ -195,7 +197,7 @@ export function CandidateProfileDialog({
                 throw caught;
             }
             const response = mode === 'create'
-                ? await fetch('/api/staff/candidates', {
+                ? await staffWorkspaceFetch('/api/staff/candidates', {
                     method: 'POST',
                     headers: { 'content-type': 'application/json' },
                     body: JSON.stringify({
@@ -204,7 +206,7 @@ export function CandidateProfileDialog({
                         operationId: operationIdRef.current,
                     }),
                 })
-                : await fetch(
+                : await staffWorkspaceFetch(
                     `/api/staff/candidates/${encodeURIComponent(targetId ?? '')}`,
                     {
                         method: 'PATCH',

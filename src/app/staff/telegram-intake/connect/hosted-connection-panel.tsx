@@ -1,5 +1,7 @@
 'use client';
 
+import { staffWorkspaceFetch } from '@/lib/staff-workspace-fetch';
+
 import { useCallback, useEffect, useRef, useState, type MutableRefObject } from 'react';
 import Link from 'next/link';
 import { Cloud, RefreshCw } from 'lucide-react';
@@ -46,7 +48,7 @@ export function HostedConnectionPanel({ connection, loaded, disabled, attemptRef
     const blocked = connection && connection.status !== 'disconnected' && connection.workerId !== status?.workerId;
 
     const request = useCallback(async (signal: AbortSignal, prepare = false) => {
-        const response = await fetch(endpoint, { cache: 'no-store', signal: AbortSignal.any([signal, AbortSignal.timeout(15000)]),
+        const response = await staffWorkspaceFetch(endpoint, { cache: 'no-store', signal: AbortSignal.any([signal, AbortSignal.timeout(15000)]),
             ...(prepare ? { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ action: 'prepare' }) } : {}),
         });
         signal.throwIfAborted();

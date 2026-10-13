@@ -1,5 +1,7 @@
 'use client';
 
+import { staffWorkspaceFetch, refreshStaffWorkspace } from '@/lib/staff-workspace-fetch';
+
 import { useState, useTransition } from 'react';
 import Link from 'next/link';
 import { usePathname, useRouter, useSearchParams } from 'next/navigation';
@@ -158,7 +160,7 @@ function StageSelect({
         setPending(true);
         setError('');
         try {
-            const response = await fetch('/api/staff/applications', {
+            const response = await staffWorkspaceFetch('/api/staff/applications', {
                 method: 'POST',
                 headers: { 'content-type': 'application/json' },
                 body: JSON.stringify({
@@ -179,7 +181,7 @@ function StageSelect({
                 window.dispatchEvent(new CustomEvent('staff-workspace-updated', {
                     detail: { scope: 'workspace' },
                 }));
-                startTransition(() => router.refresh());
+                startTransition(() => refreshStaffWorkspace(router));
             }
         } catch {
             setError('Stage change failed.');
@@ -234,7 +236,7 @@ function NoteComposer({ candidateId }: { candidateId: string }) {
         setPending(true);
         setMessage('');
         try {
-            const response = await fetch('/api/staff/candidates', {
+            const response = await staffWorkspaceFetch('/api/staff/candidates', {
                 method: 'POST',
                 headers: { 'content-type': 'application/json' },
                 body: JSON.stringify({
@@ -251,7 +253,7 @@ function NoteComposer({ candidateId }: { candidateId: string }) {
                 window.dispatchEvent(new CustomEvent('staff-workspace-updated', {
                     detail: { scope: 'workspace' },
                 }));
-                startTransition(() => router.refresh());
+                startTransition(() => refreshStaffWorkspace(router));
             }
         } catch {
             setMessage('Note could not be saved.');
@@ -309,7 +311,7 @@ export function CandidateDetail({
             || typeof profile.candidate.version !== 'string'
             || !/^[1-9][0-9]{0,18}$/.test(profile.candidate.version)
             || !Array.isArray(profile.identifiers)) {
-            router.refresh();
+            refreshStaffWorkspace(router);
             return;
         }
         setSavedProfile(current => current && current.candidate.candidateId === candidateId

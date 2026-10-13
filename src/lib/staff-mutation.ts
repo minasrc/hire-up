@@ -1,5 +1,7 @@
 'use client';
 
+import { staffWorkspaceFetch } from '@/lib/staff-workspace-fetch';
+
 import { staffAuthRecovery } from './staff-auth-recovery';
 
 export class StaffMutationError extends Error {
@@ -33,7 +35,7 @@ const stringFieldErrors = (payload: unknown): Record<string, string> => {
 
 export async function staffMutation(url: string, body: unknown) {
     const epoch = staffAuthRecovery.requestEpoch();
-    const response = await fetch(url, {
+    const response = await staffWorkspaceFetch(url, {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify(body),

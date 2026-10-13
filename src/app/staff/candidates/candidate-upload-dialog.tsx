@@ -1,5 +1,7 @@
 'use client';
 
+import { staffWorkspaceFetch } from '@/lib/staff-workspace-fetch';
+
 import { useEffect, useRef, useState, type FormEvent } from 'react';
 import Link from 'next/link';
 import { Plus, Trash2, Upload } from 'lucide-react';
@@ -78,7 +80,7 @@ function UploadForm({ options, onCreated, onClose }: {
             }));
             body.set('cvFile', file, file.name);
             body.set('operationId', operation.current);
-            const response = await fetch('/api/staff/candidates/upload', { method: 'POST', body });
+            const response = await staffWorkspaceFetch('/api/staff/candidates/upload', { method: 'POST', body });
             const payload = await response.json().catch(() => null);
             if (response.status === 409 && payload?.code === 'DUPLICATE_CANDIDATE' && isUuid(payload.candidateId)) {
                 setDuplicate(payload.candidateId);

@@ -19,7 +19,7 @@ const load = (respond) => {
         },
     ).outputText, {
         exports,
-        require: () => ({ staffAuthRecovery: createStaffAuthRecovery((name, detail) => dispatched.push(new CustomEvent(name, { detail }))) }),
+        require: name => name === '@/lib/staff-workspace-fetch' ? { staffWorkspaceFetch: respond } : ({ staffAuthRecovery: createStaffAuthRecovery((name, detail) => dispatched.push(new CustomEvent(name, { detail }))) }),
         fetch: respond,
         window: { dispatchEvent: (event) => dispatched.push(event) },
         Event,

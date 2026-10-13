@@ -13,11 +13,14 @@ export async function readStaffAccess(pool, identity, organizationId) {
                  left join lateral app.totp_status_v1() t on true`,
             );
             const row = rows[0];
+            const workspaceName = process.env.STAFF_MULTI_WORKSPACE_ENABLED === '1'
+                ? (await client.query('select app.staff_workspace_name_v1() name')).rows[0]?.name : null;
             return {
                 principal: {
                     user_id: principal.userId,
                     membership_id: principal.membershipId,
                     role_id: principal.roleId,
+                    workspace_name: workspaceName,
                     time_zone: row?.time_zone ?? null,
                     time_zone_version: row?.time_zone_version ?? '0',
                 },

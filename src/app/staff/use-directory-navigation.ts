@@ -1,5 +1,7 @@
 'use client';
 
+import { staffWorkspaceUrl } from '@/lib/staff-workspace-fetch';
+
 import { useEffect, useRef, useState, useTransition } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 
@@ -72,7 +74,7 @@ export function useDirectoryNavigation<T>(
             timer.current = null;
             setScheduled(false);
             startTransition(() => {
-                router.replace(`${path}${query ? `?${query}` : ''}`, { scroll: false });
+                router.replace(staffWorkspaceUrl(`${path}${query ? `?${query}` : ''}`), { scroll: false });
             });
         };
         if (debounce) timer.current = setTimeout(navigate, 300);

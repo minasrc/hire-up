@@ -1,5 +1,7 @@
 'use client';
 
+import { refreshStaffWorkspace } from '@/lib/staff-workspace-fetch';
+
 import { useRouter } from 'next/navigation';
 import { useTransition } from 'react';
 
@@ -15,7 +17,7 @@ export function SummaryRetry() {
             disabled={pending}
             onClick={() =>
                 startTransition(() => {
-                    router.refresh();
+                    refreshStaffWorkspace(router);
                     window.dispatchEvent(new Event('staff-workspace-updated'));
                 })
             }

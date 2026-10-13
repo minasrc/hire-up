@@ -1,5 +1,7 @@
 'use client';
 
+import { staffWorkspaceFetch } from '@/lib/staff-workspace-fetch';
+
 import { createStaffRefresh } from '@/lib/staff-refresh';
 import { staffAuthRecovery } from '@/lib/staff-auth-recovery';
 import { StaffAuthRecoveryPrompt, useStaffAuthRecovery } from './auth-recovery';
@@ -264,6 +266,8 @@ function Initials({ name }: { name: string }) {
 export function StaffShell({
     userName,
     userEmail,
+    multiWorkspace = false,
+    workspaceName = 'Agora',
     initialSummary = null,
     initialCapabilities = initialSummary?.capabilities ?? null,
     summaryContent,
@@ -271,6 +275,8 @@ export function StaffShell({
 }: {
     userName: string;
     userEmail: string;
+    multiWorkspace?: boolean;
+    workspaceName?: string;
     initialSummary?: StaffWorkspaceNotifications | null;
     initialCapabilities?: StaffWorkspaceNotifications['capabilities'] | null;
     summaryContent?: ReactNode;
@@ -318,7 +324,7 @@ export function StaffShell({
         abortRef.current = controller;
         const stale = () => request !== requestRef.current || controller.signal.aborted;
         try {
-            const response = await fetch('/api/staff/workspace', {
+            const response = await staffWorkspaceFetch('/api/staff/workspace', {
                 headers: { accept: 'application/json' },
                 signal: controller.signal,
             });
@@ -422,7 +428,7 @@ export function StaffShell({
                     A
                 </div>
                 <div className="flex flex-col">
-                    <span className="text-sm font-semibold text-foreground">Agora</span>
+                    <span className="text-sm font-semibold text-foreground">{workspaceName}</span>
                     <span className="text-[11px] text-muted-foreground">Staff workspace</span>
                 </div>
             </div>
@@ -447,6 +453,10 @@ export function StaffShell({
                         </span>
                     </div>
                 </div>
+                {multiWorkspace && <Link href="/staff/workspaces" onClick={onNavigate}
+                    className="px-1 text-left text-[11px] font-medium text-muted-foreground hover:text-foreground hover:underline">
+                    Choose workspace
+                </Link>}
                 <Link href="/staff/settings" onClick={onNavigate}
                     className="px-1 text-left text-[11px] font-medium text-muted-foreground hover:text-foreground hover:underline">
                     Account settings

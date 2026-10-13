@@ -1,3 +1,4 @@
+import { staffWorkspaceFetch } from '@/lib/staff-workspace-fetch';
 export const searchEndpoint = '/api/staff/profile-search';
 export class ProfileSearchError extends Error {
     constructor(public status: number) {
@@ -10,7 +11,7 @@ export class ProfileSearchError extends Error {
     }
 }
 export async function searchRequest(url: string, init?: RequestInit) {
-    const response = await fetch(url, { cache: 'no-store', ...init });
+    const response = await staffWorkspaceFetch(url, { cache: 'no-store', ...init });
     const body = await response.json().catch(() => null);
     if (!response.ok || !body) throw new ProfileSearchError(response.ok ? 503 : response.status);
     return body;

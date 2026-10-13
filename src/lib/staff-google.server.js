@@ -33,6 +33,15 @@ async function readStaffToken() {
     }
 }
 
+// Server-component session reads omit `expires`. Derive routing-cookie expiry
+// from the verified encrypted JWT, without exposing its refresh credential.
+export async function staffSessionExpiresAt(subject) {
+    const token = await readStaffToken();
+    if (token?.provider !== 'google' || token.providerAccountId !== subject
+        || !Number.isSafeInteger(token.exp) || token.exp * 1000 <= Date.now()) return null;
+    return token.exp * 1000;
+}
+
 /** @returns {Promise<'active' | 'revoked' | 'unknown'>} */
 export async function staffGoogleCredentialStatus(subject) {
     const token = await readStaffToken();

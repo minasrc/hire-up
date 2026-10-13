@@ -1,5 +1,7 @@
 'use client';
 
+import { staffWorkspaceFetch } from '@/lib/staff-workspace-fetch';
+
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { ClipboardList, Plus } from 'lucide-react';
 
@@ -90,7 +92,7 @@ export function StaffTodoList({ writeEnabled }: { writeEnabled: boolean }) {
                 offset: String(offset),
             });
             if (category !== 'all') params.set('category', category);
-            const response = await fetch(`/api/staff/tasks?${params.toString()}`, {
+            const response = await staffWorkspaceFetch(`/api/staff/tasks?${params.toString()}`, {
                 headers: { accept: 'application/json' },
                 signal: controller.signal,
             });

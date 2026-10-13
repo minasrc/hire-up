@@ -1,5 +1,6 @@
 import 'server-only';
 import { staffRequestOriginAllowed } from './staff-request-origin.js';
+import { staffWorkspaceContext } from './staff-workspace-context.server.js';
 import { cookies } from 'next/headers';
 import { getServerSession } from 'next-auth';
 import { authOptions } from './auth-options';
@@ -21,7 +22,9 @@ export async function staffMfaContext(request) {
     const identity = staffIdentityFromSession(session);
     if (!identity) return { denied: mfaJson({ error: 'unauthorized' }, 401) };
     const pool = getStaffPool();
-    const organizationId = process.env.STAFF_ORGANIZATION_ID;
+    const workspace = await staffWorkspaceContext(identity, { api: true });
+    if (workspace.status !== 'ok') return { denied: mfaJson({ error: 'Choose a workspace to continue.', code: 'WORKSPACE_CHANGED' }, 409, { 'x-staff-workspace-changed': '1' }) };
+    const organizationId = workspace.organizationId;
     const secret = process.env.NEXTAUTH_SECRET;
     if (!pool || !organizationId || !secret) {
         return { denied: mfaJson({ error: 'mfa temporarily unavailable' }, 503) };

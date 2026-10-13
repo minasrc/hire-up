@@ -21,6 +21,7 @@ export default async function StaffNoAccessPage() {
     const gate = await staffGate();
     if (gate.stage === 'unavailable') redirect('/staff/unavailable');
     if (gate.stage === 'reauthenticate') redirect('/staff/sign-in');
+    if (gate.stage === 'workspace-required') redirect('/staff/workspaces');
     if (gate.stage !== 'unresolved') {
         redirect('/staff');
     }
@@ -38,18 +39,6 @@ export default async function StaffNoAccessPage() {
                 <div className="flex gap-3">
                     <dt className="w-24 text-foreground/50">email</dt>
                     <dd>{session?.user?.email ?? '—'}</dd>
-                </div>
-                <div className="flex gap-3">
-                    <dt className="w-24 text-foreground/50">provider</dt>
-                    <dd>{identity.provider}</dd>
-                </div>
-                <div className="flex gap-3">
-                    <dt className="w-24 text-foreground/50">issuer</dt>
-                    <dd>{identity.issuer}</dd>
-                </div>
-                <div className="flex gap-3">
-                    <dt className="w-24 text-foreground/50">subject</dt>
-                    <dd>{identity.subject}</dd>
                 </div>
             </dl>
             <div className="mt-8">

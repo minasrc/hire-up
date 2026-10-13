@@ -1,5 +1,7 @@
 'use client';
 
+import { staffWorkspaceFetch } from '@/lib/staff-workspace-fetch';
+
 import { useEffect, useMemo, useRef, useState, type MouseEvent, type ReactNode } from 'react';
 import Link from 'next/link';
 import dynamic from 'next/dynamic';
@@ -279,7 +281,7 @@ export function RecordPreview({ children }: { children: ReactNode }) {
         let current = true;
         const authEpoch = staffAuthRecovery.requestEpoch();
         cache.load(selectionKey, async (signal: AbortSignal) => {
-            const response = await fetch(
+            const response = await staffWorkspaceFetch(
                 `/api/staff/${selection.kind === 'candidate' ? 'candidates' : 'jobs'}/${selection.id}`,
                 { signal, cache: 'no-store' },
             );
