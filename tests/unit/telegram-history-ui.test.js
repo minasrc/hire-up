@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { historyPollingDelay, importActions, importGuidance, importStatus, selectionPayload, syncStatus } from '../../src/app/staff/telegram-intake/chats/history-model.js';
+import { connectionGuidance, historyPollingDelay, importActions, importGuidance, importStatus, selectionPayload, syncStatus } from '../../src/app/staff/telegram-intake/chats/history-model.js';
 
 test('bulk selection only submits visible rows and their current versions', () => {
     const rows = [{ id: 'one', version: 2, title: 'Private title', peer: { id: '123' } }, { id: 'two', version: 5 }];
@@ -56,4 +56,23 @@ test('completed history keeps sync labels while incremental work is paused or ac
     for (const status of ['queued', 'leased', 'waiting']) assert.equal(importActions({ historyCompleted: true, selected: true, import: { status } })[0].label, 'Pause sync');
     for (const status of ['paused', 'capacity_paused', 'failed', 'cancelled']) assert.equal(importActions({ historyCompleted: true, selected: true, import: { status } })[0].label, 'Resume sync');
     assert.equal(importActions({ historyCompleted: false, import: { status: 'paused' } })[0].label, 'Resume import');
+});
+
+
+test('pending sign-in guidance identifies the remaining approval step without permitting imports', () => {
+    for (const [status, title] of [['requested', 'Preparing Telegram sign-in'], ['qr_pending', 'Finish Telegram approval on your phone'], ['awaiting_password', 'Complete Telegram two-step verification']]) {
+        const snapshot = { canImport: false, blockedReason: 'NOT_CONNECTED', connection: { status } };
+        assert.equal(connectionGuidance(snapshot).title, title);
+        assert.equal(connectionGuidance(snapshot).action, 'Continue sign-in');
+        assert.match(connectionGuidance(snapshot).empty, /choose chats to import afterward/);
+        assert.equal(historyPollingDelay(snapshot), 2000);
+        assert.equal(snapshot.canImport, false);
+    }
+    assert.match(connectionGuidance({ canImport: false, blockedReason: 'NOT_CONNECTED', connection: { status: 'awaiting_password' } }).description, /password on the connection page/);
+    assert.equal(connectionGuidance({ canImport: false, blockedReason: 'NOT_CONNECTED', connection: { status: 'failed' } }).action, 'Retry sign-in');
+    for (const connection of [null, { status: 'disconnected' }]) {
+        assert.equal(connectionGuidance({ canImport: false, blockedReason: 'NOT_CONNECTED', connection }).action, 'Connect Telegram');
+        assert.equal(historyPollingDelay({ connection }), 15000);
+    }
+    assert.equal(connectionGuidance({ canImport: true, connection: { status: 'connected' } }), null);
 });

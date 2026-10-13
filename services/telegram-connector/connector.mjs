@@ -7,7 +7,7 @@ function validateTask(task, now) {
   if (!task || !uuid.test(task.id) || !uuid.test(task.leaseToken) || !uuid.test(task.challengeId) || !Number.isSafeInteger(task.generation) || task.generation < 1 || !states.has(task.status) || !Number.isFinite(Date.parse(task.leaseExpiresAt)) || Date.parse(task.leaseExpiresAt) <= now || Date.parse(task.leaseExpiresAt) > now + 125000) throw new Error('INVALID_HOST_RESPONSE');
   return task;
 }
-export function createConnector({ host, vault, createTelegram, now = Date.now, operationTimeoutMs = 15000, onConnectedTick, efficientPolling = false, cleanupEnabled = false }) {
+export function createConnector({ host, vault, createTelegram, now = Date.now, operationTimeoutMs = 15000, onConnectedTick, onStatus = () => {}, efficientPolling = false, cleanupEnabled = false }) {
   let task = null; let client = null; let saved = null; let epoch = 0; let stopped = false;
   let plan; let wakeTurns = 0; let wakeRequested = false;
   let nextHeartbeat = 0; let nextClaim = 0; let nextKeepalive = 0; let pendingReport = null; let busy = false;
@@ -29,7 +29,7 @@ export function createConnector({ host, vault, createTelegram, now = Date.now, o
     await host('update', { connectionId: task.id, generation: task.generation, leaseToken: task.leaseToken, ...fields, ...(['qr_pending', 'awaiting_password'].includes(fields.status) ? { challengeId: task.challengeId } : {}) });
     if (!active(version)) throw new Error('STALE_TASK');
     task = { ...task, status: fields.status };
-    if (fields.status === 'connected') connectedProfile = fields.profile;
+    if (fields.status === 'connected') { connectedProfile = fields.profile; onStatus('CONNECTOR_CONNECTION_CONFIRMED'); }
     pendingReport = null;
   }
   function persist(state) {

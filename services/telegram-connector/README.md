@@ -254,6 +254,20 @@ off unless its processing and model acceptance are separately authorized.
 
 ## Session recovery and durable checkpoints
 
+QR approval uses a narrow listener for Telegram's login-token notification,
+including wrapped notifications. It bypasses the SDK's general update queue:
+that queue can wait for an authorized account state before delivering the very
+notification needed to authorize the account. Automatic SDK account/channel
+fetching stays disabled during sign-in, migration and synchronization; explicit
+server-fenced work owns the import and source checkpoints.
+
+Private operational logs distinguish `CONNECTOR_PHONE_APPROVED`,
+`CONNECTOR_PASSWORD_REQUIRED`, `CONNECTOR_AUTHENTICATED` and
+`CONNECTOR_CONNECTION_CONFIRMED`. The last code is emitted only after the server
+acknowledges the connection. These codes contain no token, password, account
+identity or conversation content. An already expired/cancelled login generation
+cannot be revived; start a fresh sign-in after deploying this connector.
+
 Temporary Telegram network failures and SDK operation timeouts close the current
 client and retry the encrypted session after 2, 4, 8, 16, then at most 30 seconds.
 The connector continues renewing its host claim during the wait. The connection

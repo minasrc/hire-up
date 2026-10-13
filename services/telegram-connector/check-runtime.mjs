@@ -21,7 +21,9 @@ assert.equal(new Api.channels.GetMessages({ channel: new Api.InputChannel({ chan
 for (const name of ['InputPeerUser', 'InputPeerChat', 'InputPeerChannel', 'InputPeerEmpty', 'InputPeerSelf']) assert.equal(typeof Api[name], 'function', name);
 assert.equal(new Api.InputPeerUser({ userId: 123456789012345678n, accessHash: -123456789012345678n }).getBytes().length, 20);
 assert.equal(typeof Api.account.GetPassword, 'function');
-assert.equal(typeof Api.UpdateLoginToken, 'function');
+for (const name of ['UpdateLoginToken', 'UpdateShort', 'Updates', 'UpdatesCombined']) assert.equal(typeof Api[name], 'function', name);
+const { UpdateManager } = await import('teleproto/client/updates/manager.js');
+for (const method of ['start', 'stop', 'onUpdates']) assert.equal(typeof UpdateManager.prototype[method], 'function', method);
 assert.equal(typeof computeCheck, 'function');
 assert.equal(new StringSession('').save(), '');
 assert.equal(new Logger('none').canSend('error'), false);

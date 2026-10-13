@@ -193,6 +193,13 @@ test('Hosted Telegram browser starts on demand, cancels setup and protects QR/pa
         await update({ status: 'awaiting_password', passwordHint: 'Synthetic hint' });
         const password = page.getByLabel('Telegram two-step verification password', { exact: true });
         await expect(password).toBeVisible();
+        await page.goto(`${baseURL}/staff/telegram-intake/chats`);
+        await expect(page.getByRole('heading', { name: 'Complete Telegram two-step verification', exact: true })).toBeVisible();
+        await expect(page.getByRole('button', { name: 'Discover chats', exact: true })).toBeDisabled();
+        await expect(page.getByRole('link', { name: 'Continue sign-in', exact: true })).toBeVisible();
+        await page.getByRole('link', { name: 'Continue sign-in', exact: true }).click();
+        await expect(password).toBeVisible();
+        assert.equal(starts, 2, 'Continuing pending sign-in must reuse the existing connection');
         await password.fill('synthetic hosted secret');
         const submission = page.waitForResponse(response => response.url() === connectionURL && response.request().postDataJSON()?.action === 'password');
         await page.getByRole('button', { name: 'Continue securely', exact: true }).click();

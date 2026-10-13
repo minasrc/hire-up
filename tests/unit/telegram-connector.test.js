@@ -44,6 +44,23 @@ function fixture(t, overrides = {}) {
   return { connector, options, vault, calls, clients, responses, profile, get current() { return current; }, set current(value) { current = value; }, advance: (ms = 5000) => { time += ms; }, time: () => time };
 }
 
+test('connection-confirmed diagnostics wait for the server acknowledgement, including a lost response', async t => {
+  const f = fixture(t), events = [];
+  let lost = true;
+  const connector = createConnector({ ...f.options, onStatus: code => events.push(code), host: async (action, body) => {
+    const result = await f.options.host(action, body);
+    if (action === 'update' && body.status === 'connected' && lost) { lost = false; throw new Error('HOST_UNAVAILABLE'); }
+    return result;
+  } });
+  t.after(() => connector.stop());
+  f.responses.push({ status: 'connected', profile: f.profile });
+  await assert.rejects(connector.tick(), /HOST_UNAVAILABLE/);
+  assert.deepEqual(events, []);
+  assert.equal(f.vault.load(id).state, 'connected', 'The authorization is durable while acknowledgement is retried');
+  await connector.tick();
+  assert.deepEqual(events, ['CONNECTOR_CONNECTION_CONFIRMED']);
+});
+
 test('vault keeps session ciphertext private, scoped and stable across restarts', (t) => {
   const { root, vault } = storage(t);
   vault.save(id, { session: 'highly-secret-session', generation: 1, state: 'connected' });

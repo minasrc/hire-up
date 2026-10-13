@@ -40,7 +40,22 @@ export function selectionPayload(chats, markedIds, selected) {
     return { action: 'selectMany', selected, chats: rows.map(chat => ({ chatId: chat.id, expectedVersion: chat.version })) };
 }
 
+export function connectionGuidance(snapshot) {
+    if (snapshot?.canImport) return null;
+    if (snapshot?.blockedReason === 'NOT_CONNECTED') {
+        const guidance = {
+            requested: { title: 'Preparing Telegram sign-in', description: 'Your sign-in is being prepared. Continue on the connection page, then approve the sign-in in Telegram on your phone.', action: 'Continue sign-in' },
+            qr_pending: { title: 'Finish Telegram approval on your phone', description: 'Scan the QR code and approve the sign-in in Telegram on your phone. If Telegram asks for a two-step verification password, complete it on the connection page.', action: 'Continue sign-in' },
+            awaiting_password: { title: 'Complete Telegram two-step verification', description: 'Phone approval is complete. Enter your Telegram two-step verification password on the connection page to finish signing in.', action: 'Continue sign-in' },
+            failed: { title: 'Telegram sign-in needs a retry', description: 'Open the connection page to retry sign-in, then approve it in Telegram on your phone.', action: 'Retry sign-in' },
+        }[snapshot.connection?.status];
+        if (guidance) return { ...guidance, empty: 'Finish Telegram sign-in, then discover your chats. Discovery does not import messages; choose chats to import afterward.' };
+    }
+    return { title: 'Connect Telegram to import chats', description: 'Your existing private history remains available. Reconnect the same Telegram account to resume its interrupted imports. A different account has its own separate chat list.', action: 'Connect Telegram', empty: 'Connect Telegram, then discover your chats. Choose chats to import their messages.' };
+}
+
 export function historyPollingDelay(snapshot) {
+    if (snapshot?.blockedReason === 'NOT_CONNECTED' && ['requested', 'qr_pending', 'awaiting_password'].includes(snapshot.connection?.status)) return 2000;
     return snapshot?.discovery?.status === 'active' || snapshot?.chats?.some(chat => activeStatuses.has(chat.import?.status)) ? 3000 : 15000;
 }
 
