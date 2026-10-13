@@ -3,10 +3,8 @@
 import { staffWorkspaceFetch } from '@/lib/staff-workspace-fetch';
 
 import { useCallback, useEffect, useRef, useState } from 'react';
-import Link from 'next/link';
 import QRCode from 'qrcode';
 import { CheckCircle2, Laptop, RefreshCw } from 'lucide-react';
-import { PageHeader } from '@/components/staff-preview/shared';
 import { Badge } from '@/components/staff-ui/badge';
 import { Button } from '@/components/staff-ui/button';
 import { Card } from '@/components/staff-ui/card';
@@ -41,18 +39,21 @@ async function request(init?: RequestInit): Promise<Snapshot> {
     return response.json();
 }
 
-export function TelegramConnectionBrowser({ workspaceId, hostedEnabled = false }: { workspaceId: string; hostedEnabled?: boolean }) {
-    // Changing workspace or connection mode discards pending requests and secrets.
-    return <ConnectionBrowser key={`${workspaceId}:${hostedEnabled}`} workspaceId={workspaceId} hostedEnabled={hostedEnabled} />;
+type ConnectionBrowserProps = { workspaceId: string; hostedEnabled: boolean; blocked: boolean; onConnectionChange: () => void; onDenied: () => void; onChooseChats: () => void };
+
+export function TelegramConnectionBrowser(props: ConnectionBrowserProps) {
+    // Scope changes and access denial discard requests and secrets. An explicit
+    // access retry creates a fresh controller instead of reviving denied state.
+    return <ConnectionBrowser key={`${props.workspaceId}:${props.hostedEnabled}:${props.blocked}`} {...props} />;
 }
 
-function ConnectionBrowser({ workspaceId, hostedEnabled }: { workspaceId: string; hostedEnabled: boolean }) {
+function ConnectionBrowser({ workspaceId, hostedEnabled, blocked, onConnectionChange, onDenied, onChooseChats }: ConnectionBrowserProps) {
     const [snapshot, setSnapshot] = useState<Snapshot | null>(null);
     const [selectedWorker, setSelectedWorker] = useState('');
     const [password, setPassword] = useState('');
     const [error, setError] = useState('');
     const [busy, setBusy] = useState(false);
-    const [accessDenied, setAccessDenied] = useState(false);
+    const [accessDenied, setAccessDenied] = useState(blocked);
     const [refresh, setRefresh] = useState(0);
     const [now, setNow] = useState(() => Date.now());
     const [qrError, setQrError] = useState(false);
@@ -68,6 +69,7 @@ function ConnectionBrowser({ workspaceId, hostedEnabled }: { workspaceId: string
     const mounted = useRef(true);
     const passwordInput = useRef<HTMLInputElement>(null);
     const connection = snapshot?.connection;
+    const loaded = Boolean(snapshot);
     const worker = snapshot?.workers.find(item => item.id === connection?.workerId);
     const active = connection && !['failed', 'disconnected'].includes(connection.status);
     const qrAvailable = usableQr(connection, now);
@@ -79,7 +81,8 @@ function ConnectionBrowser({ workspaceId, hostedEnabled }: { workspaceId: string
         currentRead.current?.abort(); currentMutation.current?.abort();
         setAccessDenied(true); setSnapshot(null); setPassword('');
         if (passwordInput.current) passwordInput.current.value = '';
-    }, []);
+        onDenied();
+    }, [onDenied]);
 
     const load = useCallback(async () => {
         if (mutating.current || document.hidden) return;
@@ -146,6 +149,9 @@ function ConnectionBrowser({ workspaceId, hostedEnabled }: { workspaceId: string
         setPassword('');
         if (passwordInput.current) passwordInput.current.value = '';
     }, [connection?.id, connection?.generation, connection?.challengeId, connection?.status]);
+    useEffect(() => {
+        if (loaded && !accessDenied) onConnectionChange();
+    }, [loaded, connection?.id, connection?.generation, connection?.status, connection?.profile?.telegramUserId, worker?.online, accessDenied, onConnectionChange]);
     useEffect(() => {
         if (!qrAvailable || !canvas.current) return;
         let stale = false;
@@ -215,13 +221,15 @@ function ConnectionBrowser({ workspaceId, hostedEnabled }: { workspaceId: string
 
     const displayedConnectionError = (code: string) => hostedEnabled ? hostedConnectionError(code) || connectionError(code) : connectionError(code);
 
+    if (accessDenied) return null;
+
     const ConnectionCard = hostedEnabled ? 'div' : Card;
     const requestErrorPanel = error ? <div role="alert" className="rounded-lg border border-border p-4 text-sm"><p>{error}</p><Button className="mt-3" variant="outline" disabled={busy} onClick={() => { mutationError.current = false; setAccessDenied(false); setRefresh(value => value + 1); }}><RefreshCw />Retry status</Button></div> : null;
     const connectionPanel = connection ? <ConnectionCard ref={signInPanel} className={`scroll-mt-24 space-y-4 ${hostedEnabled ? 'border-t border-border pt-5' : 'p-6'}`} aria-busy={busy}>
         <div aria-live="polite">
             {connection.status === 'requested' ? <><h2 className="font-semibold">Preparing Telegram sign-in</h2><p className="mt-2 text-sm text-muted-foreground">{hostedEnabled ? 'The service is requesting a sign-in code. It will appear here automatically.' : 'Your Mac is requesting a sign-in code. It will appear here automatically.'}</p></> : null}
             {connection.status === 'qr_pending' ? <><h2 className="font-semibold">Scan with Telegram</h2><p className="mt-2 text-sm text-muted-foreground">On your phone, open Telegram → Settings → Devices → Link Desktop Device, then scan this code.</p></> : null}
-            {connection.status === 'awaiting_password' ? <h2 className="font-semibold">Enter your Telegram password</h2> : null}
+            {connection.status === 'awaiting_password' ? <h2 className="font-semibold">Complete Telegram two-step verification</h2> : null}
             {connection.status === 'connected' ? <><h2 className="flex items-center gap-2 font-semibold"><CheckCircle2 className="h-5 w-5" />Telegram connected</h2><p className="mt-2">{connection.profile?.displayName}</p>{connection.profile?.username ? <p className="text-sm text-muted-foreground">@{connection.profile.username}</p> : null}</> : null}
             {connection.status === 'disconnecting' ? <><h2 className="font-semibold">Waiting for Telegram to disconnect</h2><p className="mt-2 text-sm text-muted-foreground">{hostedEnabled ? 'Disconnect is pending until the connection service confirms Telegram logout and removes its saved session. If the service is offline, logout will continue when it returns.' : 'Disconnect is pending until your Mac confirms Telegram logout and removes its saved session. Keep the connector running.'}</p></> : null}
             {connection.status === 'disconnected' ? <><h2 className="font-semibold">{connection.retirementReason === 'external_revocation_attested' ? 'Telegram registration reset' : connection.cancelledBeforeStart ? 'Connection cancelled' : 'Telegram disconnected'}</h2><p className="mt-2 text-sm text-muted-foreground">{connection.retirementReason === 'external_revocation_attested' ? 'You confirmed the old session was revoked in Telegram Settings → Devices. The service registration has been retired; imported history remains available.' : connection.cancelledBeforeStart ? hostedEnabled ? 'Sign-in was cancelled before connecting.' : 'Sign-in was cancelled before your Mac started connecting.' : hostedEnabled ? 'The connection service confirmed logout and removed its saved session.' : 'Your Mac confirmed logout and removed its saved session.'}</p></> : null}
@@ -236,12 +244,10 @@ function ConnectionBrowser({ workspaceId, hostedEnabled }: { workspaceId: string
             <Button type="submit" disabled={busy || accessDenied || connection.passwordPending || !worker?.online || !password}>{busy || connection.passwordPending ? 'Checking password…' : 'Continue securely'}</Button>
         </form> : null}
         {(active || connection.status === 'failed') && connection.status !== 'disconnecting' ? <Button variant="outline" disabled={busy || accessDenied} onClick={() => { hostedAttempt.current?.abort(); setPassword(''); void mutate({ action: 'disconnect', connectionId: connection.id, generation: connection.generation }); }}>{['connected', 'failed'].includes(connection.status) ? 'Disconnect Telegram' : 'Cancel sign-in'}</Button> : null}
-        {connection.status === 'connected' ? <Button asChild><Link href="/staff/telegram-intake/chats">Choose chats to import</Link></Button> : null}
+        {connection.status === 'connected' ? <Button onClick={onChooseChats}>Choose chats to import</Button> : null}
     </ConnectionCard> : null;
 
-    return <section className="mx-auto flex w-full max-w-3xl flex-col gap-6">
-        <PageHeader eyebrow="Private workspace" title="Connect Telegram" description="Connect your account securely using Telegram on your phone."
-            actions={<div className="flex flex-wrap gap-2"><Button asChild variant="outline"><Link href="/staff/telegram-intake/chats">Telegram chats</Link></Button><Button asChild variant="outline"><Link href="/staff/telegram-intake/context">Search conversations</Link></Button><Button asChild variant="outline"><Link href="/staff/telegram-intake">Back to draft inbox</Link></Button></div>} />
+    return <section id="telegram-connection" aria-label="Telegram connection" className="scroll-mt-24 flex w-full flex-col gap-4">
         {hostedEnabled ? <HostedConnectionPanel connection={connection ?? null} loaded={Boolean(snapshot)} disabled={busy || accessDenied} attemptRef={hostedAttempt} onDenied={denyAccess} onReset={() => setRefresh(value => value + 1)} onConnect={(workerId, signal) => mutate({ action: 'connect', workerId }, signal)}>{requestErrorPanel}{connectionPanel}</HostedConnectionPanel> : <Card className="space-y-5 p-6">
             <div className="flex items-start gap-3"><Laptop className="mt-1 h-5 w-5 shrink-0" /><div><h2 className="font-semibold">Your Mac connector</h2><p className="mt-1 text-sm text-muted-foreground">Keep the registered connector running on your Mac during sign-in and while connected. Your Telegram session stays on that Mac.</p></div></div>
             {!snapshot && !error ? <p role="status">Loading connection…</p> : null}

@@ -531,7 +531,7 @@ export function StaffShell({
                                 {isDetail ? (
                                     <>
                                         <Link
-                                            href={`/staff/${section}`}
+                                            href={section === 'telegram-intake' ? '/staff/telegram-intake/chats' : `/staff/${section}`}
                                             className="truncate rounded-sm text-muted-foreground outline-none hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring"
                                         >
                                             {sectionLabel}

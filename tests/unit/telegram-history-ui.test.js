@@ -60,18 +60,18 @@ test('completed history keeps sync labels while incremental work is paused or ac
 
 
 test('pending sign-in guidance identifies the remaining approval step without permitting imports', () => {
-    for (const [status, title] of [['requested', 'Preparing Telegram sign-in'], ['qr_pending', 'Finish Telegram approval on your phone'], ['awaiting_password', 'Complete Telegram two-step verification']]) {
+    for (const status of ['requested', 'qr_pending', 'awaiting_password']) {
         const snapshot = { canImport: false, blockedReason: 'NOT_CONNECTED', connection: { status } };
-        assert.equal(connectionGuidance(snapshot).title, title);
-        assert.equal(connectionGuidance(snapshot).action, 'Continue sign-in');
+        assert.match(connectionGuidance(snapshot).description, /above/);
+        assert.equal(/connection page/.test(connectionGuidance(snapshot).description), false);
         assert.match(connectionGuidance(snapshot).empty, /choose chats to import afterward/);
-        assert.equal(historyPollingDelay(snapshot), 2000);
+        assert.equal(historyPollingDelay(snapshot), 15000);
         assert.equal(snapshot.canImport, false);
     }
-    assert.match(connectionGuidance({ canImport: false, blockedReason: 'NOT_CONNECTED', connection: { status: 'awaiting_password' } }).description, /password on the connection page/);
-    assert.equal(connectionGuidance({ canImport: false, blockedReason: 'NOT_CONNECTED', connection: { status: 'failed' } }).action, 'Retry sign-in');
+    assert.match(connectionGuidance({ canImport: false, blockedReason: 'NOT_CONNECTED', connection: { status: 'awaiting_password' } }).description, /password above/);
+    assert.match(connectionGuidance({ canImport: false, blockedReason: 'NOT_CONNECTED', connection: { status: 'failed' } }).description, /Retry sign-in above/);
     for (const connection of [null, { status: 'disconnected' }]) {
-        assert.equal(connectionGuidance({ canImport: false, blockedReason: 'NOT_CONNECTED', connection }).action, 'Connect Telegram');
+        assert.match(connectionGuidance({ canImport: false, blockedReason: 'NOT_CONNECTED', connection }).description, /Connect Telegram above/);
         assert.equal(historyPollingDelay({ connection }), 15000);
     }
     assert.equal(connectionGuidance({ canImport: true, connection: { status: 'connected' } }), null);
