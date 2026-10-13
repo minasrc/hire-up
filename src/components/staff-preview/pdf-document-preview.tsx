@@ -1,5 +1,7 @@
 'use client';
 
+import { StaffDocumentLink } from '@/components/staff-ui/staff-document-link';
+
 import { useEffect, useRef, useState } from 'react';
 import { ChevronLeft, ChevronRight, ExternalLink, ZoomIn, ZoomOut } from 'lucide-react';
 import type { PDFDocumentProxy } from 'pdfjs-dist';
@@ -135,11 +137,11 @@ function LoadedPdfPreview({ documentId, filename, value }: {
                     <ZoomIn className="h-4 w-4" />
                 </Button>
                 <Button size="icon" variant="ghost" asChild>
-                    <a href={`/api/staff/documents/${documentId}?view=inline`}
+                    <StaffDocumentLink documentId={documentId} view="inline"
                         target="_blank" rel="noreferrer"
                         title={`Open original ${filename}`} aria-label={`Open original ${filename}`}>
                         <ExternalLink className="h-4 w-4" />
-                    </a>
+                    </StaffDocumentLink>
                 </Button>
             </div>
         </div>

@@ -3,6 +3,7 @@ import { createRequire } from 'node:module';
 import { dirname, join } from 'node:path';
 import { expect, test } from '@playwright/test';
 import ts from 'typescript';
+import { staffWorkspaceClientSource } from '../support/staff-workspace-client-source.js';
 
 const require = createRequire(import.meta.url);
 const compiled = ts.transpileModule(readFileSync(new URL('../../src/app/staff/members/mfa-reset-form.tsx', import.meta.url), 'utf8'),
@@ -22,7 +23,13 @@ async function mount(page, status = 200, networkError = false) {
     });
     await page.goto('http://127.0.0.1:3000/__mfa-reset-test');
     for (const content of scripts) await page.addScriptTag({ content });
-    await page.addScriptTag({ content: `const exports = {}; const require = (name) => name === 'react' ? React : { useRouter: () => ({ refresh: () => { window.didRefresh = true; } }) };
+    await page.addScriptTag({ content: `const workspaceClient = (() => { const exports = {}; ${staffWorkspaceClientSource}; return exports; })();
+        const exports = {}; const require = name => {
+            if (name === 'react') return React;
+            if (name === '@/lib/staff-workspace-fetch') return workspaceClient;
+            if (name === 'next/navigation') return { useRouter: () => ({ refresh: () => { window.didRefresh = true; } }) };
+            throw new Error('Unexpected fixture dependency: ' + name);
+        };
         ${compiled}
         ReactDOM.createRoot(document.getElementById('root')).render(React.createElement(exports.MemberMfaResetForm,
             { membershipId: '${membershipId}', version: '3', displayName: 'Synthetic Member' }));` });

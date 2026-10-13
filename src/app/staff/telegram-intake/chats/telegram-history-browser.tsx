@@ -1,5 +1,7 @@
 'use client';
 
+import { staffWorkspaceFetch } from '@/lib/staff-workspace-fetch';
+
 import { useCallback, useEffect, useRef, useState } from 'react';
 import Link from 'next/link';
 import { MessageSquare, RefreshCw, Search } from 'lucide-react';
@@ -39,7 +41,7 @@ class HistoryError extends Error {
     }
 }
 async function request(url: string, init?: RequestInit) {
-    const response = await fetch(url, { cache: 'no-store', ...init });
+    const response = await staffWorkspaceFetch(url, { cache: 'no-store', ...init });
     const body = await response.json().catch(() => null);
     if (!response.ok) throw new HistoryError(response.status);
     if (!body) throw new HistoryError(503);

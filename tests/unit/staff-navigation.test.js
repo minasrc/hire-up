@@ -32,6 +32,7 @@ function loadShell() {
     const exports = {};
     const imports = {
         react: React,
+        '@/lib/staff-workspace-fetch': { staffWorkspaceFetch: (...args) => fetch(...args) },
         '@/lib/staff-refresh': { createStaffRefresh },
         '@/lib/staff-auth-recovery': { staffAuthRecovery: createStaffAuthRecovery() },
         './auth-recovery': {

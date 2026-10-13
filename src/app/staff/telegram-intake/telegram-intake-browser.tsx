@@ -1,5 +1,7 @@
 'use client';
 
+import { staffWorkspaceFetch } from '@/lib/staff-workspace-fetch';
+
 import { useEffect, useRef, useState } from 'react';
 import Link from 'next/link';
 import { FileText, Inbox, RefreshCw, Search } from 'lucide-react';
@@ -30,7 +32,7 @@ class IntakeError extends Error {
 }
 
 async function request(url: string, init?: RequestInit) {
-    const response = await fetch(url, { cache: 'no-store', ...init });
+    const response = await staffWorkspaceFetch(url, { cache: 'no-store', ...init });
     const body = await response.json().catch(() => ({}));
     if (!response.ok) throw new IntakeError(typeof body.error === 'string' ? body.error : 'This request could not be completed. Please retry.', response.status, body.fields ?? body.fieldErrors, body.result);
     return body.result;
@@ -52,7 +54,7 @@ export function TelegramIntakeBrowser({ initialResult, initialDraftId }: { initi
 
     useEffect(() => {
         // Cleanup is best effort and must never delay the inbox or expose private keys.
-        void fetch('/api/staff/telegram-intake/uploads/cleanup', { method: 'POST', cache: 'no-store' }).catch(() => {});
+        void staffWorkspaceFetch('/api/staff/telegram-intake/uploads/cleanup', { method: 'POST', cache: 'no-store' }).catch(() => {});
     }, []);
 
     useEffect(() => {

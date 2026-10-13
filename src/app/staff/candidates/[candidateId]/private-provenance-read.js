@@ -1,3 +1,4 @@
+import { staffWorkspaceFetch } from '../../../../lib/staff-workspace-fetch.js';
 export class PrivateProvenanceTimeout extends Error {}
 
 // Cover both headers and JSON reads. Obsolete/auth/unmount cancellation remains
@@ -10,7 +11,7 @@ export async function readPrivateProvenance(url, signal, timeoutMs = 15000) {
     signal.addEventListener('abort', cancel, { once: true });
     const timer = setTimeout(() => { timedOut = true; controller.abort(); }, timeoutMs);
     try {
-        const response = await fetch(url, { cache: 'no-store', signal: controller.signal });
+        const response = await staffWorkspaceFetch(url, { cache: 'no-store', signal: controller.signal });
         // Unread fetch bodies can keep Chromium's network activity pending even
         // after a flag-off404 completes on the server. Release all error bodies.
         let data = null;

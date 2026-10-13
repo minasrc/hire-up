@@ -1,5 +1,7 @@
 'use client';
 
+import { StaffDocumentLink } from '@/components/staff-ui/staff-document-link';
+
 import { useState } from 'react';
 import { Download, FileText } from 'lucide-react';
 
@@ -68,10 +70,10 @@ export function RealCandidateDocuments({
                     </p>
                 </div>
                 {canOpen(document) ? <Button size="icon" variant="ghost" asChild>
-                    <a href={`/api/staff/documents/${document.documentId}`}
+                    <StaffDocumentLink documentId={document.documentId}
                         aria-label={`Download ${document.filename}`} title={`Download ${document.filename}`}>
                         <Download className="h-4 w-4" />
-                    </a>
+                    </StaffDocumentLink>
                 </Button> : null}
             </div>)}
         </div>

@@ -1,4 +1,5 @@
 import 'server-only';
+import { staffWorkspaceContext } from './staff-workspace-context.server.js';
 import { cookies } from 'next/headers';
 import { getServerSession } from 'next-auth';
 import { authOptions } from './auth-options';
@@ -12,14 +13,17 @@ import { StaffAuthorizationError } from './staff-authorization';
 
 // Staff API boundary: session + resolved principal + active TOTP credential +
 // a valid staff_mfa proof. Data-bearing routes must not run without all four.
-export async function staffApiContext() {
+/** @param {{ expectedWorkspaceId?: string | null }} [options] */
+export async function staffApiContext({ expectedWorkspaceId = null } = {}) {
     const session = await getServerSession(authOptions);
     const identity = staffIdentityFromSession(session);
     if (!identity) {
         return { status: 'unauthorized' };
     }
     const pool = getStaffPool();
-    const organizationId = process.env.STAFF_ORGANIZATION_ID;
+    const workspace = await staffWorkspaceContext(identity, { api: true, expectedWorkspaceId });
+    if (workspace.status !== 'ok') return workspace;
+    const organizationId = workspace.organizationId;
     const secret = process.env.NEXTAUTH_SECRET;
     if (!pool || !organizationId || !secret) {
         return { status: 'unconfigured' };
@@ -68,6 +72,10 @@ export async function staffApiContext() {
 export function staffGateResponse(context) {
     if (context.status === 'ok') {
         return null;
+    }
+    if (context.status === 'workspace-changed' || context.status === 'workspace-required') {
+        return Response.json({ error: 'Workspace changed. Choose a workspace to continue.', code: 'WORKSPACE_CHANGED' },
+            { status: 409, headers: { 'cache-control': 'private, no-store', 'x-staff-workspace-changed': '1' } });
     }
     if (context.status === 'unconfigured' || context.status === 'unavailable') {
         return Response.json({ error: 'workspace temporarily unavailable' }, { status: 503 });

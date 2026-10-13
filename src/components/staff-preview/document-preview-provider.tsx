@@ -1,5 +1,7 @@
 'use client';
 
+import { staffWorkspaceFetch } from '@/lib/staff-workspace-fetch';
+
 import { createContext, useContext, useEffect, useMemo, useState, useSyncExternalStore, type ReactNode } from 'react';
 import { useSession } from 'next-auth/react';
 import type { PDFDocumentProxy } from 'pdfjs-dist';
@@ -44,7 +46,7 @@ export function DocumentPreviewProvider({ scope, children }: { scope: string; ch
 
 async function loadDocument(documentId: string, view: 'bytes' | 'text', previous: PreviewResource | undefined, signal: AbortSignal): Promise<PreviewResource> {
     const authEpoch = staffAuthRecovery.requestEpoch();
-    const response = await fetch(`/api/staff/documents/${documentId}?view=${view}`, {
+    const response = await staffWorkspaceFetch(`/api/staff/documents/${documentId}?view=${view}`, {
         signal, cache: 'no-store',
         headers: previous?.version ? { 'if-none-match': previous.version } : {},
     });

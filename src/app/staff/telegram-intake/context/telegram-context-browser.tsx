@@ -1,5 +1,7 @@
 'use client';
 
+import { staffWorkspaceFetch } from '@/lib/staff-workspace-fetch';
+
 import { useCallback, useEffect, useRef, useState } from 'react';
 import Link from 'next/link';
 import { PageHeader } from '@/components/staff-preview/shared';
@@ -61,7 +63,7 @@ export function TelegramContextBrowser() {
         const controller = new AbortController(); controllers.current[key] = controller;
         const epoch = staffAuthRecovery.requestEpoch();
         try {
-            const response = await fetch(url, { cache: 'no-store', signal: controller.signal, ...(body ? { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) } : {}) });
+            const response = await staffWorkspaceFetch(url, { cache: 'no-store', signal: controller.signal, ...(body ? { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) } : {}) });
             if (controller.signal.aborted || invalidated.current) return null;
             if (!response.ok) {
                 if ([401, 403, 428].includes(response.status)) { clearPrivate(); staffAuthRecovery.require(response.status, epoch); }

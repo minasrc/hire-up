@@ -14,6 +14,7 @@ function helper({ signedIn = true, google = 'active', retry = 0 } = {}) {
         './auth-options': { authOptions: {} },
         './staff-identity': { staffIdentityFromSession: (s) => s ? { subject: '123' } : null },
         './staff-db.server': { getStaffPool: () => ({}), resolveStaffPrincipal: async () => ({ user_id: 'user' }) },
+        './staff-workspace-context.server.js': { staffWorkspaceContext: async () => ({ status: 'ok', organizationId: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa' }) },
         './staff-google.server': { staffGoogleCredentialStatus: async () => google },
         './staff-mfa.server': { reserveMfaAttempt: async () => { reservations++; return retry; } },
         './staff-mfa-cookie': { STAFF_MFA_COOKIE: 'proof', STAFF_MFA_TTL_MS: 1000, createStaffMfaProof: () => 'proof' },

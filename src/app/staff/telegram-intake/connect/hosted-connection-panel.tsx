@@ -1,5 +1,7 @@
 'use client';
 
+import { staffWorkspaceFetch } from '@/lib/staff-workspace-fetch';
+
 import { useCallback, useEffect, useRef, useState, type MutableRefObject } from 'react';
 import Link from 'next/link';
 import { Cloud, RefreshCw } from 'lucide-react';
@@ -51,7 +53,7 @@ export function HostedConnectionPanel({ connection, loaded, disabled, attemptRef
     const blocked = connection && connection.status !== 'disconnected' && connection.workerId !== status?.workerId;
 
     const request = useCallback(async (signal: AbortSignal, prepare = false) => {
-        const response = await fetch(endpoint, { cache: 'no-store', signal: AbortSignal.any([signal, AbortSignal.timeout(15000)]),
+        const response = await staffWorkspaceFetch(endpoint, { cache: 'no-store', signal: AbortSignal.any([signal, AbortSignal.timeout(15000)]),
             ...(prepare ? { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ action: 'prepare' }) } : {}),
         });
         signal.throwIfAborted();
@@ -132,7 +134,7 @@ export function HostedConnectionPanel({ connection, loaded, disabled, attemptRef
         const controller = new AbortController(); attemptRef.current = controller;
         statusRead.current?.abort(); setPhase('retiring'); setError(''); setResetNotice(''); actionError.current = false;
         try {
-            const response = await fetch(endpoint, { method: 'POST', cache: 'no-store', headers: { 'content-type': 'application/json' }, body: JSON.stringify(input), signal: AbortSignal.any([controller.signal, AbortSignal.timeout(15000)]) });
+            const response = await staffWorkspaceFetch(endpoint, { method: 'POST', cache: 'no-store', headers: { 'content-type': 'application/json' }, body: JSON.stringify(input), signal: AbortSignal.any([controller.signal, AbortSignal.timeout(15000)]) });
             const result = await response.json().catch(() => null); controller.signal.throwIfAborted();
             if (!response.ok) { if ([401,403,428].includes(response.status)) onDenied(); throw new Error(hostedRequestError(response.status, result)); }
             if (result?.ok !== true || result.retiredRequestId !== enrollment.requestId

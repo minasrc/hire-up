@@ -1,9 +1,10 @@
+import { staffWorkspaceFetch } from '@/lib/staff-workspace-fetch';
 export const analysisEndpoint = '/api/staff/cv-analysis';
 export class AnalysisError extends Error {
     constructor(public status: number) { super(status === 409 ? 'The draft, CV or analysis changed. Refresh and review the latest version before continuing.' : status === 401 || status === 403 ? 'CV analysis requires access to this draft and its document. Sign in again or contact your workspace administrator.' : status === 404 ? 'This CV analysis is unavailable.' : status === 400 || status === 422 ? 'Review the CV analysis status and complete its required decisions before continuing.' : 'CV analysis is temporarily unavailable. Refresh status or try again later.'); }
 }
 export async function analysisRequest(url: string, init?: RequestInit) {
-    const response = await fetch(url, { cache: 'no-store', ...init });
+    const response = await staffWorkspaceFetch(url, { cache: 'no-store', ...init });
     const body = await response.json().catch(() => null);
     if (!response.ok || !body) throw new AnalysisError(response.ok ? 503 : response.status);
     return body.result ?? body;

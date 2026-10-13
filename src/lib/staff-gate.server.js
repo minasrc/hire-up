@@ -7,11 +7,13 @@ import { authOptions } from './auth-options';
 import { staffIdentityFromSession, staffInviteEmailFromSession } from './staff-identity';
 import { getStaffPool, resolveOrClaimStaffAccess } from './staff-db.server';
 import { staffGoogleCredentialStatus } from './staff-google.server';
+import { staffWorkspaceContext, multiWorkspaceEnabled } from './staff-workspace-context.server.js';
+import { listStaffWorkspaces } from './staff-workspace-directory.js';
 import { STAFF_MFA_COOKIE, readStaffMfaProof } from './staff-mfa-cookie';
 
 /**
  * @typedef {{ provider: string, issuer: string, subject: string }} StaffGateIdentity
- * @typedef {{ user_id: string, membership_id: string, role_id: string, time_zone?: string | null, time_zone_version?: string }} StaffGatePrincipal
+ * @typedef {{ user_id: string, membership_id: string, role_id: string, workspace_name?: string | null, time_zone?: string | null, time_zone_version?: string }} StaffGatePrincipal
  * @typedef {import('next-auth').Session} StaffGateSession
  * @typedef {import('pg').Pool} StaffGatePool
  * @typedef {{ status: string, credentialId?: string, secret?: string } | null} StaffGateTotp
@@ -19,7 +21,7 @@ import { STAFF_MFA_COOKIE, readStaffMfaProof } from './staff-mfa-cookie';
  *   identity: StaffGateIdentity, principal: StaffGatePrincipal, totp: StaffGateTotp,
  *   pool: StaffGatePool, organizationId: string }} StaffGateResolved
  * @typedef {{ stage: 'signed-out' }
- *   | { stage: 'reauthenticate' } | { stage: 'unavailable' }
+ *   | { stage: 'workspace-required' } | { stage: 'reauthenticate' } | { stage: 'unavailable' }
  *   | { stage: 'unresolved', session: StaffGateSession, identity: StaffGateIdentity }
  *   | StaffGateResolved} StaffGateResult
  */
@@ -50,7 +52,9 @@ async function resolveStaffGate() {
     }
 
     const pool = getStaffPool();
-    const organizationId = process.env.STAFF_ORGANIZATION_ID;
+    const workspace = await staffWorkspaceContext(identity);
+    if (workspace.status === 'workspace-required') return { stage: 'workspace-required' };
+    const organizationId = workspace.organizationId;
     if (!pool || !organizationId || !process.env.NEXTAUTH_SECRET) {
         return { stage: 'unavailable' };
     }
@@ -70,6 +74,12 @@ async function resolveStaffGate() {
         return { stage: 'unavailable' };
     }
     if (!principal) {
+        if (multiWorkspaceEnabled()) {
+            try {
+                const workspaces = await listStaffWorkspaces(pool, identity, staffInviteEmailFromSession(session));
+                if (workspaces.length) return { stage: 'workspace-required' };
+            } catch { return { stage: 'unavailable' }; }
+        }
         return { stage: 'unresolved', session, identity };
     }
 
@@ -103,6 +113,7 @@ export async function requireStaffVerified() {
     if (gate.stage === 'signed-out' || gate.stage === 'reauthenticate') {
         redirect('/staff/sign-in');
     }
+    if (gate.stage === 'workspace-required') redirect('/staff/workspaces');
     if (gate.stage === 'unresolved') {
         redirect('/staff/no-access');
     }

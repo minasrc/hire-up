@@ -1,5 +1,7 @@
 "use client";
 
+import { staffWorkspaceUrl, refreshStaffWorkspace } from '@/lib/staff-workspace-fetch';
+
 import { useRouter } from 'next/navigation';
 import { useEffect, useRef, useState, useSyncExternalStore, type ReactNode } from 'react';
 import { Plus, Trash2 } from 'lucide-react';
@@ -401,7 +403,7 @@ export function ClientForm({
                     setBaseVersion(version);
                     setDirty(false);
                 }
-                router.refresh();
+                refreshStaffWorkspace(router);
             }
             return;
         }
@@ -409,7 +411,7 @@ export function ClientForm({
         if (!targetId) {
             throw new Error('Could not save. Please try again.');
         }
-        router.push(`/staff/clients/${targetId}`);
+        router.push(staffWorkspaceUrl(`/staff/clients/${targetId}`));
     };
 
     return (
@@ -798,7 +800,7 @@ export function JobForm({
                   }),
         });
         const targetId = jobId ?? payload?.result?.jobId;
-        router.push(targetId ? `/staff/jobs/${targetId}` : '/staff/jobs');
+        router.push(staffWorkspaceUrl(targetId ? `/staff/jobs/${targetId}` : '/staff/jobs'));
     };
 
     const updateBonus = (index: number, patch: Partial<JobBonus>) => {
@@ -1081,7 +1083,7 @@ export function PublishButton({
                         await staffMutation(`/api/staff/jobs/${jobId}/publish`, {
                             revisionId, expectedVersion, expectedClientVersion, reviewHash,
                         });
-                        router.refresh();
+                        refreshStaffWorkspace(router);
                     } catch (caught) {
                         setError(
                             caught instanceof Error
@@ -1117,7 +1119,7 @@ export function NewRevisionButton({ jobId, expectedJobVersion }: { jobId: string
                         await staffMutation(`/api/staff/jobs/${jobId}/revision`, {
                             expectedJobVersion,
                         });
-                        router.push(`/staff/jobs/${jobId}/edit`);
+                        router.push(staffWorkspaceUrl(`/staff/jobs/${jobId}/edit`));
                     } catch (caught) {
                         setError(
                             caught instanceof Error
@@ -1159,7 +1161,7 @@ export function MemberInviteForm({
         setInvitation(`You have been invited to Agora. Open ${window.location.origin}/staff/sign-in and sign in with ${String(data.get('email') ?? '').trim()}. Set up your authenticator when prompted.`);
         form.reset();
         setStatus('Invitation recorded — the person signs in with that Google account.');
-        router.refresh();
+        refreshStaffWorkspace(router);
     };
 
     return (
@@ -1246,7 +1248,7 @@ export function InviteDomainsForm({ domains }: { domains: string[] }) {
             domains: parseList(String(data.get('domains') ?? '')),
         });
         setSaved(true);
-        router.refresh();
+        refreshStaffWorkspace(router);
     };
 
     return (
@@ -1317,7 +1319,7 @@ export function MemberRevokeButton({
             version: Number(version),
         });
         setOpen(false);
-        router.refresh();
+        refreshStaffWorkspace(router);
     };
 
     return (
@@ -1404,7 +1406,7 @@ export function JobListingToggle({
                             listed: !listed,
                             expectedVersion,
                         });
-                        router.refresh();
+                        refreshStaffWorkspace(router);
                     } catch (caught) {
                         setError(
                             caught instanceof Error

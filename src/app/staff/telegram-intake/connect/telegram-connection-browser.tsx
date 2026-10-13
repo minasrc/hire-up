@@ -1,5 +1,7 @@
 'use client';
 
+import { staffWorkspaceFetch } from '@/lib/staff-workspace-fetch';
+
 import { useCallback, useEffect, useRef, useState } from 'react';
 import Link from 'next/link';
 import QRCode from 'qrcode';
@@ -34,7 +36,7 @@ class ConnectionRequestError extends Error {
     }
 }
 async function request(init?: RequestInit): Promise<Snapshot> {
-    const response = await fetch(endpoint, { cache: 'no-store', ...init });
+    const response = await staffWorkspaceFetch(endpoint, { cache: 'no-store', ...init });
     if (!response.ok) throw new ConnectionRequestError(response.status);
     return response.json();
 }

@@ -1,4 +1,6 @@
 'use client';
+
+import { staffWorkspaceFetch, refreshStaffWorkspace } from '@/lib/staff-workspace-fetch';
 import { createContext, useContext, useEffect, useMemo, useState, useSyncExternalStore, type ReactNode } from 'react';
 import { useRouter } from 'next/navigation';
 import { staffTimeZone } from '@/lib/staff-dates';
@@ -28,11 +30,11 @@ function AccountTimeZoneProvider({ accountId, savedTimeZone, version, children }
         now: () => Date.now(), storage: () => window.localStorage,
         auth: staffAuthRecovery,
         request: async (body, signal) => {
-            const response = await fetch('/api/staff/preferences/time-zone', { method: 'POST', headers: { 'content-type': 'application/json', 'x-staff-account-id': accountId }, body: JSON.stringify(body), signal });
+            const response = await staffWorkspaceFetch('/api/staff/preferences/time-zone', { method: 'POST', headers: { 'content-type': 'application/json', 'x-staff-account-id': accountId }, body: JSON.stringify(body), signal });
             const payload = await response.json().catch(() => null);
             return { ok: response.ok && payload?.ok === true, status: response.status, result: payload?.result,
                 code: typeof payload?.code === 'string' ? payload.code : undefined };
-        }, refresh: () => router.refresh(),
+        }, refresh: () => refreshStaffWorkspace(router),
     }));
     useEffect(() => { model.receive({ timeZone: savedTimeZone, version }); }, [model, savedTimeZone, version]);
     useEffect(() => {
@@ -47,7 +49,7 @@ function AccountTimeZoneProvider({ accountId, savedTimeZone, version, children }
         getServerSnapshot: () => model.getServerSnapshot().preference }), [accountId, model]);
     const controls = useMemo(() => ({ subscribe: model.subscribe, getSnapshot: model.getSnapshot,
         getServerSnapshot: model.getServerSnapshot, saveTimeZone: model.save,
-        keepCurrentZone: model.dismiss, reload: () => router.refresh() }), [model, router]);
+        keepCurrentZone: model.dismiss, reload: () => refreshStaffWorkspace(router) }), [model, router]);
     return <DateContext.Provider value={dates}><ControlsContext.Provider value={controls}>{children}</ControlsContext.Provider></DateContext.Provider>;
 }
 export function StaffTimeZoneProvider(props: ProviderProps) { return <AccountTimeZoneProvider key={props.accountId} {...props} />; }

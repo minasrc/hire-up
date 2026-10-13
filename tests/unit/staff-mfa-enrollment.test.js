@@ -4,6 +4,7 @@ import vm from 'node:vm';
 import test from 'node:test';
 import ts from 'typescript';
 import { createRequire } from 'node:module';
+import { mfaEnrollmentLabel } from '../../src/lib/staff-mfa-label.js';
 
 const require = createRequire(import.meta.url);
 const serviceSource = readFileSync(new URL('../../src/lib/staff-mfa.server.js', import.meta.url), 'utf8')
@@ -50,20 +51,23 @@ test('missing or mismatched persisted credentials fail closed', async () => {
 const pageSource = ts.transpileModule(readFileSync(new URL('../../src/app/staff/mfa/enroll/page.tsx', import.meta.url), 'utf8'), {
     compilerOptions: { module: ts.ModuleKind.CommonJS, jsx: ts.JsxEmit.ReactJSX },
 }).outputText;
-function page(gate, enrollment) {
+function page(gate, enrollment, multiWorkspace = false) {
     const calls = [];
+    const labels = [];
     const exports = {};
     const modules = {
         'react/jsx-runtime': require('react/jsx-runtime'),
         'next/navigation': { redirect: (url) => { throw Object.assign(new Error('redirect'), { url }); } },
         qrcode: { default: { toDataURL: async (uri) => { calls.push({ qr: uri }); return 'qr'; } } },
         '@/lib/staff-gate.server': { staffGate: async () => gate },
+        '@/lib/staff-workspace-context.server': { multiWorkspaceEnabled: () => multiWorkspace },
+        '@/lib/staff-mfa-label': { mfaEnrollmentLabel },
         '@/lib/staff-mfa.server': { enrollTotp: async () => { calls.push('enroll'); return enrollment; } },
-        '@/lib/totp': { totpUri: ({ secret }) => { calls.push({ secret }); return 'uri'; } },
+        '@/lib/totp': { totpUri: ({ secret, accountName }) => { calls.push({ secret }); labels.push(accountName); return 'uri'; } },
         '../mfa-forms': { MfaEnrollForm: () => null },
     };
     vm.runInNewContext(pageSource, { exports, require: (name) => { assert.ok(modules[name], name); return modules[name]; } });
-    return { render: exports.default, calls };
+    return { render: exports.default, calls, labels };
 }
 const gate = { stage: 'resolved', pool: {}, identity: { subject: '123' }, organizationId: 'org', session: { user: { email: 'synthetic@example.test' } } };
 test('a stale setup page redirects if another tab completed enrollment', async () => {
@@ -80,4 +84,11 @@ test('an active credential at the initial gate skips enrollment and QR generatio
     const p = page({ ...gate, totp: { status: 'active' } }, null);
     await assert.rejects(p.render(), { url: '/staff' });
     assert.deepEqual(p.calls, []);
+});
+
+test('multi-workspace setup qualifies the provisioning label but uses the stored pending secret', async () => {
+    const p = page({ ...gate, principal: { workspace_name: 'Independent workspace' } }, { status: 'pending', secret: 'STORED' }, true);
+    await p.render();
+    assert.deepEqual(p.labels, ['synthetic@example.test (Independent workspace)']);
+    assert.deepEqual(p.calls, ['enroll', { secret: 'STORED' }, { qr: 'uri' }]);
 });

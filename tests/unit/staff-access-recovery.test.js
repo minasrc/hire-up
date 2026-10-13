@@ -18,6 +18,8 @@ function boundary(file, overrides = {}) {
             getStaffPool: () => ({}),
             resolveOrClaimStaffAccess: async () => ({ principal: { user_id: 'user' }, totp: { status: 'active', credentialId: 'credential' } }),
         },
+        './staff-workspace-context.server.js': { staffWorkspaceContext: async () => ({ status: 'ok', organizationId: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa' }), multiWorkspaceEnabled: () => false },
+        './staff-workspace-directory.js': { listStaffWorkspaces: async () => [] },
         './staff-google.server': { staffGoogleCredentialStatus: async () => 'active' },
         './staff-mfa-cookie': { STAFF_MFA_COOKIE: 'staff_mfa', readStaffMfaProof: () => ({}) },
         './staff-operations': { StaffOperationsError: class extends Error {} },
@@ -38,6 +40,8 @@ function boundary(file, overrides = {}) {
 
 test('revoked Google authorization directs an existing session to reauthentication', async () => {
     const gate = boundary('staff-gate.server.js', {
+        './staff-workspace-context.server.js': { staffWorkspaceContext: async () => ({ status: 'ok', organizationId: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa' }), multiWorkspaceEnabled: () => false },
+        './staff-workspace-directory.js': { listStaffWorkspaces: async () => [] },
         './staff-google.server': { staffGoogleCredentialStatus: async () => 'revoked' },
     });
     assert.equal((await gate.staffGate()).stage, 'reauthenticate');

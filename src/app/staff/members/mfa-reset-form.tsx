@@ -1,5 +1,7 @@
 'use client';
 
+import { staffWorkspaceFetch, refreshStaffWorkspace } from '@/lib/staff-workspace-fetch';
+
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
 
@@ -21,12 +23,12 @@ export function MemberMfaResetForm({ membershipId, version, displayName }: {
         if (busy) return;
         setBusy(true); setError(null);
         try {
-            const response = await fetch('/api/staff/members/mfa-reset', {
+            const response = await staffWorkspaceFetch('/api/staff/members/mfa-reset', {
                 method: 'POST', headers: { 'content-type': 'application/json' },
                 body: JSON.stringify({ membershipId, version: Number(version), reason, code }),
             });
             const body = await response.json().catch(() => null);
-            if (response.ok) { setDone(true); router.refresh(); return; }
+            if (response.ok) { setDone(true); refreshStaffWorkspace(router); return; }
             if (response.status === 429) {
                 const seconds = Number(response.headers.get('retry-after'));
                 const minutes = seconds > 0 ? Math.ceil(seconds / 60) : 10;

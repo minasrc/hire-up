@@ -29,6 +29,7 @@ function subject() {
             return [state[index], value => { state[index] = typeof value === 'function' ? value(state[index]) : value; }];
         } };
         if (name === 'next/navigation') return { useRouter: () => ({ refresh: () => { refreshes++; } }), useSearchParams: () => new URLSearchParams(), usePathname: () => `/staff/candidates/${id}` };
+        if (name === '@/lib/staff-workspace-fetch') return { staffWorkspaceUrl: href => href, refreshStaffWorkspace: router => router.refresh() };
         if (name === '@/lib/utils') return { cn: (...values) => values.join(' ') };
         return new Proxy({}, { get: (_, property) => String(property) });
     } });

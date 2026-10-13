@@ -72,20 +72,22 @@ function formSubject(respond, { clientId = id, initial = client, onSaved } = {})
     const saved = [];
     const recovery = createStaffAuthRecovery((type, detail) => events.push({ type, detail }));
     const mutation = {};
+    const request = async (url, options) => {
+        const body = JSON.parse(options.body);
+        requests.push({ url, body });
+        return respond(requests.length, body);
+    };
     runInNewContext(mutationCode, {
         exports: mutation,
         Error,
         Event,
         CustomEvent,
         require: name => {
+            if (name === '@/lib/staff-workspace-fetch') return { staffWorkspaceFetch: request };
             assert.equal(name, './staff-auth-recovery');
             return { staffAuthRecovery: recovery };
         },
-        fetch: async (url, options) => {
-            const body = JSON.parse(options.body);
-            requests.push({ url, body });
-            return respond(requests.length, body);
-        },
+        fetch: request,
         window: { dispatchEvent: event => events.push(event) },
     });
     const hooks = persistentReact();
@@ -117,6 +119,7 @@ function formSubject(respond, { clientId = id, initial = client, onSaved } = {})
         },
         '@/lib/client-form-errors.js': { mapClientFieldErrors },
         '@/lib/staff-mutation': mutation,
+        '@/lib/staff-workspace-fetch': { staffWorkspaceUrl: href => href, refreshStaffWorkspace: router => router.refresh() },
     };
     const exports = {};
     runInNewContext(formCode, {

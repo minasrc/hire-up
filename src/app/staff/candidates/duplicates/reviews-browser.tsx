@@ -1,5 +1,7 @@
 'use client';
 
+import { staffWorkspaceFetch, refreshStaffWorkspace } from '@/lib/staff-workspace-fetch';
+
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { useEffect, useState } from 'react';
@@ -82,7 +84,7 @@ export function DuplicateReviewsBrowser({
     useEffect(() => {
         if (!selectedReviewId || demo) return;
         const controller = new AbortController();
-        fetch(`/api/staff/candidates/duplicates?reviewId=${encodeURIComponent(selectedReviewId)}`, {
+        staffWorkspaceFetch(`/api/staff/candidates/duplicates?reviewId=${encodeURIComponent(selectedReviewId)}`, {
             signal: controller.signal,
             cache: 'no-store',
         }).then(async (response) => {
@@ -132,7 +134,7 @@ export function DuplicateReviewsBrowser({
         setBusyId(review.id);
         setError(null);
         try {
-            const response = await fetch('/api/staff/candidates/duplicates', {
+            const response = await staffWorkspaceFetch('/api/staff/candidates/duplicates', {
                 method: 'POST',
                 headers: { 'content-type': 'application/json' },
                 body: JSON.stringify({
@@ -178,7 +180,7 @@ export function DuplicateReviewsBrowser({
         setMergeError(null);
         try {
             if (!demo) {
-                const response = await fetch('/api/staff/candidates/duplicates/merge', {
+                const response = await staffWorkspaceFetch('/api/staff/candidates/duplicates/merge', {
                     method: 'POST',
                     headers: { 'content-type': 'application/json' },
                     body: JSON.stringify({
@@ -210,7 +212,7 @@ export function DuplicateReviewsBrowser({
             setResolvedIds((current) => [...current, review.id]);
             setSelectedId(null);
             setMergeChoice(null);
-            if (!demo) router.refresh();
+            if (!demo) refreshStaffWorkspace(router);
         } catch {
             setMergeError('The connection was interrupted. Check the candidate profile before trying again.');
         } finally {

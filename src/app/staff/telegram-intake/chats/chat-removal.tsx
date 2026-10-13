@@ -1,5 +1,7 @@
 'use client';
 
+import { staffWorkspaceFetch } from '@/lib/staff-workspace-fetch';
+
 import { useEffect, useRef, useState } from 'react';
 import { Button } from '@/components/staff-ui/button';
 import { Dialog, DialogContent, DialogDescription, DialogTitle } from '@/components/staff-ui/dialog';
@@ -75,7 +77,7 @@ export function ChatRemoval({ chatId, title, state = 'none', receipt, disabled, 
         }
     }, [accessBlocked]);
     async function request(payload: Record<string, unknown>, signal: AbortSignal) {
-        const response = await fetch(endpoint, {
+        const response = await staffWorkspaceFetch(endpoint, {
             method: 'POST',
             cache: 'no-store',
             headers: { 'content-type': 'application/json' },
