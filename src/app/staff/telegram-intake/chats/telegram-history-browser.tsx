@@ -3,8 +3,6 @@
 import { staffWorkspaceFetch } from '@/lib/staff-workspace-fetch';
 
 import { useCallback, useEffect, useRef, useState } from 'react';
-import Link from 'next/link';
-import { useRouter } from 'next/navigation';
 import { CheckCircle2, MessageSquare, RefreshCw, Search } from 'lucide-react';
 import { Button } from '@/components/staff-ui/button';
 import { Card } from '@/components/staff-ui/card';
@@ -44,7 +42,6 @@ async function request(url: string, init?: RequestInit) {
 }
 
 export function TelegramHistoryBrowser({ workspaceId, hostedEnabled = false, onboarding = false }: { workspaceId: string; hostedEnabled?: boolean; onboarding?: boolean }) {
-    const router = useRouter();
     const [snapshot, setSnapshot] = useState<Snapshot | null>(null);
     const view = 'all';
     const [search, setSearch] = useState('');
@@ -75,6 +72,8 @@ export function TelegramHistoryBrowser({ workspaceId, hostedEnabled = false, onb
     const eligibleChats = snapshot?.chats.filter(chat => !chat.removalState || chat.removalState === 'none') ?? [];
     const selectedRows = useRef(new Map<string, Chat>());
     const autoDiscovery = useRef<string | null>(null);
+    const [imported, setImported] = useState(false);
+    const [proposalCount, setProposalCount] = useState(0);
     const [starting, setStarting] = useState(false);
     const [importRevision, setImportRevision] = useState(0);
     const allMarked = Boolean(eligibleChats.length && eligibleChats.every(chat => marked.includes(chat.id)));
@@ -191,7 +190,7 @@ export function TelegramHistoryBrowser({ workspaceId, hostedEnabled = false, onb
         setStarting(true); setImportRevision(value => value + 1);
         const success = await act({ action: 'start', selected: true, chats: chats.map(chat => ({ chatId: chat.id, expectedVersion: chat.version })) }, '', true);
         setStarting(false); setImportRevision(value => value + 1);
-        if (success && onboarding) router.push('/staff/telegram-intake');
+        if (success) setImported(true);
     }
     useEffect(() => {
         const account = snapshot?.connection?.accountUserId;
@@ -203,10 +202,10 @@ export function TelegramHistoryBrowser({ workspaceId, hostedEnabled = false, onb
     }, [snapshot, busy, loading, denied]);
 
     return <section className="flex w-full flex-col gap-3">
-        <header className="mx-auto flex w-full max-w-6xl flex-wrap items-center justify-between gap-2"><h1 className="text-[26px] leading-8 font-medium text-foreground">{onboarding ? 'Connect Telegram' : 'Choose chats'}</h1>{!onboarding ? <Button asChild size="sm" variant="outline"><Link href="/staff/telegram-intake">Review proposals</Link></Button> : null}</header>
+        <header className="mx-auto flex w-full max-w-6xl flex-wrap items-center justify-between gap-2"><h1 className="text-[26px] leading-8 font-medium text-foreground">{onboarding ? 'Connect Telegram' : 'Choose chats'}</h1></header>
         {onboarding ? <ol aria-label="Telegram onboarding steps" className="flex w-full items-center gap-3 py-3 text-sm text-muted-foreground">
             {['Connect', 'Choose chats', 'Review'].map((label, index) => {
-                const active = snapshot?.canImport ? 1 : 0;
+                const active = proposalCount > 0 ? 2 : snapshot?.canImport ? 1 : 0;
                 return <li key={label} aria-current={index === active ? 'step' : undefined} className={`flex min-w-0 flex-1 items-center gap-2 ${index === active ? 'font-medium text-foreground' : 'text-muted-foreground'}`}><span className={`flex h-7 w-7 shrink-0 items-center justify-center rounded-full ${index <= active ? 'bg-primary text-primary-foreground' : 'bg-muted'}`}>{index < active ? <CheckCircle2 className="h-4 w-4" aria-label="Complete" /> : index + 1}</span>{label}</li>;
             })}
         </ol> : null}
@@ -214,7 +213,7 @@ export function TelegramHistoryBrowser({ workspaceId, hostedEnabled = false, onb
         {error ? <div role="alert" className="flex flex-wrap items-center justify-between gap-3 rounded-lg border p-4 text-sm"><p>{error}</p><Button variant="outline" onClick={refreshStatus} disabled={busy}>Retry</Button></div> : null}
         {snapshot?.canImport ? <details className="rounded-lg border bg-card px-3 py-2"><summary className="cursor-pointer text-sm font-medium"><CheckCircle2 className="mr-2 inline h-4 w-4 text-primary" />Telegram connected</summary><div className="mt-4"><TelegramConnectionBrowser workspaceId={workspaceId} hostedEnabled={hostedEnabled} blocked={denied} onConnectionChange={connectionChanged} onDenied={denyRemovalAccess} onChooseChats={chooseChats} chooseChatsLabel={null} /></div></details>
             : <TelegramConnectionBrowser workspaceId={workspaceId} hostedEnabled={hostedEnabled} blocked={denied} onConnectionChange={connectionChanged} onDenied={denyRemovalAccess} onChooseChats={chooseChats} chooseChatsLabel="Choose chats" />}
-        {snapshot?.canImport || starting ? <ProcessingStatus key={importRevision} starting={starting} reviewLink={false} /> : null}
+        {snapshot?.canImport || starting ? <ProcessingStatus key={importRevision} starting={starting} imported={imported} reviewLink onProposalCount={setProposalCount} /> : null}
         {snapshot?.canImport ? <Card className="overflow-hidden">
             <div className="flex items-center justify-between gap-3 border-b p-4"><h2 ref={chatPanel} tabIndex={-1} className="scroll-mt-24 font-semibold">Your chats</h2><Button ref={discoveryPanel} variant="ghost" size="sm" disabled={blocked || snapshot.discovery.status === 'active'} onClick={() => void act({ action: 'discover' }, 'Updating chats…')} aria-label="Refresh chat list"><RefreshCw className={snapshot.discovery.status === 'active' ? 'motion-safe:animate-spin' : ''} /></Button></div>
             <form className="flex items-center gap-2 p-4" onSubmit={event => { event.preventDefault(); setQuery(search.trim()); setCursors(['']); setLoading(true); }}>

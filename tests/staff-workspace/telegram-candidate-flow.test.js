@@ -193,6 +193,8 @@ test('Candidate intake has a compact chat picker and approve/edit/reject review 
     assert.equal(started.chats.length, 2);
     assert.deepEqual(started.chats.map(chat => chat.chatId), [chats[0].id,chats[50].id]);
     await expect(page.getByRole('link', { name: 'Review proposals', exact: true })).toHaveCount(1);
+    await expect(page.getByRole('status', { name: 'Telegram activity' }).getByRole('link', { name: 'Review proposals', exact: true })).toBeVisible();
+    await expect(page.getByText('1 proposal ready', { exact: true })).toBeVisible();
     mkdirSync(join(root,'test-results'), { recursive: true });
     await page.screenshot({ path: join(root,'test-results/candidate-flow-desktop.png'), fullPage: true });
     await page.setViewportSize({ width: 390, height: 844 });
@@ -214,6 +216,7 @@ test('Candidate intake has a compact chat picker and approve/edit/reject review 
     await unifiedSearch.fill('alice@example.test');
     await expect(page.getByRole('table').getByRole('link', { name: 'Alice Candidate', exact: true })).toBeVisible();
     assert.equal(meaningQuery, undefined, 'email lookup does not enqueue a meaning search');
+    await expect(page.getByText('1 candidate', { exact: true })).toBeVisible();
     await expect(page).toHaveURL(/q=alice%40example.test/);
     await unifiedSearch.fill('Remote Ethereum engineer');
     try { await expect.poll(() => meaningQuery?.query).toBe('Remote Ethereum engineer'); } catch (error) { t.diagnostic(JSON.stringify({ requests: meaningRequests, url: page.url(), input: await unifiedSearch.inputValue(), body: (await page.locator('body').innerText()).slice(-2200) })); throw error; }

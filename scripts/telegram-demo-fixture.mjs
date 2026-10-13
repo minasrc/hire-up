@@ -5,6 +5,15 @@ import { AUTHZ_ID, staffPoolOptions } from '../tests/support/staff-authorization
 import { saveCandidateProfile } from '../src/lib/candidate-profile-operations.js';
 import { createTelegramDraft, registerTelegramWorker } from '../src/lib/telegram-intake-operations.js';
 
+export const telegramDemoSamples = [
+    { chat: 'Engineering community', name: 'Alex Rivera', text: 'I am Alex Rivera. My email is alex@example.test. I am a Senior Solidity engineer in Barcelona. I have five years of Ethereum experience and I am open to remote roles.' },
+    { chat: 'Talent network', name: 'Maya Chen', text: 'I am Maya Chen. My email is maya@example.test. I moved to Lisbon. I am now a Senior backend engineer and lead a backend team. I am interested in remote opportunities.' },
+    { chat: 'Web3 jobs', name: 'Jordan Blake', text: 'I am Jordan Blake, a Rust and blockchain engineer in Berlin. My email is jordan@example.test. I have four years building smart contracts and am looking for a full-time engineering role.' },
+    { chat: 'Product designers', name: 'Casey Morgan', text: 'I am Casey Morgan, a Senior product designer in Valencia. My email is casey@example.test. I design SaaS products in Figma and am available for contract work.' },
+    { chat: 'Remote work', name: 'Morgan Lee', text: 'I am Morgan Lee, a Python backend engineer based in Porto. My email is morgan@example.test. I have six years of experience and am seeking fully remote roles.' },
+    { chat: 'Barcelona tech', name: 'Rafael Costa', text: 'I am Rafael Costa, a Node.js full-stack developer in Barcelona. My email is rafael@example.test. I have three years working with React and PostgreSQL and am open to new roles.' },
+];
+
 // Only called by the disposable staff preview, never by the application.
 export async function seedTelegramDemo(db, password, { liveExtraction = false } = {}) {
     const pool = new pg.Pool(staffPoolOptions(db, password, 2));
@@ -31,7 +40,7 @@ export async function seedTelegramDemo(db, password, { liveExtraction = false } 
         const worker = await registerTelegramWorker(...args, 'Local demo');
         const publicKey = generateKeyPairSync('rsa', { modulusLength: 2048 }).publicKey.export({ format: 'der', type: 'spki' }).toString('base64');
         const connection = randomUUID(), account = randomUUID();
-        const chats = ['Engineering community', 'Talent network', 'Web3 jobs', 'Product designers', 'Remote work', 'Barcelona tech'];
+        const chats = telegramDemoSamples.map(sample => sample.chat);
         const chatIds = chats.map(() => randomUUID());
         psql(db, `insert into app.telegram_connector_workers(id,organization_id,owner_user_id,public_key_spki) values('${worker.id}','${org}','${user}','${publicKey}');
             insert into app.telegram_connections(id,organization_id,owner_user_id,worker_id,status,auth_expires_at,profile) values('${connection}','${org}','${user}','${worker.id}','connected',now()+interval '1 hour','{"telegramUserId":"123","username":"local_demo","displayName":"Local demo"}');
@@ -40,14 +49,9 @@ export async function seedTelegramDemo(db, password, { liveExtraction = false } 
             ${chats.map((title, i) => `insert into app.telegram_history_chats(id,organization_id,owner_user_id,account_id,peer_kind,peer_id,title,last_message_at) values('${chatIds[i]}','${org}','${user}','${account}','chat','${i+1}','${title}',now()-interval '${i} hours');`).join('\n')}
             ${[0,1].map(folder => `insert into app.telegram_history_jobs(organization_id,owner_user_id,account_id,kind,folder,connection_generation,status,cursor) values('${org}','${user}','${account}','dialogs',${folder},1,'completed','{}');`).join('\n')}`);
         if (liveExtraction) {
-            const texts = [
-                'I am Alex Rivera. My email is alex@example.test. I am a Senior Solidity engineer in Barcelona. I have five years of Ethereum experience and I am open to remote roles.',
-                'I am Maya Chen. My email is maya@example.test. I moved to Lisbon. I am now a Senior backend engineer and lead a backend team. I am interested in remote opportunities.',
-                'I am Sam Taylor. I am a Product designer. I am available for contract work.',
-            ];
-            const messages = texts.map((text, index) => ({ messageId: '1', kind: 'message', sentAt: new Date().toISOString(), editedAt: null,
-                sender: { peer: { kind: 'user', id: String(900 + index) }, username: null, displayName: ['Alex Rivera','Maya Chen','Sam Taylor'][index] },
-                replyToMessageId: null, forwardedFrom: null, text, attachments: [] }));
+            const messages = telegramDemoSamples.map((sample, index) => ({ messageId: '1', kind: 'message', sentAt: new Date().toISOString(), editedAt: null,
+                sender: { peer: { kind: 'user', id: String(900 + index) }, username: null, displayName: sample.name },
+                replyToMessageId: null, forwardedFrom: null, text: sample.text, attachments: [] }));
             for (const [index, message] of messages.entries()) {
                 const body = JSON.stringify(message).replace(/'/g, "''");
                 psql(db, `insert into app.telegram_history_messages(organization_id,owner_user_id,chat_id,message_id,body,stored_bytes) values('${org}','${user}','${chatIds[index]}',1,'${body}',octet_length('${body}'::jsonb::text));`);
