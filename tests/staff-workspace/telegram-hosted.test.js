@@ -160,8 +160,15 @@ test('Hosted Telegram browser starts on demand, cancels setup and protects QR/pa
         assert.equal(wakeReceipt.changed, true, 'The authenticated HTTP notification channel observes the browser action');
         assert.deepEqual(Object.keys(wakeReceipt).sort(), ['changed', 'cursor', 'protocolVersion']);
         wakeAbort.abort();
-        assert.equal((await actions.getByRole('button', { name: 'Preparing sign-in…', exact: true }).boundingBox()).y,
-            (await actions.getByRole('button', { name: 'Cancel sign-in', exact: true }).boundingBox()).y, 'Preparing and cancel share one action row');
+        for (const width of [390, 320]) {
+            await page.setViewportSize({ width, height: 844 });
+            await expect.poll(() => actions.evaluate(group => {
+                const buttons = [...group.querySelectorAll('button')];
+                return buttons[0].getBoundingClientRect().top - buttons[1].getBoundingClientRect().top;
+            }), { message: `Preparing and cancel must share one action row at ${width}px` }).toBe(0);
+            assert.equal(await page.evaluate(() => document.documentElement.scrollWidth > innerWidth), false, 'Mobile action labels must not overflow');
+        }
+        await page.setViewportSize({ width: 390, height: 844 });
         await page.getByRole('button', { name: 'Cancel sign-in', exact: true }).click();
         await expect(page.getByText('Setup cancelled. Click Connect Telegram when you are ready.', { exact: true })).toBeVisible();
         assert.equal(prepares, 1, 'Strict mode must not duplicate provisioning');

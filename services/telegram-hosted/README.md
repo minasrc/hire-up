@@ -186,9 +186,10 @@ With fast responses and no queued work, supervisor control falls from 25,920
 to 8,640 requests/day. Ten enrolled idle children add 14,400 polls/day. A quiet
 account plus one quiet selected channel per owner adds approximately 57,600
 native claim/completion requests/day, including independent lane scheduling hints.
-Idle maintenance adds 288 requests/day. With no provider jobs the total is
-approximately 23,328 requests/day; with a quiet account and one quiet selected
-channel per owner it is approximately 80,928 requests/day. These are respectively
+Idle maintenance adds 288 requests/day. The shared wake channel adds roughly
+3,400 requests/day when each wait runs its full twenty-five seconds. With no
+provider jobs the total is approximately 26,700 requests/day; with a quiet account
+and one quiet selected channel per owner it is approximately 84,300 requests/day. These are respectively
 about 97% and 90% below the previous roughly 817,920 empty requests/day.
 These are request estimates, not bill estimates. More channels, source
 repair, imports, browser tabs, retries and retention cleanup add real work.

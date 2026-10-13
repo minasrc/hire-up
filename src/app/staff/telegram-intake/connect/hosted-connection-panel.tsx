@@ -160,10 +160,10 @@ export function HostedConnectionPanel({ connection, loaded, disabled, attemptRef
         {error ? <p role="alert" className="text-sm">{error}</p> : null}
         {children}
         {serviceNeedsCheck ? <p className="text-sm text-muted-foreground">Service status updates automatically. Check again to see whether the service is available.</p> : null}
-        <div role="group" aria-label="Telegram connection actions" className="flex flex-wrap items-center gap-3">
+        <div role="group" aria-label="Telegram connection actions" className="grid grid-cols-2 gap-3 [&>button]:h-auto [&>button]:min-h-9 [&>button]:min-w-0 [&>button]:whitespace-normal sm:flex sm:flex-wrap sm:items-center">
             {!active || signingIn ? <Button onClick={() => void connect()} disabled={disabled || busy || Boolean(active) || !loaded || Boolean(blocked) || !status?.serviceOnline || status.state === 'unavailable'}>{busy || connection?.status === 'requested' ? 'Preparing sign-in…' : connection?.status === 'qr_pending' ? 'Sign-in in progress' : connection?.status === 'failed' ? 'Retry sign-in' : 'Connect Telegram'}</Button> : null}
             {phase === 'preparing' || phase === 'starting' ? <Button variant="outline" disabled={phase === 'starting'} onClick={() => { attemptRef.current?.abort(); actionError.current = true; setError('Setup cancelled. Click Connect Telegram when you are ready.'); }}>Cancel sign-in</Button> : actions}
-            {serviceNeedsCheck ? <Button variant="outline" disabled={busy || disabled} onClick={() => setRefresh(value => value + 1)}><RefreshCw />Check service status</Button> : null}
+            {serviceNeedsCheck ? <Button className="col-span-2 sm:col-span-1" variant="outline" disabled={busy || disabled} onClick={() => setRefresh(value => value + 1)}><RefreshCw />Check service status</Button> : null}
         </div>
     </Card>
     {status?.enrollment ? <Card className="p-4"><details className="space-y-3 rounded-md border p-3">
