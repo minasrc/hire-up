@@ -5,6 +5,7 @@ import * as React from 'react';
 import { renderToString } from 'react-dom/server';
 import { expect, test } from '@playwright/test';
 import ts from 'typescript';
+import { staffWorkspaceClientSource } from '../support/staff-workspace-client-source.js';
 
 const require = createRequire(import.meta.url);
 const reactScripts = ['react', 'react-dom'].map(name => readFileSync(
@@ -14,6 +15,7 @@ const compile = path => ts.transpileModule(readFileSync(new URL(`../../${path}`,
     compilerOptions: { module: ts.ModuleKind.CommonJS, jsx: ts.JsxEmit.React, target: ts.ScriptTarget.ES2020 },
 }).outputText;
 const sources = {
+    workspace: staffWorkspaceClientSource,
     dates: compile('src/lib/staff-dates.js'),
     auth: compile('src/lib/staff-auth-recovery.js'),
     model: compile('src/app/staff/time-zone-model.ts'),
@@ -53,6 +55,7 @@ function loadComponents(React, source, refresh) {
         new Function('exports', 'require', 'React', source[name])(exports, require, React);
         return exports;
     };
+    modules['@/lib/staff-workspace-fetch'] = load('workspace');
     modules['@/lib/staff-dates'] = modules['../../lib/staff-dates.js'] = load('dates');
     modules['@/lib/staff-auth-recovery'] = load('auth');
     modules['./time-zone-model'] = load('model');

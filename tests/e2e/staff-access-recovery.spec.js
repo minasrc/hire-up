@@ -3,6 +3,7 @@ import { createRequire } from 'node:module';
 import { dirname, join } from 'node:path';
 import { expect, test } from '@playwright/test';
 import ts from 'typescript';
+import { staffWorkspaceClientSource } from '../support/staff-workspace-client-source.js';
 
 const require = createRequire(import.meta.url);
 const reactScripts = ['react', 'react-dom'].map((name) => readFileSync(
@@ -32,7 +33,9 @@ for (const scenario of [
         for (const content of reactScripts) await page.addScriptTag({ content });
         await page.addScriptTag({ content: `
             const state = (() => { const exports = {}; ${authState}; return exports; })();
+            const workspaceClient = (() => { const exports = {}; ${staffWorkspaceClientSource}; return exports; })();
             const imports = {
+                '@/lib/staff-workspace-fetch': workspaceClient,
                 react: React,
                 '@/lib/staff-auth-recovery': state,
                 './staff-auth-recovery': state,
