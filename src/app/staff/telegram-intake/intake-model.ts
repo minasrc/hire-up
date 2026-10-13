@@ -19,6 +19,8 @@ export interface IntakeDraft {
     documentRevision?: number;
     status: 'pending' | 'snoozed' | 'duplicate' | 'approved' | 'discarded';
     fields: DraftFields;
+    proposedFields?: DraftFields;
+    existingCandidate?: { id: string; version: string; fields: DraftFields } | null;
     cv: { filename: string; status: string } | null;
     missingFields: string[];
     sourceTitle: string;
@@ -40,7 +42,7 @@ export interface IntakeResult {
 
 export const viewLabels: Record<IntakeView, string> = {
     ready: 'Ready', needs_information: 'Needs information', snoozed: 'Snoozed',
-    duplicates: 'Duplicates', all: 'All drafts',
+    duplicates: 'Duplicates', all: 'All proposals',
 };
 export const fieldLabels: Record<string, string> = {
     firstName: 'First name', lastName: 'Last name', primaryEmail: 'Primary email',

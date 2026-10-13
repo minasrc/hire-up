@@ -21,7 +21,13 @@ export function telegramExtractionAction(pool, identity, org, input) {
             const proposal = await result(client, 'select app.telegram_extraction_proposal_v1($1) as result', [action.proposalId]);
             normalizeTelegramDraftFields({ ...proposal.fields, [proposal.field]: proposal.value });
         }
-        return result(client, 'select app.telegram_extraction_action_v1($1::jsonb) as result', [JSON.stringify(action)]);
+        const resolvedField = action.action === 'resolve' ? (await result(client, 'select app.telegram_extraction_proposal_v1($1) as result', [action.proposalId])).field : null;
+        const output = await result(client, 'select app.telegram_extraction_action_v1($1::jsonb) as result', [JSON.stringify(action)]);
+        if (output.draft && action.action === 'resolve') {
+            await client.query('select app.telegram_review_field_decision_v1($1,$2)', [output.draft.id, resolvedField]);
+        }
+        if (output.draft) output.draft = await result(client, 'select app.telegram_review_draft_v1($1) as result', [output.draft.id]);
+        return output;
     });
 }
 export async function telegramExtractionWorkerOperation(pool, token, action, input) {

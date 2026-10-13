@@ -39,7 +39,7 @@ export function decodeHistoryCursor(value) {
 }
 export function telegramHistoryAction(pool, identity, org, input) {
     const action = historyStaffAction(input);
-    return staff(pool, identity, org, async ({ client }) => (await client.query('select app.telegram_history_action_v1($1::jsonb) as result', [JSON.stringify(action)])).rows[0].result);
+    return staff(pool, identity, org, async ({ client }) => (await client.query(action.action === 'start' ? 'select app.telegram_candidate_start_v1($1::jsonb) as result' : 'select app.telegram_history_action_v1($1::jsonb) as result', [JSON.stringify(action)])).rows[0].result);
 }
 export async function telegramHistoryWorkerOperation(pool, token, action, input) {
     if (!/^[A-Za-z0-9_-]{64}$/.test(token ?? '')) { const error = new Error('Unauthorized'); error.code = '42501'; throw error; }

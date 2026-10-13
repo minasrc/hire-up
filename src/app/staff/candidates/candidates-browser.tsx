@@ -108,7 +108,7 @@ export function CandidatesBrowser({
                         Clear
                     </Button>
                 ) : null}
-                {semanticSearchEnabled && profileOptions?.canWrite === true ? <><Button asChild variant="outline"><Link href="/staff/telegram-intake">Telegram intake</Link></Button><Button asChild variant="outline"><Link href="/staff/candidates/search">Search by meaning</Link></Button></> : null}
+                {semanticSearchEnabled && profileOptions?.canWrite === true ? <><Button asChild variant="outline"><Link href="/staff/telegram-intake">Review proposals</Link></Button><Button asChild variant="outline"><Link href="/staff/candidates/search">Search candidates</Link></Button></> : null}
                 {canReviewDuplicates ? (
                     <Button asChild variant="outline">
                         <Link href="/staff/candidates/duplicates">Review matches</Link>

@@ -227,7 +227,7 @@ function ConnectionBrowser({ workspaceId, hostedEnabled, blocked, onConnectionCh
 
     const ConnectionCard = hostedEnabled ? 'div' : Card;
     const requestErrorPanel = error ? <div role="alert" className="rounded-lg border border-border p-4 text-sm"><p>{error}</p><Button className="mt-3" variant="outline" disabled={busy} onClick={() => { mutationError.current = false; setAccessDenied(false); setRefresh(value => value + 1); }}><RefreshCw />Retry status</Button></div> : null;
-    const passwordAction = connection?.status === 'awaiting_password' ? <Button type="submit" form={passwordFormId} disabled={busy || accessDenied || connection.passwordPending || !worker?.online || !password}>{busy || connection.passwordPending ? 'Checking password…' : 'Continue securely'}</Button> : null;
+    const passwordAction = connection?.status === 'awaiting_password' ? <Button type="submit" form={passwordFormId} disabled={busy || accessDenied || connection.passwordPending || !worker?.online || !password}>{busy || connection.passwordPending ? 'Checking password…' : 'Continue'}</Button> : null;
     const connectionActions = connection ? <>
         {passwordAction}
         {(active || connection.status === 'failed') && connection.status !== 'disconnecting' ? <Button variant="outline" disabled={busy || accessDenied} onClick={() => { hostedAttempt.current?.abort(); setPassword(''); void mutate({ action: 'disconnect', connectionId: connection.id, generation: connection.generation }); }}>{['connected', 'failed'].includes(connection.status) ? 'Disconnect Telegram' : 'Cancel sign-in'}</Button> : null}
@@ -235,7 +235,7 @@ function ConnectionBrowser({ workspaceId, hostedEnabled, blocked, onConnectionCh
     </> : null;
     const connectionPanel = connection ? <ConnectionCard ref={signInPanel} className={`scroll-mt-24 space-y-4 ${hostedEnabled ? ['requested', 'failed', 'disconnected'].includes(connection.status) ? 'border-t border-border pt-5' : '' : 'p-6'}`} aria-busy={busy}>
         <div aria-live="polite">
-            {connection.status === 'requested' ? <><h2 className="font-semibold">Preparing Telegram sign-in</h2><p className="mt-2 text-sm text-muted-foreground">{hostedEnabled ? 'The service is requesting a sign-in code. It will appear here automatically.' : 'Your Mac is requesting a sign-in code. It will appear here automatically.'}</p></> : null}
+            {connection.status === 'requested' ? <><h2 className="font-semibold">Preparing Telegram sign-in</h2><p className="mt-2 text-sm text-muted-foreground">{hostedEnabled ? 'Preparing your sign-in code…' : 'Preparing your sign-in code…'}</p></> : null}
             {connection.status === 'qr_pending' ? <><h2 className="font-semibold">Scan with Telegram</h2><p className="mt-2 text-sm text-muted-foreground">On your phone, open Telegram → Settings → Devices → Link Desktop Device, then scan this code.</p></> : null}
             {connection.status === 'awaiting_password' ? <h2 className="font-semibold">Complete Telegram two-step verification</h2> : null}
             {connection.status === 'connected' ? <><h2 className="flex items-center gap-2 font-semibold"><CheckCircle2 className="h-5 w-5" />Telegram connected</h2><p className="mt-2">{connection.profile?.displayName}</p>{connection.profile?.username ? <p className="text-sm text-muted-foreground">@{connection.profile.username}</p> : null}</> : null}
@@ -246,9 +246,9 @@ function ConnectionBrowser({ workspaceId, hostedEnabled, blocked, onConnectionCh
         {connection.errorCode ? <p role="alert" className="text-sm">{displayedConnectionError(connection.errorCode)}</p> : null}
         {connection.status === 'qr_pending' ? <>{qrAvailable ? <canvas ref={canvas} role="img" aria-label="Telegram sign-in QR code" className="mx-auto rounded-lg" hidden={qrError} /> : null}{!qrAvailable || qrError ? <p role="status" className="text-sm text-muted-foreground">{qrError ? 'Unable to display the code. Refresh the status to try again.' : hostedEnabled ? 'This code expired. Waiting for a fresh sign-in code…' : 'This code expired. Waiting for a fresh code from your Mac…'}</p> : null}{qrError ? <Button variant="outline" onClick={() => setRefresh(value => value + 1)}>Refresh sign-in code</Button> : null}</> : null}
         {connection.status === 'awaiting_password' ? <form id={passwordFormId} className="space-y-3" onSubmit={submitPassword}>
-            <p className="text-sm text-muted-foreground">{hostedEnabled ? 'Telegram has two-step verification enabled. Your password is encrypted in this browser for your private Telegram connection.' : 'Telegram has two-step verification enabled. Your password is encrypted in this browser for your Mac connector.'}</p>
+            <p className="text-sm text-muted-foreground">{hostedEnabled ? 'Enter your Telegram two-step verification password.' : 'Telegram has two-step verification enabled. Your password is encrypted in this browser for your Mac connector.'}</p>
             {connection.passwordHint ? <p className="text-sm">Password hint: {connection.passwordHint}</p> : null}
-            <Label htmlFor="telegram-password">Telegram two-step verification password</Label><Input ref={passwordInput} id="telegram-password" name="telegram-password" type="password" autoComplete="off" value={password} onChange={event => setPassword(event.target.value)} disabled={busy || accessDenied || connection.passwordPending || !worker?.online} required />
+            <Label htmlFor="telegram-password">Password</Label><Input ref={passwordInput} id="telegram-password" name="telegram-password" type="password" autoComplete="off" value={password} onChange={event => setPassword(event.target.value)} disabled={busy || accessDenied || connection.passwordPending || !worker?.online} required />
         </form> : null}
         {!hostedEnabled ? <div className="flex flex-wrap items-center gap-3">{connectionActions}</div> : null}
     </ConnectionCard> : null;
@@ -270,6 +270,6 @@ function ConnectionBrowser({ workspaceId, hostedEnabled, blocked, onConnectionCh
         {!hostedEnabled ? requestErrorPanel : null}
         {!hostedEnabled ? connectionPanel : null}
         {!hostedEnabled ? <WorkerPairingPanel workspaceId={workspaceId} onDeviceChange={() => setRefresh(value => value + 1)} /> : null}
-        <p className="text-sm text-muted-foreground">Connect your account, then choose chats to import their full available history. Drafts and source messages stay private; only approved candidate records become shared.</p>
+
     </section>;
 }

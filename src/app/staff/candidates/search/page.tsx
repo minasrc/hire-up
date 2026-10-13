@@ -7,7 +7,7 @@ export default async function ProfileSearchPage({ searchParams }: { searchParams
     await requireStaffVerified();
     if (process.env.TELEGRAM_INTAKE_ENABLED !== '1') notFound();
     const params = await searchParams;
-    const initialScope = ['approved', 'my_drafts'].includes(params.scope ?? '') ? params.scope as 'approved' | 'my_drafts' : 'all';
+    const initialScope = ['approved', 'my_drafts'].includes(params.scope ?? '') ? params.scope as 'approved' | 'my_drafts' : 'approved';
     const initialQueryId = typeof params.queryId === 'string' && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(params.queryId) ? params.queryId : undefined;
     return <ProfileSearchBrowser initialScope={initialScope} initialQueryId={initialQueryId} />;
 }

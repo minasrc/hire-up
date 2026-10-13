@@ -6,7 +6,7 @@ import { validateCvFile } from '@/lib/application-file';
 import { validateCvFileMetadata, MAX_CV_SIZE_BYTES } from '@/lib/application';
 import { assertCandidateCvFilename } from '@/lib/candidate-upload-contracts';
 import { CANDIDATE_CV_BUCKET, createCandidateUploadStorage, candidateCvObjectKey } from '@/lib/candidate-upload-storage';
-import { listTelegramDrafts, getTelegramDraft, createTelegramDraft, updateTelegramDraft, decideTelegramDraft, registerTelegramWorker, revokeTelegramWorker, enqueueTelegramEmbedding, telegramCvTarget, attachTelegramCv } from '@/lib/telegram-intake-operations';
+import { telegramReviewMatches, matchTelegramReview, refreshTelegramReview, listTelegramDrafts, getTelegramDraft, createTelegramDraft, updateTelegramDraft, decideTelegramDraft, registerTelegramWorker, revokeTelegramWorker, enqueueTelegramEmbedding, telegramCvTarget, attachTelegramCv } from '@/lib/telegram-intake-operations';
 import { readTelegramJson, telegramErrorResponse, telegramFeatureResponse, telegramJson, telegramOriginAllowed } from '@/lib/telegram-intake-http';
 import { cleanupTelegramUploads, reserveTelegramUpload } from '@/lib/telegram-upload-cleanup';
 import { telegramCvDocument } from '@/lib/telegram-intake-operations';
@@ -31,6 +31,9 @@ async function handle(request: Request, { params }: RouteContext) {
         if (resource === 'drafts' && !id && request.method === 'POST') return telegramJson({ result: await createTelegramDraft(...args, await readTelegramJson(request)) }, 201);
         if (resource === 'drafts' && id && !action && request.method === 'GET') return telegramJson({ result: await getTelegramDraft(...args, id) });
         if (resource === 'drafts' && id && !action && request.method === 'PATCH') return telegramJson({ result: await updateTelegramDraft(...args, id, await readTelegramJson(request)) });
+        if (resource === 'drafts' && id && action === 'matches' && request.method === 'GET') return telegramJson({ result: await telegramReviewMatches(...args, id, new URL(request.url).searchParams.get('q') ?? '') });
+        if (resource === 'drafts' && id && action === 'match' && request.method === 'POST') return telegramJson({ result: await matchTelegramReview(...args, id, await readTelegramJson(request)) });
+        if (resource === 'drafts' && id && action === 'refresh' && request.method === 'POST') return telegramJson({ result: await refreshTelegramReview(...args, id, await readTelegramJson(request)) });
         if (resource === 'drafts' && id && action === 'decision' && request.method === 'POST') {
             const result = await decideTelegramDraft(...args, id, await readTelegramJson(request));
             const storage = createCandidateUploadStorage();
