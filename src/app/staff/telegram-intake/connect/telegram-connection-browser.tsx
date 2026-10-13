@@ -39,7 +39,7 @@ async function request(init?: RequestInit): Promise<Snapshot> {
     return response.json();
 }
 
-type ConnectionBrowserProps = { workspaceId: string; hostedEnabled: boolean; blocked: boolean; onConnectionChange: () => void; onDenied: () => void; onChooseChats: () => void; chooseChatsLabel?: string };
+type ConnectionBrowserProps = { workspaceId: string; hostedEnabled: boolean; blocked: boolean; onConnectionChange: () => void; onDenied: () => void; onChooseChats: () => void; chooseChatsLabel?: string | null };
 
 export function TelegramConnectionBrowser(props: ConnectionBrowserProps) {
     // Scope changes and access denial discard requests and secrets. An explicit
@@ -231,7 +231,7 @@ function ConnectionBrowser({ workspaceId, hostedEnabled, blocked, onConnectionCh
     const connectionActions = connection ? <>
         {passwordAction}
         {(active || connection.status === 'failed') && connection.status !== 'disconnecting' ? <Button variant="outline" disabled={busy || accessDenied} onClick={() => { hostedAttempt.current?.abort(); setPassword(''); void mutate({ action: 'disconnect', connectionId: connection.id, generation: connection.generation }); }}>{['connected', 'failed'].includes(connection.status) ? 'Disconnect Telegram' : 'Cancel sign-in'}</Button> : null}
-        {connection.status === 'connected' ? <Button onClick={onChooseChats}>{chooseChatsLabel}</Button> : null}
+        {connection.status === 'connected' && chooseChatsLabel ? <Button onClick={onChooseChats}>{chooseChatsLabel}</Button> : null}
     </> : null;
     const connectionPanel = connection ? <ConnectionCard ref={signInPanel} className={`scroll-mt-24 space-y-4 ${hostedEnabled ? ['requested', 'failed', 'disconnected'].includes(connection.status) ? 'border-t border-border pt-5' : '' : 'p-6'}`} aria-busy={busy}>
         <div aria-live="polite">

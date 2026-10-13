@@ -1,13 +1,13 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { randomBytes, randomUUID, generateKeyPairSync } from 'node:crypto';
+import { randomUUID, generateKeyPairSync } from 'node:crypto';
 import { readFileSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import pg from 'pg';
 import { POSTGRES_17_IMAGE, assertLocalTestEnvironment, psql, startPostgresContainer, stopAndRemoveContainer } from '../support/foundation-docker.js';
 import { AUTHZ_ID, installStaffFixture, staffPoolOptions } from '../support/staff-authorization.js';
-import { CJ_ID, clientJobFixtureSql } from '../support/client-job-workflows.js';
+import { clientJobFixtureSql } from '../support/client-job-workflows.js';
 import { withStaffTransaction } from '../../src/lib/staff-authorization.js';
 import { telegramHistoryRecentStatus } from '../../src/lib/telegram-history-operations.js';
 const org = AUTHZ_ID.ORG_B, user = AUTHZ_ID.USER_ADMIN2;
@@ -55,4 +55,13 @@ test('recent history pages retain global tuple order and owner scope', { timeout
   const continued=await fetch({after:first.nextCursor});assert.equal(continued.chats[0].id,all[50].id);
   const reset=await fetch({after:randomUUID()});assert.equal(reset.chats[0].id,first.chats[0].id);
   await assert.rejects(withStaffTransaction(pool,identity,org,['candidates.read','candidates.write'],async({client})=>client.query('select * from app.telegram_history_chats')), /permission denied/);
+  psql(db, 'revoke execute on function app.telegram_history_status_v2(text,text,jsonb) from app_staff;');
+  await assert.rejects(fetch({}), { code: '42501' });
+  psql(db, 'grant execute on function app.telegram_history_status_v2(text,text,jsonb) to app_staff;alter function app.telegram_history_status_v2(text,text,jsonb) rename to telegram_history_status_pending_v2;');
+  try {
+    const fallback = await fetch({});
+    assert.equal(fallback.chats.length, 50, 'A rolling migration keeps the existing scoped reader available');
+    assert.equal(fallback.totals.chats, 126);
+    assert.deepEqual((await telegramHistoryRecentStatus(pool,{...identity,subject:'1007'},org,{})).chats,[]);
+  } finally { psql(db, 'alter function app.telegram_history_status_pending_v2(text,text,jsonb) rename to telegram_history_status_v2;'); }
 });

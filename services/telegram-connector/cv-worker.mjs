@@ -72,22 +72,22 @@ export function createCvWorker({ host, upload, vault, now = Date.now }) {
       if (busy || !active(context)) return { status: 'stale' };
       const current = `${context.connectionId}:${context.accountUserId}:${context.generation}`;
       if (scope !== current) { scope = current; verified = ''; nextPoll = 0; }
-      if (now() < nextPoll && !context.wake) return { status: 'idle' };
-      busy = true; let state;
+      if (now() < nextPoll && !context.wake) return { status: 'idle', idleReason: 'local_wait', providerRead: false };
+      busy = true; let state, providerRead = false;
       try {
         state = load(context);
         if (state && state.generation !== context.generation) { clear(context, state); state = null; }
         if (state?.pendingDefer) return await defer(context, state);
         // A committed upload receipt must be retried before claiming another job.
         if (state?.phase === 'upload') return await finish(context, state);
-        if (!state && context.plan?.cv === false) return { status: 'idle' };
+        if (!state && context.plan?.cv === false) return { status: 'idle', idleReason: 'plan', providerRead: false };
         const response = await host('claim', proof(context), { signal: context.signal }); requireActive(context);
         const job = response.job;
         if (job === null) {
           const retryAt = Date.parse(response.retryAt);
           if (!Number.isFinite(retryAt) || retryAt <= now()) { if (state) clear(context, state); }
           nextPoll = Number.isFinite(retryAt) && retryAt > now() ? retryAt : now() + 5000;
-          return { status: 'idle' };
+          return { status: 'idle', idleReason: 'empty', providerRead: false };
         }
         if (!validJob(job, context)) throw new Error('INVALID_CV_RESPONSE');
         if (state && (state.jobId !== job.id || state.sourceDigest !== job.sourceDigest)) { clear(context, state); state = null; }
@@ -97,12 +97,14 @@ export function createCvWorker({ host, upload, vault, now = Date.now }) {
         const key = `${job.id}:${job.sourceDigest}:${context.generation}`;
         if (!state.location || verified !== key) {
           const source = state.source;
+          providerRead = true;
           const location = await context.telegram.cv.inspect({ peer: source.peer, messageId: source.messageId, attachment: { id: source.documentId, kind: 'document', filename: source.filename, mimeType: source.mimeType, sizeBytes: source.sizeBytes }, readPeer: peer => vault.loadHistory(context.connectionId, context.accountUserId, `peer:${peerKey(peer)}`), signal: context.signal });
           requireActive(context);
           if (!location || !Number.isInteger(location.sizeBytes) || location.sizeBytes < 1 || location.sizeBytes > CV_MAX_BYTES || (state.sizeBytes !== null && state.sizeBytes !== location.sizeBytes)) throw new CvReadError('SOURCE_CHANGED');
           state.location = location; state.sizeBytes = location.sizeBytes; save(context, state); verified = key;
           return { status: 'reading' };
         }
+        providerRead = true;
         const bytes = await context.telegram.cv.chunk({ location: state.location, offset: state.downloaded, signal: context.signal });
         try {
           requireActive(context);
@@ -121,7 +123,7 @@ export function createCvWorker({ host, upload, vault, now = Date.now }) {
       } catch (error) {
         if (error.code === 'CONNECTION_CHANGED' || !active(context)) return { status: 'stale' };
         if (error.status === 409) { if (state) clear(context, state); return { status: 'stale' }; }
-        if (error.status === 404) { nextPoll = now() + 30000; return { status: 'idle' }; }
+        if (error.status === 404) { nextPoll = now() + 30000; return { status: 'idle', idleReason: 'unavailable', providerRead }; }
         if (state && error.code === 'FILE_REFERENCE_EXPIRED' && state.referenceRefreshes < 3) { state.location = null; state.referenceRefreshes++; save(context, state); verified = ''; return { status: 'refreshing' }; }
         if (state && error.code === 'FILE_MIGRATE' && state.location && state.migrations < 3) { state.location.dcId = error.dcId; state.migrations++; save(context, state); return { status: 'migrating' }; }
         if (state && ['PEER_CACHE_MISSING', 'FILE_MIGRATE', 'FILE_REFERENCE_EXPIRED'].includes(error.code)) return await defer(context, state, 'SOURCE_UNAVAILABLE', 1);

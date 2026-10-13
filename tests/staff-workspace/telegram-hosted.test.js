@@ -273,7 +273,7 @@ test('Hosted Telegram browser starts on demand, cancels setup and protects QR/pa
         await update({ status: 'connected', profile: { telegramUserId: '123456789', username: 'synthetic_recruiter', displayName: 'Synthetic Recruiter' } });
         await expect(page.getByRole('heading', { name: 'Telegram connected', exact: true })).toBeVisible();
         await expect(page.getByRole('button', { name: 'Discover chats', exact: true })).toBeEnabled();
-        await expect(page.getByRole('button', { name: 'Choose chats to import', exact: true })).toBeEnabled();
+        await expect(page.getByRole('button', { name: 'Choose chats to import', exact: true })).toHaveCount(0);
         // Follow the real hosted browser journey through imported source context.
         const historyURL = `${baseURL}/api/staff/telegram-history`;
         const historyWorker = async (action, data = {}) => {
@@ -287,9 +287,8 @@ test('Hosted Telegram browser starts on demand, cancels setup and protects QR/pa
         const completePage = (job, records, nextCursor = job.cursor, done = false) => historyWorker('complete', { jobId: job.id, jobLeaseToken: job.leaseToken, pageId: randomUUID(), fromCursor: job.cursor, nextCursor, done, records });
         const historyAction = async locator => { const response = page.waitForResponse(response => response.url() === historyURL && response.request().method() === 'POST'); await locator.click(); assert.equal((await response).status(), 200); };
         const beforeChooseChats = page.url();
-        await page.getByRole('button', { name: 'Choose chats to import', exact: true }).click();
-        assert.equal(page.url(), beforeChooseChats, 'Choosing chats stays on the sign-in page');
         await historyAction(page.getByRole('button', { name: 'Discover chats', exact: true }));
+        assert.equal(page.url(), beforeChooseChats, 'Discovering chats stays on the sign-in page');
         let dialogPageSent = false;
         for (let pages = 0; pages < 4; pages += 1) {
             const job = (await historyWorker('claim')).job;

@@ -200,6 +200,7 @@ test('Telegram page coverage includes its consumers; shared intake still covers 
         assert.deepEqual(selected([path]), ['quality', 'telegram-connection']);
     }
     assert.deepEqual(selected(['src/app/staff/telegram-intake/chats/history-model.js']), ['quality', 'telegram-connection', 'telegram-history', 'telegram-source-updates']);
+    assert.deepEqual(selected(['tests/database/telegram-chat-order.test.js']), ['quality', 'telegram-history']);
     assert.deepEqual(selected(['src/app/staff/telegram-intake/connect/worker-pairing-panel.tsx']), ['quality', 'telegram-connection', 'worker-pairing']);
     assert.ok(selected(['src/app/staff/telegram-intake/extraction/batch-source.tsx']).includes('cv-analysis'));
     for (const job of ['telegram-intake', 'telegram-history', 'profile-search', 'cv-analysis', 'cv-search', 'worker-pairing']) {

@@ -16,6 +16,12 @@ export function telegramHistoryRecentStatus(pool, identity, org, filters = {}) {
     return staff(pool, identity, org, async ({ client }) => {
         const result = (await client.query('select app.telegram_history_status_v2($1,$2,$3::jsonb) as result', [view, q, cursor == null ? null : JSON.stringify(cursor)])).rows[0].result;
         return { ...result, nextCursor: result.nextCursor == null ? null : Buffer.from(JSON.stringify(result.nextCursor)).toString('base64url') };
+    }).catch(error => {
+        // Website and migrations roll out independently. Only a missing v2
+        // entry point permits the existing scoped reader during that interval;
+        // permission, cursor and nested-function failures remain failures.
+        if (error?.code !== '42883' || !error.message?.startsWith('function app.telegram_history_status_v2(')) throw error;
+        return telegramHistoryStatus(pool, identity, org, { view, q, after: cursor?.legacyId ?? cursor?.id ?? null });
     });
 }
 export function decodeHistoryCursor(value) {

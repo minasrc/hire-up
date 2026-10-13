@@ -131,6 +131,22 @@ messages and cursors. Migrated basic groups remain discoverable so their older
 history is not silently lost; select both legacy and current conversations when
 both contain relevant history.
 
+The first connection shows one discovery action before any empty list controls.
+The website lists discovered chats by last message activity, newest first, with
+unknown dates last. The order applies across pages; timestamps and an ID tie-break
+form a cursor scoped to the current account and filters. It reflects discovery
+metadata, so refresh the chat list to update that ordering. Pinned dialogs are
+retained but never used to skip ahead in Telegram's chronological pagination.
+Missing names use available usernames or distinct unnamed-peer labels; missing
+metadata does not prove deletion or loss of access. A refresh can supply a name.
+
+Idle CV/history/source lanes can share a tick until one lane performs provider
+work. Active lanes retain round-robin fairness, cooldowns remain authoritative,
+and uncertain results stop the tick. A local polling wait never disables a lane's
+work plan. The browser checks initial discovery every second for ten seconds,
+then every three seconds while work continues, pausing when hidden. This reduces
+avoidable latency without parallel Telegram reads or continuous rapid polling.
+
 Each connected tick performs at most one Telegram read, with a 10-second native
 RPC deadline and cancellation signal. The connector renews its control lease and
 heartbeat between pages. Dialogs and history are read in bounded pages of at most

@@ -70,17 +70,17 @@ export function createHistoryWorker({ host, vault, now = Date.now, randomId = ra
       if (busy || !active(context)) return { status: 'stale' };
       const currentScope = `${context.connectionId}:${context.accountUserId}:${context.generation}`;
       if (scope !== currentScope) { scope = currentScope; nextPoll = 0; pageLimit = 100; limitJob = null; }
-      if (now() < nextPoll && !context.wake) return { status: 'idle' };
+      if (now() < nextPoll && !context.wake) return { status: 'idle', idleReason: 'local_wait', providerRead: false };
       busy = true;
-      let job;
+      let job, providerRead = false;
       try {
         const pending = loadPending(context);
         if (pending) return await reconcilePending(context, pending);
-        if (context.plan?.history === false) return { status: 'idle' };
+        if (context.plan?.history === false) return { status: 'idle', idleReason: 'plan', providerRead: false };
         const response = await host('claim', proof(context));
         requireActive(context);
         job = response.job;
-        if (job === null) { nextPoll = now() + 5000; return { status: 'idle' }; }
+        if (job === null) { nextPoll = now() + 5000; return { status: 'idle', idleReason: 'empty', providerRead: false }; }
         if (!jobValid(job, context, now())) throw new Error('INVALID_HISTORY_RESPONSE');
         if (limitJob !== `${job.id}:${job.pageNumber}`) { pageLimit = 100; limitJob = `${job.id}:${job.pageNumber}`; }
         const args = {
@@ -91,6 +91,7 @@ export function createHistoryWorker({ host, vault, now = Date.now, randomId = ra
         requireActive(context);
         // Exactly one provider page per tick; the connector renews its control
         // lease/heartbeat before another tick, including page-size retries.
+        providerRead = true;
         const page = await context.telegram[job.kind](args);
         requireActive(context);
         if (!page || !Array.isArray(page.records) || page.records.length > pageLimit || (page.done && page.records.length) || typeof page.done !== 'boolean') throw new HistoryReadError('PEER_UNAVAILABLE');
@@ -106,7 +107,7 @@ export function createHistoryWorker({ host, vault, now = Date.now, randomId = ra
       } catch (error) {
         if (error.code === 'CONNECTION_CHANGED' || !active(context)) return { status: 'stale' };
         if (error.status === 409) return { status: 'stale' };
-        if (error.status === 404) { nextPoll = now() + 30000; return { status: 'idle' }; }
+        if (error.status === 404) { nextPoll = now() + 30000; return { status: 'idle', idleReason: 'unavailable', providerRead }; }
         if (job && codes.has(error.code)) {
           const body = { ...proof(context), jobId: job.id, jobLeaseToken: job.leaseToken, code: error.code };
           if (error.code === 'FLOOD_WAIT') body.retryAfterSeconds = error.retryAfterSeconds;
