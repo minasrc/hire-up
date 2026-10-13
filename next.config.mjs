@@ -6,7 +6,7 @@ const withBundleAnalyzer = bundleAnalyzer({
 
 /** @type {import('next').NextConfig} */
 const nextConfig = {
-    // Add any other Next.js config options here if needed in the future
+    devIndicators: false,
 };
 
 export default withBundleAnalyzer(nextConfig);

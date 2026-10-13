@@ -280,3 +280,10 @@ body {
   from { visibility: hidden; }
   to { visibility: visible; }
 }
+
+/* Staff dividers use the workspace palette; explicit utility colours still win. */
+@layer base {
+    .staff-scope :where(*, ::before, ::after) {
+        border-color: var(--border);
+    }
+}

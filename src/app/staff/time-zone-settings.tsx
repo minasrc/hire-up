@@ -16,7 +16,7 @@ export function StaffTimeZoneBanner() {
     const data = useStaffTimeZone();
     const controls = useStaffTimeZoneControls();
     if (!controls.prompt) return null;
-    return <aside aria-label="Time zone preference" className="mx-3 mt-2 flex flex-wrap items-center gap-2 rounded-md border bg-muted/20 px-3 py-1.5 md:mx-4">
+    return <aside aria-label="Time zone preference" className="mx-3 mt-2 flex flex-wrap items-center gap-2 rounded-md bg-muted/50 px-3 py-1.5 md:mx-4">
         <p className="min-w-0 flex-1 break-words text-xs text-muted-foreground">{data.savedTimeZone === null
             ? `Use ${controls.prompt.timeZone}?`
             : `Use ${controls.prompt.timeZone} instead of ${data.timeZone}?`}</p>

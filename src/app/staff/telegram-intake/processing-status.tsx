@@ -34,7 +34,7 @@ export function ProcessingStatus({ reviewLink = true }: { reviewLink?: boolean }
         return () => { stopped = true; clearTimeout(timer); controller?.abort(); document.removeEventListener('visibilitychange', visibility); };
     }, []);
     const working = importing || !counts || counts.queued + counts.leased + counts.waiting > 0;
-    return <div className="flex min-h-9 flex-wrap items-center gap-2 rounded-lg border bg-muted/20 px-3 py-2" aria-live="polite">
+    return <div className="flex min-h-9 flex-wrap items-center gap-2 rounded-lg bg-muted/50 px-3 py-2" aria-live="polite">
         {working ? <LoaderCircle className="h-3.5 w-3.5 shrink-0 text-primary motion-safe:animate-spin" /> : <CheckCircle2 className="h-3.5 w-3.5 shrink-0 text-primary" />}
         <span className="text-xs text-muted-foreground">{unavailable ? 'Reconnecting…' : working ? 'Finding candidates…' : counts?.failed ? 'Some chats need attention' : counts?.needsReview ? 'Proposals ready' : 'Watching for updates'}</span>
         {working ? <div role="progressbar" aria-label="Processing Telegram information" className="h-1 w-20 overflow-hidden rounded-full bg-muted"><div className="h-full w-1/3 rounded-full bg-primary motion-safe:animate-pulse" /></div> : null}

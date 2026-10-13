@@ -95,6 +95,20 @@ test('Candidate intake has a compact chat picker and approve/edit/reject review 
     const first = await createDraft('Alice', 'Original headline');
     await createDraft('Bob', 'Reject me');
     await page.goto(`${baseURL}/staff/telegram-intake?draft=${first.id}`);
+    const sidebar = page.locator('#staff-sidebar');
+    await page.getByRole('button', { name: 'Collapse sidebar', exact: true }).click();
+    await expect(sidebar).toHaveCSS('width', '64px');
+    await expect(sidebar.getByRole('link', { name: 'Candidates', exact: true })).toHaveAttribute('title', 'Candidates');
+    await page.getByRole('button', { name: 'Account menu', exact: true }).click();
+    await expect(page.getByRole('link', { name: 'Account settings', exact: true }).last()).toBeVisible();
+    await page.keyboard.press('Escape');
+    await page.reload();
+    await expect(sidebar).toHaveCSS('width', '64px');
+    await page.getByRole('button', { name: 'Expand sidebar', exact: true }).click();
+    await expect(sidebar).toHaveCSS('width', '240px');
+    const borderColor = await page.getByRole('region', { name: 'Candidate information' }).evaluate(el => getComputedStyle(el.parentElement).borderColor);
+    assert.equal(borderColor, 'rgb(229, 231, 235)', 'workspace dividers use the soft border palette');
+
     await expect(page.getByRole('region', { name: 'Candidate information', exact: true })).toBeVisible();
     await expect(page.getByRole('region', { name: 'Candidate information' }).getByText('Original headline', { exact: true })).toBeVisible();
     await page.getByRole('button', { name: 'Edit', exact: true }).click();
