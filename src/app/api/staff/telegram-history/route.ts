@@ -1,5 +1,5 @@
 import { staffApiContext, staffGateResponse } from '@/lib/staff-api.server';
-import { telegramHistoryAction, telegramHistoryStatus } from '@/lib/telegram-history-operations';
+import { telegramHistoryAction, telegramHistoryRecentStatus } from '@/lib/telegram-history-operations';
 import { readTelegramJson, telegramErrorResponse, telegramFeatureResponse, telegramJson, telegramOriginAllowed } from '@/lib/telegram-intake-http';
 export const runtime = 'nodejs';
 async function handle(request: Request) {
@@ -9,7 +9,7 @@ async function handle(request: Request) {
     const args = [context.pool, context.identity, context.organizationId] as const;
     try {
         const q = new URL(request.url).searchParams;
-        return telegramJson(request.method === 'GET' ? await telegramHistoryStatus(...args, { view: q.get('view') ?? 'all', q: q.get('q') ?? '', after: q.get('after') || null }) : await telegramHistoryAction(...args, await readTelegramJson(request, 16384)));
+        return telegramJson(request.method === 'GET' ? await telegramHistoryRecentStatus(...args, { view: q.get('view') ?? 'all', q: q.get('q') ?? '', after: q.get('after') || null }) : await telegramHistoryAction(...args, await readTelegramJson(request, 16384)));
     } catch (error) { return telegramErrorResponse(error); }
 }
 export const GET = handle;
