@@ -115,7 +115,7 @@ test('Hosted Telegram browser starts on demand, cancels setup and protects QR/pa
     let starts = 0;
     page.on('request', request => {
         if (request.method() !== 'POST') return;
-        if (request.url() === hostedURL) prepares += 1;
+        if (request.url() === hostedURL && request.postDataJSON()?.action === 'prepare') prepares += 1;
         if (request.url() === connectionURL && request.postDataJSON()?.action === 'connect') starts += 1;
     });
     const noLocalSetup = async () => {
@@ -256,6 +256,17 @@ test('Hosted Telegram browser starts on demand, cancels setup and protects QR/pa
         task = (await worker('claim')).connection;
         await update({ status: 'disconnected' });
         await expect(page.getByRole('heading', { name: 'Telegram disconnected', exact: true })).toBeVisible();
+        await page.getByRole('button', { name:'Retry service status', exact:true }).click();
+        await page.getByText('Reset a lost or revoked connection registration', {exact:true}).click();
+        await expect(page.getByRole('button', {name:'Reset registration',exact:true})).toBeEnabled();
+        const retired=page.waitForResponse(response=>response.url()===hostedURL&&response.request().postDataJSON()?.action==='retire');
+        await page.getByRole('button', {name:'Reset registration',exact:true}).click();
+        assert.equal((await retired).status(),200);
+        await expect(page.getByText('Registration reset. Imported history is preserved. Click Connect Telegram to create a new connection.', {exact:true})).toBeVisible();
+        assert.equal(starts,2,'Retirement cannot start a replacement automatically');
+        const retiredClaim=await fetch(`${baseURL}/api/telegram-connection/worker/claim`,{method:'POST',headers:{authorization:`Bearer ${workerToken}`,'content-type':'application/json'},body:'{}'});
+        assert.equal(retiredClaim.status,403,'Retired worker credentials are immediately refused');
+
         // The existing physical-worker account must never be silently moved.
         const registration = await context.request.post(`${baseURL}/api/staff/telegram-intake/workers`, { data: { name: 'Synthetic existing device' } });
         assert.equal(registration.status(), 201);
@@ -269,8 +280,30 @@ test('Hosted Telegram browser starts on demand, cancels setup and protects QR/pa
         await expect(page.getByRole('button', { name: 'Connect again', exact: true })).toHaveCount(0);
         await page.getByRole('button', { name: 'Cancel sign-in', exact: true }).click();
         await expect(page.getByRole('heading', { name: 'Connection cancelled', exact: true })).toBeVisible();
-        assert.equal(prepares, 3);
+        assert.equal(prepares, 4);
         await noLocalSetup();
+        // A revoked enrollment needs explicit Telegram-side confirmation.
+        const newPrepare=await context.request.post(hostedURL,{data:{action:'prepare'}});assert.equal(newPrepare.status(),200);
+        const freshRequest=(await control('list')).requests[0],lostWorker=randomUUID(),lostToken='l'.repeat(64);
+        await control('register',{requestId:freshRequest.requestId,workerId:lostWorker,tokenSha256:createHash('sha256').update(lostToken).digest('hex')});
+        const lostCall=async(action,data={})=>{
+            const response=await fetch(`${baseURL}/api/telegram-connection/worker/${action}`,{method:'POST',headers:{authorization:`Bearer ${lostToken}`,'content-type':'application/json'},body:JSON.stringify(data)});
+            assert.equal(response.status,200,await response.clone().text());return response.json();
+        };
+        await lostCall('heartbeat',{publicKeySpki});
+        assert.equal((await context.request.post(connectionURL,{data:{action:'connect',workerId:lostWorker}})).status(),200);
+        const lostTask=(await lostCall('claim')).connection;
+        await lostCall('update',{connectionId:lostTask.id,generation:lostTask.generation,leaseToken:lostTask.leaseToken,status:'connected',profile:{telegramUserId:'123456789',displayName:'Synthetic recovered owner'}});
+        psql(db,`update app.telegram_workers set revoked_at=clock_timestamp() where id='${lostWorker}'`);
+        await page.reload();
+        await page.getByText('Reset a lost or revoked connection registration',{exact:true}).click();
+        const resetButton=page.getByRole('button',{name:'Reset registration',exact:true});await expect(resetButton).toBeDisabled();
+        await page.getByRole('checkbox',{name:'I revoked the old session, or verified it is absent, in Telegram Settings → Devices.',exact:true}).check();
+        await expect(resetButton).toBeEnabled();
+        const externalReset=page.waitForResponse(response=>response.url()===hostedURL&&response.request().postDataJSON()?.action==='retire');
+        await resetButton.click();assert.equal((await externalReset).status(),200);
+        await expect(page.getByText('Registration reset after your confirmation of revocation in Telegram. Imported history is preserved. Click Connect Telegram to create a new connection.',{exact:true})).toBeVisible();
+        await expect(page.getByText('You confirmed the old session was revoked in Telegram Settings → Devices. The service registration has been retired; imported history remains available.',{exact:true})).toBeVisible();
         // Losing access removes challenge/password state and prevents provisioning.
         await page.evaluate(() => window.dispatchEvent(new Event('staff-session-invalidated')));
         await expect(page.getByRole('button', { name: 'Connect Telegram', exact: true })).toBeDisabled();

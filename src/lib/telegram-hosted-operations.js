@@ -1,5 +1,5 @@
 import { withStaffTransaction } from './staff-authorization.js';
-import { hostedUuid, hostedStaffInput, hostedControlInput } from './telegram-hosted-contracts.js';
+import { hostedUuid, hostedStaffInput, hostedRetireInput, hostedControlInput } from './telegram-hosted-contracts.js';
 export function telegramHostedStatus(pool, identity, org, serviceId) {
     hostedUuid(serviceId);
     return withStaffTransaction(pool, identity, org, ['candidates.read', 'candidates.write'], async ({ client }) =>
@@ -9,6 +9,11 @@ export function telegramHostedPrepare(pool, identity, org, serviceId, input) {
     hostedUuid(serviceId); hostedStaffInput(input);
     return withStaffTransaction(pool, identity, org, ['candidates.read', 'candidates.write'], async ({ client }) =>
         (await client.query('select app.telegram_hosted_prepare_v1($1) result', [serviceId])).rows[0].result);
+}
+export function telegramHostedRetire(pool, identity, org, serviceId, input) {
+    hostedUuid(serviceId); const p = hostedRetireInput(input);
+    return withStaffTransaction(pool, identity, org, ['candidates.read', 'candidates.write'], async ({ client }) =>
+        (await client.query('select app.telegram_hosted_retire_v1($1,$2,$3,$4,$5) result', [serviceId, p.requestId, p.expectedWorkerId, p.operationId, p.telegramRevoked])).rows[0].result);
 }
 export async function telegramHostedControl(pool, serviceId, input) {
     hostedUuid(serviceId); const p = hostedControlInput(input);

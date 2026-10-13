@@ -100,9 +100,10 @@ Disconnect retains the existing remote logout protocol. Removing a worker token
 does not guarantee remote logout; Telegram Settings → Devices remains the
 emergency revocation path.
 
-This initial deployment supports ten durable owner enrollments, including
-stopped/revoked registrations. It intentionally does not recycle uncertain
-identities. Capacity errors are real limits, not an invitation to bypass them.
+This deployment supports ten active owner enrollments. Stopped/revoked
+registrations keep their slot until an explicit retirement with logout proof
+or owner confirmation of external revocation. Historical identities remain
+private audit records; uncertain credentials are never silently replaced.
 Public workspace signup and independent workspace selection are separate work;
 this service currently uses the existing authorized workspace membership gate.
 
@@ -164,3 +165,27 @@ erases only the claimed chat's scratch and CV chunks, flushes deletions, and
 then acknowledges its bounded page. Other chats' pending work and authentication
 keys/sessions are preserved. Offline removal remains pending until those
 acknowledgements arrive.
+
+## Retiring a lost registration
+
+`20261013150000` changes the ten-owner capacity limit to count active enrollments.
+Retired registrations remain as private audit/provenance records, with their old
+worker identity, owner, retirement time, reason and idempotent operation receipt.
+They are excluded from provisioning and service snapshots. Imported history is
+preserved.
+
+The owner can open **Reset a lost or revoked connection registration** in the
+hosted connection panel. A never-registered enrollment or server-recorded
+logout/cancellation can retire directly. For an uncertain or unavailable session,
+the owner must first terminate the old session in Telegram Settings → Devices,
+or verify it is absent, and explicitly confirm that step. This is an owner
+attestation; the website does not claim it performed remote logout.
+
+Reset requires the existing authenticated owner session and MFA gate. It revokes
+the old worker token immediately, fences the old connection generation, and
+retains encrypted old service files rather than replacing uncertain credentials.
+Clicking Connect then requests a fresh enrollment/worker; reset alone does not
+start sign-in. The next complete supervisor snapshot stops retired children
+before starting replacement children. Keep old private files until the operator
+can safely archive them under the deployment's retention/backup policy. Reset
+cannot restore a lost encryption key or prove Telegram-side revocation itself.

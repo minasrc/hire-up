@@ -14,6 +14,13 @@ export function hostedStaffInput(input) {
     if (input.action !== 'prepare') throw new TelegramHostedError();
     return input;
 }
+export function hostedRetireInput(input) {
+    shape(input, ['action', 'operationId', 'requestId', 'expectedWorkerId', 'telegramRevoked']);
+    if (input.action !== 'retire' || typeof input.telegramRevoked !== 'boolean') throw new TelegramHostedError();
+    hostedUuid(input.operationId); hostedUuid(input.requestId);
+    if (input.expectedWorkerId !== null) hostedUuid(input.expectedWorkerId);
+    return input;
+}
 export function hostedControlInput(input) {
     if (['heartbeat', 'sync'].includes(input?.action)) shape(input, ['action', 'instanceId'], ['leaseToken']);
     else if (['list', 'maintenance'].includes(input?.action)) shape(input, ['action', 'instanceId', 'leaseToken'], input.action === 'list' ? ['after'] : []);
