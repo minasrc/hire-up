@@ -56,12 +56,14 @@ async function OverviewSection({ section }: { section: SummarySection }) {
 async function OverviewTasks() {
     const { capabilities, gate } = await loadStaffCapabilities();
     let reviewTasks = null;
+    let reviewCount = 0;
     if (capabilities?.telegram && gate.stage === 'verified') {
         let inbox: IntakeResult | null = null;
         try {
             inbox = await listTelegramDrafts(gate.pool, gate.identity, gate.organizationId, { view: 'all' });
         } catch { /* The link remains available if the queue cannot be loaded. */ }
         if (inbox && inbox.counts.all > 0) {
+            reviewCount = inbox.counts.all;
             reviewTasks = (
                 <div aria-label="Candidate proposal tasks" className="rounded-lg bg-muted/40 p-3">
                     <Link href="/staff/telegram-intake" className="flex items-center gap-2 rounded text-sm font-medium outline-none focus-visible:ring-2 focus-visible:ring-ring">
@@ -88,7 +90,7 @@ async function OverviewTasks() {
         }
     }
     if (capabilities?.tasks === true) {
-        return <StaffTodoList writeEnabled={capabilities.writeTasks === true} reviewTasks={reviewTasks} />;
+        return <StaffTodoList writeEnabled={capabilities.writeTasks === true} reviewTasks={reviewTasks} reviewCount={reviewCount} />;
     }
     return (
         <Card id="tasks">

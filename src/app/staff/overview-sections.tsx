@@ -94,7 +94,7 @@ export function ReviewQueue({ summary }: { summary: StaffWorkspaceSummary }) {
                             aria-hidden="true"
                         />
                     </span>
-                    Awaiting review
+                    Application reviews
                 </CardTitle>
             </CardHeader>
             <CardContent className="flex flex-col gap-3">
@@ -146,7 +146,7 @@ export function ReviewQueue({ summary }: { summary: StaffWorkspaceSummary }) {
                         href="/staff/applications?review=1"
                         className="w-fit rounded-sm text-xs font-medium text-accent-foreground outline-none hover:underline focus-visible:ring-2 focus-visible:ring-ring"
                     >
-                        View all {total} awaiting review
+                        Review {total} applications
                     </Link>
                 ) : null}
             </CardContent>

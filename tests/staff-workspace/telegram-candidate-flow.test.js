@@ -100,6 +100,15 @@ test('Candidate intake has a compact chat picker and approve/edit/reject review 
     await page.goto(`${baseURL}/staff`);
     const reviewTasks = page.getByLabel('Candidate proposal tasks');
     await expect(reviewTasks.getByRole('link', { name: /Review candidate proposals/ })).toBeVisible();
+    await expect(page.getByRole('tab', { name: 'All 2', exact: true })).toBeVisible();
+    await expect(page.getByRole('tab', { name: 'Review 2', exact: true })).toBeVisible();
+    await expect(page.getByText('You’re up to date', { exact: true })).not.toBeVisible();
+    await expect(page.getByText('Application reviews', { exact: true })).toBeVisible();
+    await page.getByRole('tab', { name: 'Review 2', exact: true }).click();
+    await expect(reviewTasks.getByRole('link', { name: /Bob Candidate/ })).toBeVisible();
+    await page.getByRole('tab', { name: 'Interviews 0', exact: true }).click();
+    await expect(reviewTasks).not.toBeVisible();
+    await page.getByRole('tab', { name: 'All 2', exact: true }).click();
     await reviewTasks.getByRole('link', { name: /Alice Candidate/ }).click();
     await expect(page).toHaveURL(`${baseURL}/staff/telegram-intake?draft=${first.id}`);
     const sidebar = page.locator('#staff-sidebar');
