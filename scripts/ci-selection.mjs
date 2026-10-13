@@ -69,8 +69,8 @@ export function selectJobs(files, full = false, readFile = readRepoFile) {
         else if (file === 'tests/telegram-connector/native-sdk.test.js') jobs = ['telegram-source-updates'];
         else if (file === 'tests/telegram-connector/hosted-entrypoint.test.js') jobs = ['telegram-connection'];
         else if (/^tests\/evals\/telegram-context\//.test(file)) jobs = ['telegram-extraction'];
-        else if (/^src\/app\/staff\/telegram-intake\/context\//.test(file)) jobs = ['telegram-context'];
-        else if (/^src\/app\/staff\/telegram-intake\/chats\//.test(file)) jobs = ['telegram-history', 'telegram-source-updates'];
+        else if (/^src\/app\/staff\/telegram-intake\/context\//.test(file)) jobs = ['telegram-context', 'telegram-connection'];
+        else if (/^src\/app\/staff\/telegram-intake\/chats\//.test(file)) jobs = ['telegram-history', 'telegram-source-updates', 'telegram-connection'];
         else if (/^src\/app\/staff\/telegram-intake\/cv\//.test(file)) jobs = ['telegram-cv', 'cv-analysis'];
         else if (/^src\/app\/staff\/telegram-intake\/cv-analysis\//.test(file)) jobs = ['cv-analysis', 'cv-search'];
         else if (/^src\/app\/staff\/telegram-intake\/extraction\//.test(file)) jobs = ['telegram-extraction', 'telegram-retention', 'telegram-cv', 'cv-analysis'];
@@ -113,7 +113,7 @@ function testJobs(file) {
         [/^(staff-workspace|staff-list-pagination|candidate-profiles|candidate-upload|workspace|record-preview)\./, ['staff-workspace']],
         [/^(candidate-merge|duplicate-review)\./, ['duplicate-review']],
         [/^telegram-intake\./, ['telegram-intake']],
-        [/^telegram-connection\./, ['telegram-connection']],
+        [/^telegram-(?:connection|hosted)\./, ['telegram-connection']],
         [/^telegram-history/, ['telegram-history']],
         [/^telegram-(?:context|candidate-context)/, ['telegram-context']],
         [/^telegram-(?:source-(?:updates|refresh)|native-(?:account|channel))/, ['telegram-source-updates']],

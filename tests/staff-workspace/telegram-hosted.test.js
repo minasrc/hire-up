@@ -81,7 +81,7 @@ test('Hosted Telegram browser starts on demand, cancels setup and protects QR/pa
     const proof = createStaffMfaProof(secret, { subject: '1002', userId: AUTHZ_ID.USER_ADMIN2, credentialId: totpId });
     const browser = await chromium.launch();
     t.after(() => browser.close());
-    const context = await browser.newContext();
+    const context = await browser.newContext({ viewport: { width: 390, height: 844 }, reducedMotion: 'reduce' });
     await context.addCookies([
         { name: 'next-auth.session-token', value: token, url: baseURL },
         { name: STAFF_MFA_COOKIE, value: proof, url: baseURL },
@@ -154,11 +154,41 @@ test('Hosted Telegram browser starts on demand, cancels setup and protects QR/pa
         await page.getByRole('button', { name: 'Connect Telegram', exact: true }).click();
         await expect(page.getByRole('heading', { name: 'Preparing Telegram sign-in', exact: true })).toBeVisible();
         assert.equal(starts, 1);
+        await expect(page.getByRole('button', { name: 'Preparing sign-in…', exact: true })).toBeDisabled();
+        const preparingBounds = await page.getByRole('heading', { name: 'Preparing Telegram sign-in', exact: true }).boundingBox();
+        assert.ok(preparingBounds && preparingBounds.y >= 0 && preparingBounds.y + preparingBounds.height < await page.evaluate(() => window.innerHeight), 'An explicit connect brings sign-in progress into view');
         assert.equal(prepares, 2);
         let task = (await worker('claim')).connection;
         const update = data => worker('update', { connectionId: task.id, generation: task.generation, leaseToken: task.leaseToken, challengeId: task.challengeId, ...data });
         await update({ status: 'qr_pending', qrLoginUrl: 'tg://login?token=synthetic_hosted_token', qrExpiresAt: new Date(Date.now() + 90000).toISOString() });
-        await expect(page.getByRole('img', { name: 'Telegram sign-in QR code', exact: true })).toBeVisible();
+        const qr = page.getByRole('img', { name: 'Telegram sign-in QR code', exact: true });
+        await expect(qr).toBeVisible();
+        await expect.poll(async () => {
+            const bounds = await qr.boundingBox();
+            return bounds && bounds.y >= 0 && bounds.y + bounds.height <= await page.evaluate(() => window.innerHeight);
+        }, { message: 'The QR code is brought into view when ready' }).toBe(true);
+        assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth + 2), 'Mobile sign-in must not overflow horizontally');
+        mkdirSync(join(root, 'test-results'), { recursive: true });
+        await page.screenshot({ path: join(root, 'test-results/staff-workspace-telegram-signin-mobile.png'), fullPage: true });
+        assert.equal(starts, 1, 'One click must reach QR sign-in without opening recovery or starting again');
+        await expect(page.getByRole('button', { name: 'Preparing sign-in…', exact: true })).toHaveCount(0);
+        const recovery = page.getByText('Advanced recovery options', { exact: true });
+        assert.ok((await qr.boundingBox()).y < (await recovery.boundingBox()).y, 'Recovery belongs below the QR sign-in');
+        await recovery.click();
+        await expect(page.getByRole('checkbox', { name: /I revoked the old session/ })).toBeVisible();
+        assert.ok((await qr.boundingBox()).y < (await recovery.boundingBox()).y, 'Even expanded recovery cannot precede sign-in');
+        await recovery.click();
+        assert.equal(starts, 1, 'Expanding recovery must never start a connection');
+        await update({ status: 'failed', errorCode: 'LOGIN_EXPIRED' });
+        await expect(page.getByText('This sign-in attempt expired. Start a new connection.', { exact: true })).toBeVisible();
+        await expect(page.getByRole('button', { name: 'Retry sign-in', exact: true })).toBeEnabled();
+        await expect(page.getByRole('button', { name: 'Connect again', exact: true })).toHaveCount(0);
+        await page.getByRole('button', { name: 'Retry sign-in', exact: true }).click();
+        await expect(page.getByRole('heading', { name: 'Preparing Telegram sign-in', exact: true })).toBeVisible();
+        assert.equal(starts, 2, 'Only an explicit retry starts the replacement attempt');
+        task = (await worker('claim')).connection;
+        await update({ status: 'qr_pending', qrLoginUrl: 'tg://login?token=synthetic_hosted_retry', qrExpiresAt: new Date(Date.now() + 90000).toISOString() });
+        await expect(qr).toBeVisible();
         await noLocalSetup();
         await update({ status: 'awaiting_password', passwordHint: 'Synthetic hint' });
         const password = page.getByLabel('Telegram two-step verification password', { exact: true });
@@ -210,6 +240,7 @@ test('Hosted Telegram browser starts on demand, cancels setup and protects QR/pa
         historyJob = (await historyWorker('claim')).job;
         await completePage(historyJob, [], historyJob.cursor, true);
         await page.getByRole('button', { name: 'Refresh status', exact: true }).click();
+        await page.getByText('Import progress details', { exact: true }).click();
         await expect(page.getByText(/Last progress:/)).toBeVisible();
         await expect(page.getByText(/History reached:/)).toBeVisible();
         await page.getByRole('link', { name: 'View conversation', exact: true }).click();
@@ -233,8 +264,8 @@ test('Hosted Telegram browser starts on demand, cancels setup and protects QR/pa
         await noLocalSetup();
         await update({ status: 'disconnected' });
         await expect(page.getByRole('heading', { name: 'Telegram disconnected', exact: true })).toBeVisible();
-        await expect(page.getByRole('button', { name: 'Connect again', exact: true })).toBeEnabled();
-        assert.equal(starts, 1, 'Logout acknowledgment must not trigger automatic sign-in');
+        await expect(page.getByRole('button', { name: 'Connect Telegram', exact: true })).toBeEnabled();
+        assert.equal(starts, 2, 'Logout acknowledgment must not trigger automatic sign-in');
         await page.getByRole('link', { name: 'Search imported conversations', exact: true }).click();
         await page.getByLabel('Message words or phrase', { exact: true }).fill('Solidity');
         await page.getByRole('button', { name: 'Search messages', exact: true }).click();
@@ -242,7 +273,7 @@ test('Hosted Telegram browser starts on demand, cancels setup and protects QR/pa
         await page.getByRole('link', { name: 'Telegram chats', exact: true }).click();
         await expect(page.getByRole('heading', { name: 'Connect Telegram to import chats' })).toBeVisible();
         await page.getByRole('link', { name: 'Telegram connection', exact: true }).click();
-        await page.getByRole('button', { name: 'Connect again', exact: true }).click();
+        await page.getByRole('button', { name: 'Connect Telegram', exact: true }).click();
         await expect(page.getByRole('heading', { name: 'Preparing Telegram sign-in', exact: true })).toBeVisible();
         task = (await worker('claim')).connection;
         await update({ status: 'connected', profile: { telegramUserId: '123456789', username: 'synthetic_recruiter', displayName: 'Synthetic Recruiter' } });
@@ -257,13 +288,13 @@ test('Hosted Telegram browser starts on demand, cancels setup and protects QR/pa
         await update({ status: 'disconnected' });
         await expect(page.getByRole('heading', { name: 'Telegram disconnected', exact: true })).toBeVisible();
         await page.getByRole('button', { name:'Retry service status', exact:true }).click();
-        await page.getByText('Reset a lost or revoked connection registration', {exact:true}).click();
+        await page.getByText('Advanced recovery options', {exact:true}).click();
         await expect(page.getByRole('button', {name:'Reset registration',exact:true})).toBeEnabled();
         const retired=page.waitForResponse(response=>response.url()===hostedURL&&response.request().postDataJSON()?.action==='retire');
         await page.getByRole('button', {name:'Reset registration',exact:true}).click();
         assert.equal((await retired).status(),200);
         await expect(page.getByText('Registration reset. Imported history is preserved. Click Connect Telegram to create a new connection.', {exact:true})).toBeVisible();
-        assert.equal(starts,2,'Retirement cannot start a replacement automatically');
+        assert.equal(starts,3,'Retirement cannot start a replacement automatically');
         const retiredClaim=await fetch(`${baseURL}/api/telegram-connection/worker/claim`,{method:'POST',headers:{authorization:`Bearer ${workerToken}`,'content-type':'application/json'},body:'{}'});
         assert.equal(retiredClaim.status,403,'Retired worker credentials are immediately refused');
 
@@ -277,10 +308,10 @@ test('Hosted Telegram browser starts on demand, cancels setup and protects QR/pa
         assert.equal(physicalStart.status(), 200, await physicalStart.text());
         await page.reload();
         await expect(page.getByText('This account has an existing connection. Disconnect it below and wait for logout confirmation before starting a hosted connection.', { exact: true })).toBeVisible();
-        await expect(page.getByRole('button', { name: 'Connect again', exact: true })).toHaveCount(0);
+        await expect(page.getByRole('button', { name: 'Connect Telegram', exact: true })).toHaveCount(0);
         await page.getByRole('button', { name: 'Cancel sign-in', exact: true }).click();
         await expect(page.getByRole('heading', { name: 'Connection cancelled', exact: true })).toBeVisible();
-        assert.equal(prepares, 3, 'Reconnect reuses the existing registration; physical-worker setup cannot provision another hosted worker');
+        assert.equal(prepares, 4, 'Reconnect reuses the existing registration; physical-worker setup cannot provision another hosted worker');
         await noLocalSetup();
         // A revoked enrollment needs explicit Telegram-side confirmation.
         const newPrepare=await context.request.post(hostedURL,{data:{action:'prepare'}});assert.equal(newPrepare.status(),200);
@@ -296,7 +327,7 @@ test('Hosted Telegram browser starts on demand, cancels setup and protects QR/pa
         await lostCall('update',{connectionId:lostTask.id,generation:lostTask.generation,leaseToken:lostTask.leaseToken,status:'connected',profile:{telegramUserId:'123456789',displayName:'Synthetic recovered owner'}});
         psql(db,`update app.telegram_workers set revoked_at=clock_timestamp() where id='${lostWorker}'`);
         await page.reload();
-        await page.getByText('Reset a lost or revoked connection registration',{exact:true}).click();
+        await page.getByText('Advanced recovery options',{exact:true}).click();
         const resetButton=page.getByRole('button',{name:'Reset registration',exact:true});await expect(resetButton).toBeDisabled();
         await page.getByRole('checkbox',{name:'I revoked the old session, or verified it is absent, in Telegram Settings → Devices.',exact:true}).check();
         await expect(resetButton).toBeEnabled();

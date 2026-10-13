@@ -2,7 +2,7 @@
 
 import { staffWorkspaceFetch } from '@/lib/staff-workspace-fetch';
 
-import { useCallback, useEffect, useRef, useState, type MutableRefObject } from 'react';
+import { useCallback, useEffect, useRef, useState, type ReactNode, type MutableRefObject } from 'react';
 import Link from 'next/link';
 import { Cloud, RefreshCw } from 'lucide-react';
 import { Button } from '@/components/staff-ui/button';
@@ -29,8 +29,9 @@ function waitForPoll(signal: AbortSignal) {
     });
 }
 
-export function HostedConnectionPanel({ connection, loaded, disabled, attemptRef, onDenied, onConnect, onReset }: {
+export function HostedConnectionPanel({ connection, loaded, disabled, attemptRef, onDenied, onConnect, onReset, children }: {
     connection: { workerId: string; status: string } | null;
+    children?: ReactNode;
     loaded: boolean;
     disabled: boolean;
     attemptRef: MutableRefObject<AbortController | null>;
@@ -145,26 +146,28 @@ export function HostedConnectionPanel({ connection, loaded, disabled, attemptRef
         } finally { if (attemptRef.current === controller) attemptRef.current = null; if (mounted.current) setPhase('idle'); }
     }
 
-    return <Card className="space-y-4 p-6" aria-busy={busy}>
+    return <><Card className="space-y-4 p-6" aria-busy={busy}>
         <div className="flex items-start gap-3"><Cloud className="mt-1 h-5 w-5 shrink-0" /><div><h2 className="font-semibold">Hosted Telegram connection</h2><p className="mt-1 text-sm text-muted-foreground">Connect here, then scan the sign-in code with Telegram on your phone. The service keeps your connection running.</p></div></div>
         {!status && !error ? <p role="status">Checking Telegram service…</p> : null}
         {status && (!status.serviceOnline || status.state === 'unavailable') ? <p role="status">The Telegram service is temporarily offline or unavailable. Your imported history remains available.</p> : null}
         {status?.serviceOnline && status.state !== 'unavailable' ? <p role="status">{busy ? phase === 'starting' ? 'Starting Telegram sign-in…' : 'Preparing your Telegram connection…' : status.workerOnline && status.state === 'ready' ? 'Telegram service available.' : active ? 'Your Telegram connection is waiting for the service. Your imported history remains available.' : status.state === 'pending' ? 'Telegram setup is pending. Click Connect Telegram to continue when you are ready.' : 'Telegram service available. Click Connect Telegram to begin.'}</p> : null}
         {hostedEmergencyLogout(connection, status) ? <p role="status" className="text-sm text-muted-foreground">To revoke access immediately, open Telegram on your phone → Settings → Devices and terminate this session. Imported history stays in your private workspace.</p> : null}
         {blocked ? <p role="status">This account has an existing connection. Disconnect it below and wait for logout confirmation before starting a hosted connection.</p> : null}
-        {!active ? <Button onClick={() => void connect()} disabled={disabled || busy || !loaded || Boolean(blocked) || !status?.serviceOnline || status.state === 'unavailable'}>{busy ? 'Preparing…' : connection ? 'Connect again' : 'Connect Telegram'}</Button> : null}
+        {!active || connection?.status === 'requested' ? <Button onClick={() => void connect()} disabled={disabled || busy || Boolean(active) || !loaded || Boolean(blocked) || !status?.serviceOnline || status.state === 'unavailable'}>{busy || connection?.status === 'requested' ? 'Preparing sign-in…' : connection?.status === 'failed' ? 'Retry sign-in' : 'Connect Telegram'}</Button> : null}
         {phase === 'preparing' ? <Button variant="outline" onClick={() => { attemptRef.current?.abort(); actionError.current = true; setError('Setup cancelled. Click Connect Telegram when you are ready.'); }}>Cancel setup</Button> : null}
-        {status?.enrollment ? <details className="space-y-3 rounded-md border p-3">
-            <summary className="cursor-pointer text-sm font-medium">Reset a lost or revoked connection registration</summary>
+        {resetNotice ? <p role="status" className="text-sm">{resetNotice}</p> : null}
+        {error ? <p role="alert" className="text-sm">{error}</p> : null}
+        {children}
+        <div className="flex flex-wrap gap-3"><Button variant="outline" disabled={busy || disabled} onClick={() => setRefresh(value => value + 1)}><RefreshCw />Retry service status</Button><Button asChild variant="outline"><Link href="/staff/telegram-intake/context">Search imported conversations</Link></Button></div>
+    </Card>
+    {status?.enrollment ? <Card className="p-4"><details className="space-y-3 rounded-md border p-3">
+            <summary className="cursor-pointer text-sm font-medium">Advanced recovery options</summary>
+            <h3 className="text-sm font-medium">Reset a lost or revoked connection registration</h3>
             <p className="text-sm text-muted-foreground">Reset retires this registration and frees its connection slot. Your imported history stays available. A replacement starts only when you click Connect Telegram.</p>
             {status.enrollment.retirementMode === 'external_revocation_required' ? <>
                 <p className="text-sm">First open Telegram → Settings → Devices. Terminate the old service session, or verify that it is already gone. The website cannot confirm this step for a lost connection.</p>
                 <label className="flex items-start gap-2 text-sm"><input type="checkbox" checked={revoked} onChange={event => setRevoked(event.target.checked)} disabled={busy || disabled} /><span>I revoked the old session, or verified it is absent, in Telegram Settings → Devices.</span></label>
             </> : <p className="text-sm text-muted-foreground">This registration has no issued worker credential or the server has recorded logout/cancellation. No external revocation confirmation is required.</p>}
             <Button variant="outline" disabled={disabled || busy || (status.enrollment.retirementMode === 'external_revocation_required' && !revoked)} onClick={() => void retire()}>{phase === 'retiring' ? 'Resetting registration…' : 'Reset registration'}</Button>
-        </details> : null}
-        {resetNotice ? <p role="status" className="text-sm">{resetNotice}</p> : null}
-        {error ? <p role="alert" className="text-sm">{error}</p> : null}
-        <div className="flex flex-wrap gap-3"><Button variant="outline" disabled={busy || disabled} onClick={() => setRefresh(value => value + 1)}><RefreshCw />Retry service status</Button><Button asChild variant="outline"><Link href="/staff/telegram-intake/context">Search imported conversations</Link></Button></div>
-    </Card>;
+        </details></Card> : null}</>;
 }

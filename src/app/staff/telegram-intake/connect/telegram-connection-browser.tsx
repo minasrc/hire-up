@@ -57,6 +57,8 @@ function ConnectionBrowser({ workspaceId, hostedEnabled }: { workspaceId: string
     const [now, setNow] = useState(() => Date.now());
     const [qrError, setQrError] = useState(false);
     const canvas = useRef<HTMLCanvasElement>(null);
+    const signInPanel = useRef<HTMLDivElement>(null);
+    const revealSignIn = useRef(false);
     const generation = useRef(0);
     const hostedAttempt = useRef<AbortController | null>(null);
     const currentRead = useRef<AbortController | null>(null);
@@ -153,6 +155,14 @@ function ConnectionBrowser({ workspaceId, hostedEnabled }: { workspaceId: string
         return () => { stale = true; };
     }, [connection?.qrLoginUrl, qrAvailable, refresh]);
 
+    useEffect(() => {
+        if (!revealSignIn.current || !signInPanel.current) return;
+        // A short loading panel may reach the page's scroll limit. Reveal it
+        // again when the QR/password step arrives, then leave later polls alone.
+        if (connection?.status !== 'requested') revealSignIn.current = false;
+        signInPanel.current.scrollIntoView({ block: 'start', behavior: window.matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth' });
+    }, [connection?.id, connection?.generation, connection?.status]);
+
     async function mutate(payload: Record<string, unknown>, signal?: AbortSignal) {
         if (mutating.current || signal?.aborted) return;
         const revision = ++generation.current;
@@ -165,7 +175,10 @@ function ConnectionBrowser({ workspaceId, hostedEnabled }: { workspaceId: string
         setBusy(true); setError('');
         try {
             const result = await request({ method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(payload), signal: requestSignal });
-            if (mounted.current && revision === generation.current && !requestSignal.aborted) setSnapshot(result);
+            if (mounted.current && revision === generation.current && !requestSignal.aborted) {
+                if (payload.action === 'connect') revealSignIn.current = true;
+                setSnapshot(result);
+            }
         } catch (failure) {
             if (mounted.current && revision === generation.current && !requestSignal.aborted) {
                 mutationError.current = true;
@@ -202,44 +215,48 @@ function ConnectionBrowser({ workspaceId, hostedEnabled }: { workspaceId: string
 
     const displayedConnectionError = (code: string) => hostedEnabled ? hostedConnectionError(code) || connectionError(code) : connectionError(code);
 
+    const ConnectionCard = hostedEnabled ? 'div' : Card;
+    const requestErrorPanel = error ? <div role="alert" className="rounded-lg border border-border p-4 text-sm"><p>{error}</p><Button className="mt-3" variant="outline" disabled={busy} onClick={() => { mutationError.current = false; setAccessDenied(false); setRefresh(value => value + 1); }}><RefreshCw />Retry status</Button></div> : null;
+    const connectionPanel = connection ? <ConnectionCard ref={signInPanel} className={`scroll-mt-24 space-y-4 ${hostedEnabled ? 'border-t border-border pt-5' : 'p-6'}`} aria-busy={busy}>
+        <div aria-live="polite">
+            {connection.status === 'requested' ? <><h2 className="font-semibold">Preparing Telegram sign-in</h2><p className="mt-2 text-sm text-muted-foreground">{hostedEnabled ? 'The service is requesting a sign-in code. It will appear here automatically.' : 'Your Mac is requesting a sign-in code. It will appear here automatically.'}</p></> : null}
+            {connection.status === 'qr_pending' ? <><h2 className="font-semibold">Scan with Telegram</h2><p className="mt-2 text-sm text-muted-foreground">On your phone, open Telegram → Settings → Devices → Link Desktop Device, then scan this code.</p></> : null}
+            {connection.status === 'awaiting_password' ? <h2 className="font-semibold">Enter your Telegram password</h2> : null}
+            {connection.status === 'connected' ? <><h2 className="flex items-center gap-2 font-semibold"><CheckCircle2 className="h-5 w-5" />Telegram connected</h2><p className="mt-2">{connection.profile?.displayName}</p>{connection.profile?.username ? <p className="text-sm text-muted-foreground">@{connection.profile.username}</p> : null}</> : null}
+            {connection.status === 'disconnecting' ? <><h2 className="font-semibold">Waiting for Telegram to disconnect</h2><p className="mt-2 text-sm text-muted-foreground">{hostedEnabled ? 'Disconnect is pending until the connection service confirms Telegram logout and removes its saved session. If the service is offline, logout will continue when it returns.' : 'Disconnect is pending until your Mac confirms Telegram logout and removes its saved session. Keep the connector running.'}</p></> : null}
+            {connection.status === 'disconnected' ? <><h2 className="font-semibold">{connection.retirementReason === 'external_revocation_attested' ? 'Telegram registration reset' : connection.cancelledBeforeStart ? 'Connection cancelled' : 'Telegram disconnected'}</h2><p className="mt-2 text-sm text-muted-foreground">{connection.retirementReason === 'external_revocation_attested' ? 'You confirmed the old session was revoked in Telegram Settings → Devices. The service registration has been retired; imported history remains available.' : connection.cancelledBeforeStart ? hostedEnabled ? 'Sign-in was cancelled before connecting.' : 'Sign-in was cancelled before your Mac started connecting.' : hostedEnabled ? 'The connection service confirmed logout and removed its saved session.' : 'Your Mac confirmed logout and removed its saved session.'}</p></> : null}
+            {connection.status === 'failed' ? <h2 className="font-semibold">Telegram connection needs attention</h2> : null}
+        </div>
+        {connection.errorCode ? <p role="alert" className="text-sm">{displayedConnectionError(connection.errorCode)}</p> : null}
+        {connection.status === 'qr_pending' ? <>{qrAvailable ? <canvas ref={canvas} role="img" aria-label="Telegram sign-in QR code" className="mx-auto rounded-lg" hidden={qrError} /> : null}{!qrAvailable || qrError ? <p role="status" className="text-sm text-muted-foreground">{qrError ? 'Unable to display the code. Refresh the status to try again.' : hostedEnabled ? 'This code expired. Waiting for a fresh sign-in code…' : 'This code expired. Waiting for a fresh code from your Mac…'}</p> : null}{qrError ? <Button variant="outline" onClick={() => setRefresh(value => value + 1)}>Refresh sign-in code</Button> : null}</> : null}
+        {connection.status === 'awaiting_password' ? <form className="space-y-3" onSubmit={submitPassword}>
+            <p className="text-sm text-muted-foreground">{hostedEnabled ? 'Telegram has two-step verification enabled. Your password is encrypted in this browser for your private Telegram connection.' : 'Telegram has two-step verification enabled. Your password is encrypted in this browser for your Mac connector.'}</p>
+            {connection.passwordHint ? <p className="text-sm">Password hint: {connection.passwordHint}</p> : null}
+            <Label htmlFor="telegram-password">Telegram two-step verification password</Label><Input ref={passwordInput} id="telegram-password" name="telegram-password" type="password" autoComplete="off" value={password} onChange={event => setPassword(event.target.value)} disabled={busy || accessDenied || connection.passwordPending || !worker?.online} required />
+            <Button type="submit" disabled={busy || accessDenied || connection.passwordPending || !worker?.online || !password}>{busy || connection.passwordPending ? 'Checking password…' : 'Continue securely'}</Button>
+        </form> : null}
+        {(active || connection.status === 'failed') && connection.status !== 'disconnecting' ? <Button variant="outline" disabled={busy || accessDenied} onClick={() => { hostedAttempt.current?.abort(); setPassword(''); void mutate({ action: 'disconnect', connectionId: connection.id, generation: connection.generation }); }}>{['connected', 'failed'].includes(connection.status) ? 'Disconnect Telegram' : 'Cancel sign-in'}</Button> : null}
+        {connection.status === 'connected' ? <Button asChild><Link href="/staff/telegram-intake/chats">Choose chats to import</Link></Button> : null}
+    </ConnectionCard> : null;
+
     return <section className="mx-auto flex w-full max-w-3xl flex-col gap-6">
         <PageHeader eyebrow="Private workspace" title="Connect Telegram" description="Connect your account securely using Telegram on your phone."
             actions={<div className="flex flex-wrap gap-2"><Button asChild variant="outline"><Link href="/staff/telegram-intake/chats">Telegram chats</Link></Button><Button asChild variant="outline"><Link href="/staff/telegram-intake/context">Search conversations</Link></Button><Button asChild variant="outline"><Link href="/staff/telegram-intake">Back to draft inbox</Link></Button></div>} />
-        {hostedEnabled ? <HostedConnectionPanel connection={connection ?? null} loaded={Boolean(snapshot)} disabled={busy || accessDenied} attemptRef={hostedAttempt} onDenied={denyAccess} onReset={() => setRefresh(value => value + 1)} onConnect={(workerId, signal) => mutate({ action: 'connect', workerId }, signal)} /> : <Card className="space-y-5 p-6">
+        {hostedEnabled ? <HostedConnectionPanel connection={connection ?? null} loaded={Boolean(snapshot)} disabled={busy || accessDenied} attemptRef={hostedAttempt} onDenied={denyAccess} onReset={() => setRefresh(value => value + 1)} onConnect={(workerId, signal) => mutate({ action: 'connect', workerId }, signal)}>{requestErrorPanel}{connectionPanel}</HostedConnectionPanel> : <Card className="space-y-5 p-6">
             <div className="flex items-start gap-3"><Laptop className="mt-1 h-5 w-5 shrink-0" /><div><h2 className="font-semibold">Your Mac connector</h2><p className="mt-1 text-sm text-muted-foreground">Keep the registered connector running on your Mac during sign-in and while connected. Your Telegram session stays on that Mac.</p></div></div>
             {!snapshot && !error ? <p role="status">Loading connection…</p> : null}
             {snapshot && !active ? <div className="space-y-3">
                 {snapshot.workers.length ? <><Label htmlFor="telegram-worker">Mac connector</Label><select id="telegram-worker" value={selectedWorker} onChange={event => setSelectedWorker(event.target.value)} disabled={busy || accessDenied} className="h-10 w-full rounded-lg border border-input bg-card px-3 text-sm">{snapshot.workers.map(item => <option key={item.id} value={item.id}>{item.name} — {item.online ? 'Online' : 'Offline'}</option>)}</select>
                     {!snapshot.workers.find(item => item.id === selectedWorker)?.online ? <p className="text-sm text-muted-foreground">This connector is offline. Start it on your Mac; this page will detect it automatically.</p> : null}
                     {workerChangeBlocked ? <p role="status" className="text-sm text-muted-foreground">Disconnect this account before choosing another Mac. Wait for logout confirmation, or select the original Mac to retry.</p> : null}
-                    <Button onClick={() => { if (!workerChangeBlocked) void mutate({ action: 'connect', workerId: selectedWorker }); }} disabled={busy || accessDenied || workerChangeBlocked || !snapshot.workers.find(item => item.id === selectedWorker)?.online}>{busy ? 'Starting…' : connection ? 'Connect again' : 'Connect Telegram'}</Button></>
+                    <Button onClick={() => { if (!workerChangeBlocked) void mutate({ action: 'connect', workerId: selectedWorker }); }} disabled={busy || accessDenied || workerChangeBlocked || !snapshot.workers.find(item => item.id === selectedWorker)?.online}>{busy ? 'Starting…' : connection?.status === 'failed' ? 'Retry sign-in' : 'Connect Telegram'}</Button></>
                     : <p className="text-sm text-muted-foreground">No Mac connector is available. Pair your Mac below, then start its Telegram connector.</p>}
             </div> : null}
             {active ? <div className="flex flex-wrap items-center gap-2 text-sm"><span>{worker?.name || 'Assigned Mac connector'}</span><Badge variant="secondary">{worker?.online ? 'Online' : 'Offline'}</Badge></div> : null}
             {active && !worker?.online ? <p role="status" className="text-sm text-muted-foreground">The Mac connector is offline. Keep it running to continue. If you need to revoke access now, use Telegram Settings → Devices.</p> : null}
         </Card>}
-        {error ? <div role="alert" className="rounded-lg border border-border p-4 text-sm"><p>{error}</p><Button className="mt-3" variant="outline" disabled={busy} onClick={() => { mutationError.current = false; setAccessDenied(false); setRefresh(value => value + 1); }}><RefreshCw />Retry status</Button></div> : null}
-        {connection ? <Card className="space-y-4 p-6" aria-busy={busy}>
-            <div aria-live="polite">
-                {connection.status === 'requested' ? <><h2 className="font-semibold">Preparing Telegram sign-in</h2><p className="mt-2 text-sm text-muted-foreground">{hostedEnabled ? 'The service is requesting a sign-in code. It will appear here automatically.' : 'Your Mac is requesting a sign-in code. It will appear here automatically.'}</p></> : null}
-                {connection.status === 'qr_pending' ? <><h2 className="font-semibold">Scan with Telegram</h2><p className="mt-2 text-sm text-muted-foreground">On your phone, open Telegram → Settings → Devices → Link Desktop Device, then scan this code.</p></> : null}
-                {connection.status === 'awaiting_password' ? <h2 className="font-semibold">Enter your Telegram password</h2> : null}
-                {connection.status === 'connected' ? <><h2 className="flex items-center gap-2 font-semibold"><CheckCircle2 className="h-5 w-5" />Telegram connected</h2><p className="mt-2">{connection.profile?.displayName}</p>{connection.profile?.username ? <p className="text-sm text-muted-foreground">@{connection.profile.username}</p> : null}</> : null}
-                {connection.status === 'disconnecting' ? <><h2 className="font-semibold">Waiting for Telegram to disconnect</h2><p className="mt-2 text-sm text-muted-foreground">{hostedEnabled ? 'Disconnect is pending until the connection service confirms Telegram logout and removes its saved session. If the service is offline, logout will continue when it returns.' : 'Disconnect is pending until your Mac confirms Telegram logout and removes its saved session. Keep the connector running.'}</p></> : null}
-                {connection.status === 'disconnected' ? <><h2 className="font-semibold">{connection.retirementReason === 'external_revocation_attested' ? 'Telegram registration reset' : connection.cancelledBeforeStart ? 'Connection cancelled' : 'Telegram disconnected'}</h2><p className="mt-2 text-sm text-muted-foreground">{connection.retirementReason === 'external_revocation_attested' ? 'You confirmed the old session was revoked in Telegram Settings → Devices. The service registration has been retired; imported history remains available.' : connection.cancelledBeforeStart ? hostedEnabled ? 'Sign-in was cancelled before connecting.' : 'Sign-in was cancelled before your Mac started connecting.' : hostedEnabled ? 'The connection service confirmed logout and removed its saved session.' : 'Your Mac confirmed logout and removed its saved session.'}</p></> : null}
-                {connection.status === 'failed' ? <h2 className="font-semibold">Telegram connection needs attention</h2> : null}
-            </div>
-            {connection.errorCode ? <p role="alert" className="text-sm">{displayedConnectionError(connection.errorCode)}</p> : null}
-            {connection.status === 'qr_pending' ? <>{qrAvailable ? <canvas ref={canvas} role="img" aria-label="Telegram sign-in QR code" className="mx-auto rounded-lg" hidden={qrError} /> : null}{!qrAvailable || qrError ? <p role="status" className="text-sm text-muted-foreground">{qrError ? 'Unable to display the code. Refresh the status to try again.' : hostedEnabled ? 'This code expired. Waiting for a fresh sign-in code…' : 'This code expired. Waiting for a fresh code from your Mac…'}</p> : null}{qrError ? <Button variant="outline" onClick={() => setRefresh(value => value + 1)}>Refresh sign-in code</Button> : null}</> : null}
-            {connection.status === 'awaiting_password' ? <form className="space-y-3" onSubmit={submitPassword}>
-                <p className="text-sm text-muted-foreground">{hostedEnabled ? 'Telegram has two-step verification enabled. Your password is encrypted in this browser for your private Telegram connection.' : 'Telegram has two-step verification enabled. Your password is encrypted in this browser for your Mac connector.'}</p>
-                {connection.passwordHint ? <p className="text-sm">Password hint: {connection.passwordHint}</p> : null}
-                <Label htmlFor="telegram-password">Telegram two-step verification password</Label><Input ref={passwordInput} id="telegram-password" name="telegram-password" type="password" autoComplete="off" value={password} onChange={event => setPassword(event.target.value)} disabled={busy || accessDenied || connection.passwordPending || !worker?.online} required />
-                <Button type="submit" disabled={busy || accessDenied || connection.passwordPending || !worker?.online || !password}>{busy || connection.passwordPending ? 'Checking password…' : 'Continue securely'}</Button>
-            </form> : null}
-            {(active || connection.status === 'failed') && connection.status !== 'disconnecting' ? <Button variant="outline" disabled={busy || accessDenied} onClick={() => { hostedAttempt.current?.abort(); setPassword(''); void mutate({ action: 'disconnect', connectionId: connection.id, generation: connection.generation }); }}>{['connected', 'failed'].includes(connection.status) ? 'Disconnect Telegram' : 'Cancel sign-in'}</Button> : null}
-        </Card> : null}
-        {connection?.status === 'connected' ? <Button asChild><Link href="/staff/telegram-intake/chats">Choose chats to import</Link></Button> : null}
+        {!hostedEnabled ? requestErrorPanel : null}
+        {!hostedEnabled ? connectionPanel : null}
         {!hostedEnabled ? <WorkerPairingPanel workspaceId={workspaceId} onDeviceChange={() => setRefresh(value => value + 1)} /> : null}
         <p className="text-sm text-muted-foreground">Connect your account, then choose chats to import their full available history. Drafts and source messages stay private; only approved candidate records become shared.</p>
     </section>;
