@@ -24,7 +24,7 @@ export function hostedStatus(value) {
 
 export function hostedConnectionError(code) {
     const errors = {
-        SESSION_MISSING: 'This Telegram session is no longer available. Connect again.',
+        SESSION_MISSING: 'This Telegram session is no longer available. Start a new sign-in.',
         TELEGRAM_UNAVAILABLE: 'Telegram is temporarily unavailable. The service will retry.',
         LOGOUT_FAILED: 'Telegram has not confirmed logout. The service will retry. You can also revoke this session in Telegram Settings → Devices.',
     };
@@ -42,7 +42,7 @@ export async function prepareHostedConnection({ prepare, read, wait, start, onSt
         if (!status.serviceOnline || status.state === 'unavailable') {
             throw new Error('The Telegram service is temporarily offline or unavailable. Your imported history remains available. Retry shortly.');
         }
-        if (now() >= deadline) throw new Error('Telegram setup is taking longer than expected. Click Connect again to retry.');
+        if (now() >= deadline) throw new Error('Telegram setup is taking longer than expected. Try connecting again when the service is available.');
         if (visible() && status.state === 'ready' && status.workerOnline && status.workerId) {
             signal.throwIfAborted();
             await start(status.workerId, signal);
@@ -50,7 +50,7 @@ export async function prepareHostedConnection({ prepare, read, wait, start, onSt
         }
         await wait(signal);
         signal.throwIfAborted();
-        if (now() >= deadline) throw new Error('Telegram setup is taking longer than expected. Click Connect again to retry.');
+        if (now() >= deadline) throw new Error('Telegram setup is taking longer than expected. Try connecting again when the service is available.');
         status = hostedStatus(await read(signal));
     }
 }

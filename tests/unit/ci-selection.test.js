@@ -194,7 +194,7 @@ test('feature APIs retain all downstream workflow consumers without unrelated st
 });
 
 test('Telegram page coverage includes its consumers; shared intake still covers the whole chain', () => {
-    assert.deepEqual(selected(['src/app/staff/telegram-intake/chats/history-model.js']), ['quality', 'telegram-history', 'telegram-source-updates']);
+    assert.deepEqual(selected(['src/app/staff/telegram-intake/chats/history-model.js']), ['quality', 'telegram-connection', 'telegram-history', 'telegram-source-updates']);
     assert.deepEqual(selected(['src/app/staff/telegram-intake/connect/worker-pairing-panel.tsx']), ['quality', 'telegram-connection', 'worker-pairing']);
     assert.ok(selected(['src/app/staff/telegram-intake/extraction/batch-source.tsx']).includes('cv-analysis'));
     for (const job of ['telegram-intake', 'telegram-history', 'profile-search', 'cv-analysis', 'cv-search', 'worker-pairing']) {
@@ -254,7 +254,10 @@ test('browser job consumes the quality build without rebuilding or falling back 
 });
 
 test('conversation search and freshness retain separate workflow checks', () => {
-    for (const path of ['src/app/staff/telegram-intake/context/page.tsx', 'src/app/api/staff/telegram-context/route.ts', 'tests/database/telegram-context.test.js', 'tests/staff-workspace/telegram-context.test.js']) assert.deepEqual(selected([path]), ['quality', 'telegram-context']);
+    assert.deepEqual(selected(['src/app/staff/telegram-intake/context/page.tsx']), ['quality', 'telegram-connection', 'telegram-context']);
+    const hosted = readFileSync(new URL('../staff-workspace/telegram-hosted.test.js', import.meta.url), 'utf8');
+    for (const action of ['View conversation', 'Search messages', 'Import full history']) assert.ok(hosted.includes(action), 'The hosted connection suite covers the import/search journey');
+    for (const path of ['src/app/api/staff/telegram-context/route.ts', 'tests/database/telegram-context.test.js', 'tests/staff-workspace/telegram-context.test.js']) assert.deepEqual(selected([path]), ['quality', 'telegram-context']);
     for (const path of ['tests/database/telegram-source-updates-runtime.test.js', 'tests/database/telegram-source-refresh-runtime.test.js', 'tests/database/telegram-native-account-runtime.test.js', 'tests/database/telegram-native-channel-runtime.test.js']) assert.deepEqual(selected([path]), ['quality', 'telegram-source-updates']);
     assert.deepEqual(selected(['tests/telegram-connector/native-sdk.test.js']), ['quality', 'telegram-source-updates']);
     assert.deepEqual(selected(['tests/telegram-connector/hosted-entrypoint.test.js']), ['quality', 'telegram-connection']);
