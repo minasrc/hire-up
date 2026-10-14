@@ -1726,7 +1726,7 @@ test('staff workspace end-to-end in a real browser', async (t) => {
     });
 
     await runCase('candidate stage select is readable and the transition persists', async () => {
-        await gotoStaff(page, `${baseURL}/staff/candidates/${CJ_ID.CANDIDATE_B}`);
+        await gotoStaff(page, `${baseURL}/staff/candidates/${CJ_ID.CANDIDATE_B}?tab=applications`);
         const trigger = page.getByRole('combobox', {
             name: 'Stage for application AG-AAAA00000001',
         });
@@ -1790,7 +1790,7 @@ test('staff workspace end-to-end in a real browser', async (t) => {
         const notesTab = page.getByRole('tab', { name: /Notes/ });
         const documentsTab = page.getByRole('tab', { name: /Documents/ });
         await expect(
-            page.getByRole('tab', { name: /Applications/ }),
+            page.getByRole('tab', { name: 'Overview', exact: true }),
         ).toHaveAttribute('aria-selected', 'true');
 
         await documentsTab.click();

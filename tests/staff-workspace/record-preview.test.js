@@ -166,7 +166,7 @@ test('staff previews records in place and opens CV content', async (t) => {
         await page.goto(`${baseURL}/staff/candidates?q=Synthetic`, { waitUntil: 'domcontentloaded' });
         await page.waitForLoadState('networkidle');
         const candidateLink = page.getByRole('main')
-            .getByRole('link', { name: 'Synthetic Candidate B' }).first();
+            .getByRole('link', { name: 'Synthetic Candidate B', exact: true });
         await candidateLink.click();
         const candidatePreview = page.getByRole('dialog', { name: 'Synthetic Candidate B' });
         await expect(candidatePreview).toBeVisible({ timeout: 20_000 });
@@ -469,7 +469,7 @@ test('staff previews records in place and opens CV content', async (t) => {
         await page.setViewportSize({ width: 390, height: 844 });
         await page.goto(`${baseURL}/staff/candidates`, { waitUntil: 'domcontentloaded' });
         await page.waitForLoadState('networkidle');
-        await page.getByRole('main').getByRole('link', { name: 'Synthetic Candidate B' }).click();
+        await page.getByRole('main').getByRole('link', { name: 'Synthetic Candidate B', exact: true }).click();
         const mobilePreview = page.getByRole('dialog', { name: 'Synthetic Candidate B' });
         await expect(mobilePreview).toBeVisible({ timeout: 20_000 });
         assert.ok((await mobilePreview.boundingBox()).width <= 390);
