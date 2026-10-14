@@ -126,7 +126,7 @@ function testJobs(file) {
         [/^telegram-extraction/, ['telegram-extraction']],
         [/^telegram-cv/, ['telegram-cv']],
         [/^telegram-(retention|sync)/, ['telegram-retention', 'telegram-history']],
-        [/^profile-search/, ['profile-search']],
+        [/^(profile-search|telegram-candidate-flow)/, ['profile-search']],
         [/^cv-analysis/, ['cv-analysis']],
         [/^cv-search/, ['cv-search']],
         [/^worker-pairing/, ['worker-pairing']],

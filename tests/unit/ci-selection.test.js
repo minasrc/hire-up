@@ -94,6 +94,7 @@ test('CV recovery runs its workflow checks and altered migration contents restor
 test('extraction provider and activity UI select their consumers without unrelated staff workflows', () => {
     assert.deepEqual(new Set(selected(['services/telegram-extraction-worker/provider.mjs'])), new Set(['quality', 'telegram-extraction', 'telegram-intake']));
     assert.deepEqual(new Set(selected(['src/app/staff/telegram-intake/processing-status.tsx'])), new Set(['quality', 'telegram-intake', 'telegram-history', 'profile-search']));
+    assert.deepEqual(new Set(selected(['tests/staff-workspace/telegram-candidate-flow.test.js'])), new Set(['quality', 'profile-search']));
 });
 
 test('shared layouts cover every staff browser workflow without unrelated database-only jobs', () => {
