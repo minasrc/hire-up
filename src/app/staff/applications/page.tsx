@@ -18,7 +18,7 @@ export default async function StaffApplicationsPage({ searchParams }: {
     let directory;
     try {
         directory = await listApplicationDirectory(
-            gate.pool, gate.identity, gate.organizationId, params);
+            gate.pool, gate.identity, gate.organizationId, { ...params, stage: params.stage ?? 'active' });
         applications = directory.rows;
     } catch (error) {
         if (!(error instanceof StaffAuthorizationError && error.code === 'FORBIDDEN')) throw error;

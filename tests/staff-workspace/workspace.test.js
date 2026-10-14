@@ -80,6 +80,7 @@ const MIGRATIONS = [
     '20261007090000_staff_mfa_admin_recovery.sql',
     '20261010090000_staff_notifications.sql',
     '20261011090000_staff_time_zone.sql',
+    '20261014190000_application_review_filters.sql',
 ];
 
 const NEXTAUTH_SECRET = 'synthetic-workspace-secret';
@@ -515,7 +516,7 @@ test('staff workspace end-to-end in a real browser', async (t) => {
             for (const directory of ['candidates', 'applications']) {
                 await gotoStaff(page, `${baseURL}/staff/${directory}?q=Paging+UI`);
                 await expect(page.getByRole('table').locator('tbody tr')).toHaveCount(50);
-                if (directory === 'candidates') {
+                if (['candidates', 'applications'].includes(directory)) {
                     const viewport = await page.getByRole('table').evaluate(table => ({ height: table.parentElement.clientHeight, scrollHeight: table.parentElement.scrollHeight }));
                     assert.ok(viewport.height <= 640 && viewport.scrollHeight > viewport.height);
                 }
@@ -529,10 +530,10 @@ test('staff workspace end-to-end in a real browser', async (t) => {
                 await expect(page.getByRole('table').locator('tbody tr')).toHaveCount(50);
             }
             const cards = page.getByRole('group', { name: 'Stage filter cards' });
-            await expect(cards.getByRole('button', { name: /^All applications/ })).toHaveText(/All applications\s*51/);
+            await expect(cards.getByRole('button', { name: /^Active applications/ })).toHaveText(/Active applications\s*51/);
             await cards.getByRole('button', { name: /^Interview/ }).click();
             await expect(page.getByRole('table').locator('tbody tr')).toHaveCount(26);
-            await expect(cards.getByRole('button', { name: /^All applications/ })).toHaveText(/All applications\s*51/);
+            await expect(cards.getByRole('button', { name: /^Active applications/ })).toHaveText(/Active applications\s*51/);
             await expect(page.getByRole('status').filter({ hasText: '26 applications' })).toBeVisible();
         } finally {
             psql(container, `delete from app.applications where id::text like '96100000-%';
@@ -569,7 +570,7 @@ test('staff workspace end-to-end in a real browser', async (t) => {
             await gotoStaff(page, `${baseURL}/staff/applications?client=${emptyClient}`);
             await expect(page.getByRole('combobox', { name: 'Filter by client' })).toHaveText('Empty filter client');
             const cards = page.getByRole('group', { name: 'Stage filter cards' });
-            await expect(cards.getByRole('button', { name: /^All applications/ })).toHaveText(/All applications\s*0/);
+            await expect(cards.getByRole('button', { name: /^Active applications/ })).toHaveText(/Active applications\s*0/);
             for (const card of await cards.getByRole('button').all()) await expect(card).toHaveText(/0$/);
             await expect(page.getByText('No applications found', { exact: true })).toBeVisible();
             await expect(page.getByText('Review candidates across your clients and open roles.')).toHaveCount(0);
@@ -580,22 +581,22 @@ test('staff workspace end-to-end in a real browser', async (t) => {
             await expect(page.getByRole('combobox', { name: 'Filter by client' })).toHaveText('Empty filter client');
 
             await page.getByRole('button', { name: 'Clear filters' }).click();
-            await expect(page).toHaveURL(`${baseURL}/staff/applications`);
-            await expect(cards.getByRole('button', { name: /^All applications/ })).toHaveText(/All applications\s*1/);
+            await expect(page).toHaveURL(`${baseURL}/staff/applications?stage=active`);
+            await expect(cards.getByRole('button', { name: /^Active applications/ })).toHaveText(/Active applications\s*1/);
             await page.locator('#application-search').fill('no-such-candidate');
             for (const card of await cards.getByRole('button').all()) await expect(card).toHaveText(/0$/);
             await page.getByRole('button', { name: 'Clear filters' }).click();
-            await expect(cards.getByRole('button', { name: /^All applications/ })).toHaveText(/All applications\s*1/);
+            await expect(cards.getByRole('button', { name: /^Active applications/ })).toHaveText(/Active applications\s*1/);
 
             await page.getByRole('button', { name: 'Awaiting review', exact: true }).click();
-            await cards.getByRole('button', { name: /^All applications/ }).click();
+            await cards.getByRole('button', { name: /^Active applications/ }).click();
             await expect(page.getByRole('button', { name: 'Awaiting review', exact: true })).toHaveAttribute('aria-pressed', 'true');
             await expect.poll(() => new URL(page.url()).searchParams.get('review')).toBe('1');
 
             await gotoStaff(page, `${baseURL}/staff/applications?client=${foreignClient}`);
             await expect(page.getByRole('combobox', { name: 'Filter by client' })).toHaveText('Unavailable client');
             await expect(page.getByText('Private foreign filter client')).toHaveCount(0);
-            await expect(cards.getByRole('button', { name: /^All applications/ })).toHaveText(/All applications\s*0/);
+            await expect(cards.getByRole('button', { name: /^Active applications/ })).toHaveText(/Active applications\s*0/);
             await page.setViewportSize({ width: 390, height: 844 });
             await gotoStaff(page, `${baseURL}/staff/applications?client=${emptyClient}`);
             await expect(page.getByRole('combobox', { name: 'Filter by client' })).toHaveText('Empty filter client');
@@ -1677,6 +1678,62 @@ test('staff workspace end-to-end in a real browser', async (t) => {
         await page.waitForURL(new RegExp(`/staff/candidates/${CJ_ID.CANDIDATE_B}$`));
         await expect(page.getByRole('heading', { name: 'Synthetic Candidate B', exact: true })).toBeVisible();
         await expect(page.getByRole('dialog')).toHaveCount(0);
+    });
+
+    await runCase('pipeline drag saves the stage and review navigation keeps the same panel', async () => {
+        const candidateId = randomUUID();
+        const applicationId = randomUUID();
+        psql(container, `insert into app.candidates(id,organization_id,full_name,identity_state,lifecycle)
+            values('${candidateId}','${ORG_ID}','Synthetic Review Neighbor','established','active');
+            insert into app.applications(id,organization_id,candidate_id,job_id,pipeline_id,stage_id,public_reference,reference_version,received_at)
+            values('${applicationId}','${ORG_ID}','${candidateId}','${CJ_ID.JOB_LEGACY_B}','${CJ_ID.PIPELINE_B}','${CJ_ID.STAGE_B_1}','AG-AAAA00000999',1,now());`);
+        try {
+            await gotoStaff(page, `${baseURL}/staff/applications`);
+            await page.getByRole('button', { name: 'Pipeline', exact: true }).click();
+            const card = page.locator('li[data-drag-enabled]').filter({ has: page.getByRole('link', { name: 'Synthetic Candidate B', exact: true }) });
+            const target = page.getByRole('region', { name: 'Interview cards', exact: true });
+            await expect(card).toHaveAttribute('data-drag-enabled', 'true');
+            await expect(target).toHaveCSS('min-height', '560px');
+            const sourceBox = await card.boundingBox();
+            const targetBox = await target.boundingBox();
+            assert.ok(sourceBox && targetBox);
+            let releaseSave;
+            const delayedSave = new Promise(resolve => { releaseSave = resolve; });
+            await page.route('**/api/staff/applications', async route => {
+                if (route.request().method() === 'POST') await delayedSave;
+                await route.continue();
+            });
+            const saved = page.waitForResponse(response => new URL(response.url()).pathname === '/api/staff/applications' && response.request().method() === 'POST');
+            await page.mouse.move(sourceBox.x + 8, sourceBox.y + 8);
+            await page.mouse.down();
+            await page.mouse.move(sourceBox.x + 16, sourceBox.y + 8, { steps: 3 });
+            await page.waitForTimeout(250);
+            await page.mouse.move(targetBox.x + 40, targetBox.y + 20, { steps: 20 });
+            await page.mouse.up();
+            await expect(target.getByRole('link', { name: 'Synthetic Candidate B', exact: true })).toBeVisible();
+            await expect(page.getByRole('region', { name: 'To review cards', exact: true }).getByRole('link', { name: 'Synthetic Candidate B', exact: true })).toHaveCount(0);
+            releaseSave();
+            assert.equal((await saved).status(), 200);
+            await page.unroute('**/api/staff/applications');
+            await expect(target.getByRole('link', { name: 'Synthetic Candidate B', exact: true })).toBeVisible();
+            assert.equal(psql(container, `select s.key from app.applications a join app.pipeline_stages s on s.id=a.stage_id where a.id='${CJ_ID.APPLICATION_B}'`).trim(), 'interview');
+            await page.reload({ waitUntil: 'networkidle' });
+            await page.getByRole('link', { name: 'Synthetic Candidate B', exact: true }).click();
+            const panel = page.getByTestId('application-review-panel');
+            await expect(panel).toBeVisible();
+            await expect(panel.getByRole('button', { name: 'Change stage', exact: true })).toBeEnabled();
+            await panel.evaluate(node => { window.__originalReviewPanel = node; });
+            const next = panel.getByRole('button', { name: 'Next application' });
+            const previous = panel.getByRole('button', { name: 'Previous application' });
+            await (await next.isEnabled() ? next : previous).click();
+            await expect(panel.getByRole('heading', { name: 'Synthetic Review Neighbor', exact: true })).toBeVisible();
+            assert.equal(await panel.evaluate(node => node === window.__originalReviewPanel), true);
+            await expect(panel.getByRole('button', { name: 'Change stage', exact: true })).toBeEnabled();
+            await panel.getByRole('button', { name: 'Close', exact: true }).click();
+        } finally {
+            psql(container, `update app.applications set stage_id='${CJ_ID.STAGE_B_1}' where id='${CJ_ID.APPLICATION_B}';
+                delete from app.applications where id='${applicationId}'; delete from app.candidates where id='${candidateId}';`);
+        }
     });
 
     await runCase('same-path workspace links re-sync filters and history restores them', async () => {

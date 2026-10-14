@@ -52,6 +52,8 @@
     "telegram:extract": "node scripts/telegram-extraction.mjs"
   },
   "dependencies": {
+    "@dnd-kit/dom": "^0.5.0",
+    "@dnd-kit/react": "^0.5.0",
     "@heroui/accordion": "^2.2.25",
     "@heroui/react": "^2.8.6",
     "@radix-ui/react-icons": "^1.3.2",

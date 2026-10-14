@@ -228,6 +228,12 @@ test('staff directory pages filter all records and preserve authorization', asyn
         assert.equal(review.total, 310);
         assert.ok(review.rows.every((row) => row.stageIsInitial));
         assert.equal(review.stages.find((row) => row.key === 'interview').count, 0);
+        assert.equal((await applications({ q: 'Page candidate', stage: 'active' })).total, 620);
+        const toReview = await applications({ q: 'Page candidate', stage: 'to_review' });
+        assert.equal(toReview.total, 310);
+        assert.ok(toReview.rows.every(row => row.stageIsInitial));
+        assert.equal(toReview.stages.find(row => row.key === 'review').isInitial, true);
+        assert.equal((await applications({ q: 'Page candidate', stage: 'closed' })).total, 0);
         const job = await applications({ q: 'Page candidate', job: CJ_ID.JOB_LEGACY_B });
         assert.equal(job.total, 500);
         const client = await applications({ q: 'Page candidate', client: '91000000-0000-4000-8000-000000000120' });

@@ -338,7 +338,8 @@ export function RecordPreview({ children }: { children: ReactNode }) {
         const anchor = (event.target as HTMLElement).closest<HTMLAnchorElement>('a[href]');
         if (!anchor || !event.currentTarget.contains(anchor)
             || anchor.target || anchor.hasAttribute('download')
-            || anchor.hasAttribute('data-full-page')) return;
+            || anchor.hasAttribute('data-full-page')
+            || anchor.hasAttribute('data-application-review')) return;
         const url = new URL(anchor.href);
         if (url.origin !== window.location.origin || url.search || url.hash) return;
         const match = recordPath.exec(url.pathname);

@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto';
-import { transitionApplicationStage } from '@/lib/pipeline-operations';
+import { listApplicationDirectory, transitionApplicationStage } from '@/lib/pipeline-operations';
 import {
     staffApiContext,
     staffErrorResponse,
@@ -34,4 +34,15 @@ export async function POST(request: Request) {
     } catch (error) {
         return staffErrorResponse(error);
     }
+}
+
+export async function GET(request: Request) {
+    const context = await staffApiContext();
+    const denied = staffGateResponse(context);
+    if (denied) return denied;
+    try {
+        const result = await listApplicationDirectory(context.pool, context.identity, context.organizationId,
+            Object.fromEntries(new URL(request.url).searchParams));
+        return Response.json({ result }, { headers: { 'Cache-Control': 'private, no-store' } });
+    } catch (error) { return staffErrorResponse(error); }
 }
