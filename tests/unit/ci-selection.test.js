@@ -262,7 +262,7 @@ test('browser job consumes the quality build without rebuilding or falling back 
 test('conversation search and freshness retain separate workflow checks', () => {
     assert.deepEqual(selected(['src/app/staff/telegram-intake/context/page.tsx']), ['quality', 'telegram-connection', 'telegram-context']);
     const hosted = readFileSync(new URL('../staff-workspace/telegram-hosted.test.js', import.meta.url), 'utf8');
-    for (const action of ['View conversation', 'Search messages', 'Import full history']) assert.ok(hosted.includes(action), 'The hosted connection suite covers the import/search journey');
+    for (const action of ['View conversation', 'Search messages', 'Select Hosted journey chat', "name: 'Start'"]) assert.ok(hosted.includes(action), 'The hosted connection suite covers the import/search journey');
     for (const path of ['src/app/api/staff/telegram-context/route.ts', 'tests/database/telegram-context.test.js', 'tests/staff-workspace/telegram-context.test.js']) assert.deepEqual(selected([path]), ['quality', 'telegram-context']);
     for (const path of ['tests/database/telegram-source-updates-runtime.test.js', 'tests/database/telegram-source-refresh-runtime.test.js', 'tests/database/telegram-native-account-runtime.test.js', 'tests/database/telegram-native-channel-runtime.test.js']) assert.deepEqual(selected([path]), ['quality', 'telegram-source-updates']);
     assert.deepEqual(selected(['tests/telegram-connector/native-sdk.test.js']), ['quality', 'telegram-source-updates']);

@@ -292,7 +292,7 @@ test('CV analysis creates private drafts from attachment-only messages and suppo
         await panel.getByLabel('Primary email', { exact: true }).fill('charles-analysis@example.test');
         const blocked = page.waitForResponse(response => response.url().endsWith(`/drafts/${second.draftId}/decision`));
         await panel.getByRole('button', { name: 'Save and approve', exact: true }).click(); assert.equal((await blocked).status(), 422);
-        await expect(panel.getByRole('link', { name: /^CV analysis review:/ })).toBeVisible();
+        await expect(analysis.getByRole('button', { name: 'Skip CV analysis', exact: true })).toBeEnabled();
         await expect(panel.getByRole('link', { name: /^First name:/ })).toHaveCount(0);
         await panel.getByLabel('Location', { exact: true }).fill('Manual Berlin');
         const save = page.waitForResponse(response => response.url().endsWith(`/drafts/${second.draftId}`) && response.request().method() === 'PATCH');

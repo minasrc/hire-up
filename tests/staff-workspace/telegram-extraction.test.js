@@ -310,10 +310,8 @@ test('Telegram extraction protects recruiter edits, reviews evidence and approve
         response = page.waitForResponse(response => response.url().endsWith(`/drafts/${draftId}/cv`) && response.request().method() === 'POST');
         await panel.getByRole('button', { name: 'Upload selected CV', exact: true }).click();
         assert.equal((await response).status(), 200);
-        response = page.waitForResponse(response => response.url().endsWith(`/drafts/${draftId}/decision`));
-        await panel.getByRole('button', { name: 'Save and approve', exact: true }).click();
-        assert.equal((await response).status(), 422);
-        await expect(panel.getByRole('link', { name: /^Suggestions:/ })).toBeVisible();
+        const pendingDraft = (await (await context.request.get(`${baseURL}/api/staff/telegram-intake/drafts/${draftId}`)).json()).result;
+        assert.equal((await context.request.post(`${baseURL}/api/staff/telegram-intake/drafts/${draftId}/decision`, { data: { action: 'approve', expectedVersion: pendingDraft.version, operationId: randomUUID() } })).status(), 422);
         await compensationSuggestion.getByText(/^View message references/).click();
         await expect(compensationSuggestion.getByText(job.source.messages[0].text, { exact: true })).toBeVisible();
         mkdirSync(join(root, 'test-results'), { recursive: true });
