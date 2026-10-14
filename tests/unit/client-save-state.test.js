@@ -92,6 +92,7 @@ function formSubject(respond, { clientId = id, initial = client, onSaved } = {})
     });
     const hooks = persistentReact();
     const imports = {
+        './job-form': { JobForm: 'JobForm' },
         'react/jsx-runtime': jsxRuntime,
         react: hooks.react,
         'next/navigation': { useRouter: () => ({
@@ -311,6 +312,7 @@ function detailSubject(initialClient = client, capabilities = {
     const detailCode = compile('../../src/app/staff/clients/[clientId]/client-detail.tsx');
     const hooks = persistentReact();
     const imports = {
+        './job-form': { JobForm: 'JobForm' },
         'react/jsx-runtime': jsxRuntime,
         react: hooks.react,
         'next/link': { default: 'Link' },
