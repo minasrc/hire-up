@@ -129,7 +129,11 @@ const clickUntil = async (action, target, timeout = 30_000) =>
 const fillWhenReady = async (locator, value, timeout = 30_000) =>
     expect(async () => {
         await locator.fill(value);
-        await expect(locator).toHaveValue(value, { timeout: 1500 });
+        const fieldId = await locator.getAttribute('id');
+        const expected = ['job-comp-min', 'job-comp-max'].includes(fieldId)
+            ? value.replace(/\B(?=(\d{3})+(?!\d))/g, ',')
+            : value;
+        await expect(locator).toHaveValue(expected, { timeout: 1500 });
     }).toPass({ timeout });
 
 const sampleContrast = (locator) => locator.first().evaluate((node) => {
@@ -521,10 +525,10 @@ test('staff workspace end-to-end in a real browser', async (t) => {
                 await expect(page.getByRole('table').locator('tbody tr')).toHaveCount(50);
             }
             const cards = page.getByRole('group', { name: 'Stage filter cards' });
-            await expect(cards.getByRole('button', { name: /^All applications/ })).toHaveText(/All applications\s*51/);
+            await expect(cards.getByRole('button', { name: /^All applications/ })).toHaveText(/Active applications\s*51/);
             await cards.getByRole('button', { name: /^Interview/ }).click();
             await expect(page.getByRole('table').locator('tbody tr')).toHaveCount(26);
-            await expect(cards.getByRole('button', { name: /^All applications/ })).toHaveText(/All applications\s*51/);
+            await expect(cards.getByRole('button', { name: /^All applications/ })).toHaveText(/Active applications\s*51/);
             await expect(page.getByRole('status').filter({ hasText: '26 applications' })).toBeVisible();
         } finally {
             psql(container, `delete from app.applications where id::text like '96100000-%';
@@ -561,7 +565,7 @@ test('staff workspace end-to-end in a real browser', async (t) => {
             await gotoStaff(page, `${baseURL}/staff/applications?client=${emptyClient}`);
             await expect(page.getByRole('combobox', { name: 'Filter by client' })).toHaveText('Empty filter client');
             const cards = page.getByRole('group', { name: 'Stage filter cards' });
-            await expect(cards.getByRole('button', { name: /^All applications/ })).toHaveText(/All applications\s*0/);
+            await expect(cards.getByRole('button', { name: /^All applications/ })).toHaveText(/Active applications\s*0/);
             for (const card of await cards.getByRole('button').all()) await expect(card).toHaveText(/0$/);
             await expect(page.getByText('No applications found', { exact: true })).toBeVisible();
             await expect(page.getByText('Review candidates across your clients and open roles.')).toHaveCount(0);
@@ -573,11 +577,11 @@ test('staff workspace end-to-end in a real browser', async (t) => {
 
             await page.getByRole('button', { name: 'Clear filters' }).click();
             await expect(page).toHaveURL(`${baseURL}/staff/applications`);
-            await expect(cards.getByRole('button', { name: /^All applications/ })).toHaveText(/All applications\s*1/);
+            await expect(cards.getByRole('button', { name: /^All applications/ })).toHaveText(/Active applications\s*1/);
             await page.locator('#application-search').fill('no-such-candidate');
             for (const card of await cards.getByRole('button').all()) await expect(card).toHaveText(/0$/);
             await page.getByRole('button', { name: 'Clear filters' }).click();
-            await expect(cards.getByRole('button', { name: /^All applications/ })).toHaveText(/All applications\s*1/);
+            await expect(cards.getByRole('button', { name: /^All applications/ })).toHaveText(/Active applications\s*1/);
 
             await page.getByRole('button', { name: 'Awaiting review', exact: true }).click();
             await cards.getByRole('button', { name: /^All applications/ }).click();
@@ -587,7 +591,7 @@ test('staff workspace end-to-end in a real browser', async (t) => {
             await gotoStaff(page, `${baseURL}/staff/applications?client=${foreignClient}`);
             await expect(page.getByRole('combobox', { name: 'Filter by client' })).toHaveText('Unavailable client');
             await expect(page.getByText('Private foreign filter client')).toHaveCount(0);
-            await expect(cards.getByRole('button', { name: /^All applications/ })).toHaveText(/All applications\s*0/);
+            await expect(cards.getByRole('button', { name: /^All applications/ })).toHaveText(/Active applications\s*0/);
             await page.setViewportSize({ width: 390, height: 844 });
             await gotoStaff(page, `${baseURL}/staff/applications?client=${emptyClient}`);
             await expect(page.getByRole('combobox', { name: 'Filter by client' })).toHaveText('Empty filter client');
@@ -952,12 +956,17 @@ test('staff workspace end-to-end in a real browser', async (t) => {
     let createdJobId;
     await runCase('job creation persists rich description and survives reload', async () => {
         await gotoStaff(page, `${baseURL}/staff/jobs/new`);
-        await page.locator('#job-client').selectOption(createdClientId);
-        await expect(page.locator('#job-public-visibility')).toHaveValue('false');
-        await page.locator('#job-public-visibility').selectOption('true');
+        assert.equal(await page.locator('form').evaluate(form => form.parentElement.tagName), 'SECTION', 'the job form is directly on the page without a containing card');
+        await page.locator('#job-client').click();
+        await page.getByRole('option', { name: /^Synthetic Browser Client/ }).click();
+        await expect(page.locator('#job-public-visibility')).toHaveText('Internal only');
+        await page.locator('#job-public-visibility').click();
+        await page.getByRole('option', { name: 'Public job board', exact: true }).click();
         await page.locator('#job-title').fill('Synthetic Browser Job');
-        await page.locator('#job-employment-type').selectOption('full_time');
-        await page.locator('#job-workplace-mode').selectOption('remote');
+        await page.locator('#job-employment-type').click();
+        await page.getByRole('option', { name: /full.?time/i }).click();
+        await page.locator('#job-workplace-mode').click();
+        await page.getByRole('option', { name: 'Remote' }).click();
         await page.locator('#job-locations').fill('Berlin');
         const editor = page.locator('[aria-label="Job description"]');
         await editor.click();
@@ -975,7 +984,7 @@ test('staff workspace end-to-end in a real browser', async (t) => {
                 && !response.url().includes('/publish')
                 && response.request().method() === 'POST' && response.ok(),
         );
-        await page.getByRole('button', { name: 'Create job draft' }).click();
+        await page.getByRole('button', { name: 'Create job draft', exact: true }).click();
         await jobPosted;
         await page.waitForURL(/\/staff\/jobs\/[0-9a-f-]{36}$/);
         createdJobId = page.url().split('/').pop();
@@ -1012,7 +1021,8 @@ test('staff workspace end-to-end in a real browser', async (t) => {
         await saved;
         await page.waitForURL(new RegExp(`/staff/jobs/${createdJobId}$`));
         await page.getByText('Synthetic Browser Job Edited').first().waitFor();
-        await expect(page.getByText('Revision #1 · version 2', { exact: true })).toBeVisible();
+        await expect(page.getByRole('heading', { name: 'Draft', exact: true })).toBeVisible();
+        assert.equal(psql(container, `select version from app.job_revisions where job_id='${createdJobId}' and status='draft'`).trim(), '2');
 
         await gotoStaff(page, `${baseURL}/staff/jobs/${createdJobId}/edit`);
         await expect(page.locator('#job-title'))
@@ -1025,7 +1035,7 @@ test('staff workspace end-to-end in a real browser', async (t) => {
         );
         await expect(
             page.getByRole('combobox', { name: 'Bonus 1 type' }),
-        ).toContainText('equity');
+        ).toContainText(/equity/i);
         await expect(page.locator('#bonus-details-0'))
             .toHaveValue('Synthetic equity bonus');
     });
@@ -1035,8 +1045,11 @@ test('staff workspace end-to-end in a real browser', async (t) => {
         await fillWhenReady(page.locator('#job-remote-regions'), 'Worldwide');
         await fillWhenReady(page.locator('#job-comp-min'), '90000.00');
         await fillWhenReady(page.locator('#job-comp-max'), '130000.00');
-        await fillWhenReady(page.locator('#job-currency'), 'EUR');
-        await page.locator('#job-pay-period').selectOption('year');
+        await page.locator('#job-currency').click();
+        await page.getByLabel('Search currencies', { exact: true }).fill('EUR');
+        await page.getByRole('option', { name: /^EUR/ }).click();
+        await page.locator('#job-pay-period').click();
+        await page.getByRole('option', { name: 'Per year' }).click();
         const completed = page.waitForResponse(
             (response) => response.url()
                 .includes(`/api/staff/jobs/${createdJobId}/draft`)
@@ -1100,7 +1113,7 @@ test('staff workspace end-to-end in a real browser', async (t) => {
         await page.getByRole('button', { name: 'Start new revision' }).click();
         await nextRevision;
         await page.waitForURL(/\/staff\/jobs\/[0-9a-f-]{36}\/edit/);
-        await expect(page.getByRole('heading', { name: 'Edit draft revision #2', exact: true })).toBeVisible();
+        await expect(page.getByRole('heading', { name: 'Edit job', exact: true })).toBeVisible();
         await fillWhenReady(
             page.locator('#job-title'), 'Synthetic Browser Job v2');
         const draftSaved = page.waitForResponse(
@@ -1124,20 +1137,26 @@ test('staff workspace end-to-end in a real browser', async (t) => {
     let unlistedJobId;
     await runCase('a job created unlisted publishes off the board until listed', async () => {
         await gotoStaff(page, `${baseURL}/staff/jobs/new`);
-        await page.locator('#job-client').selectOption(createdClientId);
-        await expect(page.locator('#job-public-visibility')).toHaveValue('false');
+        await page.locator('#job-client').click();
+        await page.getByRole('option', { name: /^Synthetic Browser Client/ }).click();
+        await expect(page.locator('#job-public-visibility')).toHaveText('Internal only');
         await page.screenshot({
             path: join(resultsDir, 'staff-job-create-visibility.png'),
             fullPage: true,
         });
         await page.locator('#job-title').fill('Synthetic Private Role');
-        await page.locator('#job-employment-type').selectOption('full_time');
-        await page.locator('#job-workplace-mode').selectOption('remote');
+        await page.locator('#job-employment-type').click();
+        await page.getByRole('option', { name: /full.?time/i }).click();
+        await page.locator('#job-workplace-mode').click();
+        await page.getByRole('option', { name: 'Remote' }).click();
         await page.locator('#job-remote-regions').fill('Worldwide');
         await page.locator('#job-comp-min').fill('80000.00');
         await page.locator('#job-comp-max').fill('120000.00');
-        await page.locator('#job-currency').fill('USD');
-        await page.locator('#job-pay-period').selectOption('year');
+        await page.locator('#job-currency').click();
+        await page.getByLabel('Search currencies', { exact: true }).fill('USD');
+        await page.getByRole('option', { name: /^USD/ }).click();
+        await page.locator('#job-pay-period').click();
+        await page.getByRole('option', { name: 'Per year' }).click();
         const editor = page.locator('[aria-label="Job description"]');
         await editor.click();
         await expect(async () => {
@@ -1153,7 +1172,7 @@ test('staff workspace end-to-end in a real browser', async (t) => {
                 && !response.url().includes('/publish')
                 && response.request().method() === 'POST' && response.ok(),
         );
-        await page.getByRole('button', { name: 'Create job draft' }).click();
+        await page.getByRole('button', { name: 'Create job draft', exact: true }).click();
         await jobPosted;
         await page.waitForURL(/\/staff\/jobs\/[0-9a-f-]{36}$/);
         unlistedJobId = page.url().split('/').pop();
@@ -1267,6 +1286,23 @@ test('staff workspace end-to-end in a real browser', async (t) => {
         return true;
     });
 
+    const clickDuringBoardRefresh = async (button) => {
+        let release;
+        const hold = new Promise(resolve => { release = resolve; });
+        const routeHandler = async route => { await hold; await route.continue(); };
+        await boardPage.route('**/api/public/jobs', routeHandler);
+        const refreshed = boardListingResponse();
+        try {
+            await boardPage.evaluate(() => window.dispatchEvent(new Event('focus')));
+            // Exercise the action while its card is still attached to React,
+            // before the refresh replaces it with an animated exiting node.
+            const clicked = await clickIfPresent(button);
+            release();
+            await refreshed;
+            return clicked;
+        } finally { release(); await boardPage.unroute('**/api/public/jobs', routeHandler); }
+    };
+
     await runCase('the public board revalidates and gates stale actions', async () => {
         const pageErrors = [];
         const capturePageError = error => pageErrors.push(error.message);
@@ -1304,9 +1340,8 @@ test('staff workspace end-to-end in a real browser', async (t) => {
         assert.equal(unlistingResult.status(), 200, await unlistingResult.text());
         assert.ok(!(await publicJobTitles()).includes('Synthetic Browser Job Edited'));
 
-        await boardPage.evaluate(() => window.dispatchEvent(new Event('focus')));
         const goneNotice = boardPage.getByText('This position is no longer available.');
-        const clickedDetail = await clickIfPresent(card.getByRole('button', { name: 'Learn more' }));
+        const clickedDetail = await clickDuringBoardRefresh(card.getByRole('button', { name: 'Learn more' }));
         if (clickedDetail) await expect(goneNotice).toBeVisible();
         await expect(card).toHaveCount(0);
         await expect(boardPage.getByRole('dialog')).toHaveCount(0);
@@ -1333,8 +1368,7 @@ test('staff workspace end-to-end in a real browser', async (t) => {
         assert.equal(relistingResult.status(), 200, await relistingResult.text());
         assert.ok(!(await publicJobTitles()).includes('Synthetic Browser Job Edited'));
 
-        await boardPage.evaluate(() => window.dispatchEvent(new Event('focus')));
-        const clickedApply = await clickIfPresent(restored.getByRole('button', { name: /APPLY/ }));
+        const clickedApply = await clickDuringBoardRefresh(restored.getByRole('button', { name: /APPLY/ }));
         if (clickedApply) await expect(goneNotice).toBeVisible();
         await expect(restored).toHaveCount(0);
         await expect(boardPage.getByRole('dialog')).toHaveCount(0);
@@ -1607,6 +1641,27 @@ test('staff workspace end-to-end in a real browser', async (t) => {
             'true',
         );
         await page.getByText('Synthetic Candidate B').waitFor();
+    });
+
+    await runCase('job locations respect workplace mode and preview each place once', async () => {
+        await gotoStaff(page, `${baseURL}/staff/jobs/new`);
+        await page.locator('#job-workplace-mode').click();
+        await page.getByRole('option', { name: 'Hybrid', exact: true }).click();
+        await page.locator('#job-locations').fill('New York');
+        await page.locator('#job-locations').press('Enter');
+        await page.locator('#job-remote-regions').fill('New York');
+        await page.locator('#job-remote-regions').press('Enter');
+        await page.getByRole('button', { name: 'Preview draft', exact: true }).click();
+        const preview = page.getByRole('dialog', { name: 'Draft preview', exact: true });
+        await expect(preview.getByText('New York', { exact: true })).toHaveCount(1);
+        await preview.getByRole('button', { name: 'Close', exact: true }).click();
+        await page.locator('#job-workplace-mode').click();
+        await page.getByRole('option', { name: 'Onsite', exact: true }).click();
+        await expect(page.locator('#job-remote-regions')).toBeHidden();
+        assert.equal(await page.locator('form').evaluate(form => new FormData(form).has('remoteRegions')), false);
+        await page.locator('#job-workplace-mode').click();
+        await page.getByRole('option', { name: 'Hybrid', exact: true }).click();
+        await expect(page.getByRole('button', { name: 'Remove New York', exact: true })).toHaveCount(2);
     });
 
     await runCase('same-path workspace links re-sync filters and history restores them', async () => {
@@ -2042,16 +2097,19 @@ test('staff workspace end-to-end in a real browser', async (t) => {
             const tasksLoaded = page.waitForResponse(response =>
                 new URL(response.url()).pathname === '/api/staff/tasks' && response.status() === 200);
             await page.goto(`${baseURL}/staff`, { waitUntil: 'domcontentloaded' });
-            await page.getByText('Workspace summary is temporarily unavailable.')
+            await page.getByRole('main').last().getByText('Workspace summary is temporarily unavailable.')
                 .waitFor();
             await tasksLoaded;
             await expect(page.locator('#tasks').getByRole('tablist', { name: 'To-do categories' })).toBeVisible();
             await expect(page.locator('#tasks').getByRole('button', { name: 'Add task', exact: true })).toBeVisible();
             await expect(page.getByRole('button', { name: /Workspace updates, \d+ items/ })).toBeVisible();
-            const notifications = await page.request.get(`${baseURL}/api/staff/workspace`);
-            assert.equal(notifications.status(), 200);
-            assert.equal(notifications.headers()['cache-control'], 'private, no-store');
-            assert.deepEqual(Object.keys((await notifications.json()).result).sort(), ['attention', 'capabilities']);
+            const notifications = await page.evaluate(async () => {
+                const response = await fetch('/api/staff/workspace');
+                return { status: response.status, cacheControl: response.headers.get('cache-control'), body: await response.json() };
+            });
+            assert.equal(notifications.status, 200);
+            assert.equal(notifications.cacheControl, 'private, no-store');
+            assert.deepEqual(Object.keys(notifications.body.result).sort(), ['attention', 'capabilities']);
             const nav = page.getByRole('navigation', { name: 'Main navigation' });
             for (const name of [
                 'Overview', 'Applications', 'Candidates', 'Jobs', 'Clients', 'Members',
@@ -2082,7 +2140,7 @@ test('staff workspace end-to-end in a real browser', async (t) => {
                 const mobile = await context.newPage();
                 mobile.setDefaultTimeout(90_000);
                 await mobile.goto(`${baseURL}/staff`, { waitUntil: 'domcontentloaded' });
-                await mobile.getByText('Workspace summary is temporarily unavailable.')
+                await mobile.getByRole('main').last().getByText('Workspace summary is temporarily unavailable.')
                     .waitFor();
                 await expect(mobile.locator('#tasks').getByRole('tablist', { name: 'To-do categories' })).toBeVisible();
                 const sheet = mobile.getByRole('dialog');
@@ -3073,12 +3131,20 @@ test('staff workspace end-to-end in a real browser', async (t) => {
             ]);
             await tabs[loser].goto(`${baseURL}/staff/mfa/enroll`, { waitUntil: 'domcontentloaded' });
             await tabs[loser].waitForURL(`${baseURL}/staff`, { waitUntil: 'domcontentloaded', timeout: 30_000 });
-            const replay = await context.request.post(`${baseURL}/api/staff/mfa/verify`, { data: { code } });
-            assert.equal(replay.status(), 401);
-            const savedCode = await context.request.post(`${baseURL}/api/staff/mfa/verify`, { data: { method: 'backup', code: backup[0] } });
-            assert.equal(savedCode.status(), 200);
-            const reused = await context.request.post(`${baseURL}/api/staff/mfa/verify`, { data: { method: 'backup', code: backup[0] } });
-            assert.equal(reused.status(), 401);
+            // As in the preference checks, use Chromium's cookie handling for
+            // production Secure cookies on the trustworthy loopback origin.
+            const verifyInBrowser = data => tabs[winner].evaluate(async data => {
+                const response = await fetch('/api/staff/mfa/verify', {
+                    method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(data),
+                });
+                return { status: response.status, body: await response.json() };
+            }, data);
+            const replay = await verifyInBrowser({ code });
+            assert.equal(replay.status, 401);
+            const savedCode = await verifyInBrowser({ method: 'backup', code: backup[0] });
+            assert.equal(savedCode.status, 200, JSON.stringify(savedCode.body));
+            const reused = await verifyInBrowser({ method: 'backup', code: backup[0] });
+            assert.equal(reused.status, 401);
             assert.equal(psql(container, `select count(*) from app.totp_credentials where organization_id = '${ORG_ID}' and user_id = '${CJ_ID.USER_B_REC}' and status = 'pending'`).trim(), '0');
         } finally { await context.close(); }
     });

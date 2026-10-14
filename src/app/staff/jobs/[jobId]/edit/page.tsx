@@ -64,7 +64,7 @@ export default async function StaffJobEditPage(
     const canWrite = capabilities?.writeJobs === true;
     const { job, draft } = workspace;
     return (
-        <section className="mx-auto flex w-full max-w-5xl flex-col gap-6">
+        <section className="mx-auto flex w-full max-w-6xl flex-col gap-6">
             <Link
                 href={`/staff/jobs/${job.id}`}
                 className="inline-flex w-fit items-center gap-1.5 text-sm text-muted-foreground underline-offset-4 hover:text-foreground"
@@ -74,12 +74,10 @@ export default async function StaffJobEditPage(
             </Link>
             <PageHeader
                 eyebrow="Jobs"
-                title={`Edit draft revision #${draft.revisionNumber}`}
+                title="Edit job"
                 description={job.title}
             />
-            <Card>
-                <CardContent className="pt-6">
-                    {canWrite ? (
+            {canWrite ? (
                         <JobForm
                             clients={[]}
                             jobId={job.id}
@@ -107,9 +105,7 @@ export default async function StaffJobEditPage(
                                 ? 'Editing is temporarily unavailable.'
                                 : 'Editing this job requires the jobs.write permission.'}
                         </p>
-                    )}
-                </CardContent>
-            </Card>
+            )}
         </section>
     );
 }

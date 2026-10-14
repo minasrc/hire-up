@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, type ReactNode } from 'react';
+import { useEffect, useState, type ReactNode } from 'react';
 import {
     Bold,
     Heading2,
@@ -44,10 +44,12 @@ export function RichTextEditor({
     initialDocument,
     onDocumentChange,
     invalid,
+    disabled: isDisabled = false,
 }: {
     initialDocument?: unknown;
     onDocumentChange?: (document: unknown) => void;
     invalid?: boolean;
+    disabled?: boolean;
 }) {
     const [linkOpen, setLinkOpen] = useState(false);
     const [linkUrl, setLinkUrl] = useState('');
@@ -55,6 +57,7 @@ export function RichTextEditor({
 
     const editor = useEditor({
         immediatelyRender: false,
+        editable: !isDisabled,
         extensions: [
             StarterKit.configure({
                 heading: { levels: [2, 3] },
@@ -83,6 +86,10 @@ export function RichTextEditor({
             },
         },
     });
+
+    useEffect(() => {
+        editor?.setEditable(!isDisabled, false);
+    }, [editor, isDisabled]);
 
     const editorState = useEditorState({
         editor,
@@ -119,7 +126,7 @@ export function RichTextEditor({
             className={cn('h-8 w-8', pressed && 'bg-hover text-foreground')}
             aria-label={label}
             aria-pressed={pressed}
-            disabled={disabled || !editor}
+            disabled={disabled || isDisabled || !editor}
             onClick={onPress}
         >
             {icon}

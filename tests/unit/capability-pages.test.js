@@ -19,6 +19,7 @@ function subject(path, capabilities, { emptyClients = false } = {}) {
     const workspace = { job: { id, clientId: id, title: 'Synthetic job', version: '1', publicationState: 'draft' }, draft: { id, title: 'Synthetic draft', version: '1', revisionNumber: 1 } };
     const forms = Object.fromEntries(['ClientForm', 'JobForm', 'JobListingToggle', 'NewRevisionButton', 'PublishButton'].map(name => [name, name]));
     const imports = {
+        './job-form': { JobForm: 'JobForm' },
         'react/jsx-runtime': jsxRuntime,
         react: { useState: initial => [initial, () => {}] },
         'next/link': { default: 'Link' },
