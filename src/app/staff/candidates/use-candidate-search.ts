@@ -5,7 +5,9 @@ import { searchAction, searchEndpoint, searchRequest } from './search/search-api
 import { safeSearchSnapshot, searchGuidance } from './search/search-model';
 import type { CandidateRow } from './candidates-browser';
 
-type SearchState = { query: string; after: string; status: 'searching' | 'completed' | 'unavailable' | 'failed'; rows: CandidateRow[]; next: string | null; error?: string };
+type SearchCoverage = { eligible: number; indexed: number; fullyIndexed?: number; pending: number; failed: number; corpusChanged?: boolean };
+
+type SearchState = { query: string; after: string; status: 'searching' | 'completed' | 'unavailable' | 'failed'; rows: CandidateRow[]; next: string | null; error?: string; coverage?: SearchCoverage | null };
 
 export function useCandidateSearch(query: string, enabled: boolean) {
     const [state, setState] = useState<SearchState | null>(null);
@@ -28,6 +30,7 @@ export function useCandidateSearch(query: string, enabled: boolean) {
         const publish = (next: Omit<SearchState, 'query' | 'after'>) => {
             if (!stopped) setState({ query, after, ...next });
         };
+        let coverage: SearchCoverage | null = null;
         async function run() {
             publish({ status: 'searching', rows: [], next: null });
             try {
@@ -35,7 +38,8 @@ export function useCandidateSearch(query: string, enabled: boolean) {
                 if (!active || active.query !== query) {
                     const availability = await searchRequest(`${searchEndpoint}?scope=approved&includeCv=false`, { signal: controller.signal });
                     if (stopped) return;
-                    if (!availability.workerAvailable) { publish({ status: 'unavailable', rows: [], next: null }); return; }
+                    coverage = availability.coverage ?? null;
+                    if (!availability.workerAvailable) { publish({ status: 'unavailable', rows: [], next: null, coverage }); return; }
                     const includeCv = availability.cvAvailable === true;
                     const started = await searchRequest(searchEndpoint, { method: 'POST', signal: AbortSignal.any([controller.signal, AbortSignal.timeout(15000)]), headers: { 'content-type': 'application/json' }, body: JSON.stringify({ action: 'search', operationId: crypto.randomUUID(), query, scope: 'approved', readyOnly: false, includeCv }) });
                     if (stopped) { void searchAction({ action: 'cancel', queryId: started.queryId }).catch(() => {}); return; }
@@ -45,17 +49,18 @@ export function useCandidateSearch(query: string, enabled: boolean) {
                 if (after) params.set('after', after);
                 const snapshot = safeSearchSnapshot(await searchRequest(`${searchEndpoint}?${params}`, { signal: controller.signal }));
                 if (stopped) return;
+                coverage = snapshot.coverage ?? coverage;
                 if (snapshot.status === 'completed') {
-                    publish({ status: 'completed', rows: (snapshot.results ?? []).filter((row: { directoryRow?: CandidateRow }) => row.directoryRow).map((row: { directoryRow: CandidateRow }) => row.directoryRow), next: snapshot.nextAfter ?? null });
+                    publish({ status: 'completed', rows: (snapshot.results ?? []).filter((row: { directoryRow?: CandidateRow }) => row.directoryRow).map((row: { directoryRow: CandidateRow }) => row.directoryRow), next: snapshot.nextAfter ?? null, coverage });
                 } else if (snapshot.status === 'queued' || snapshot.status === 'running') {
-                    publish({ status: snapshot.workerAvailable ? 'searching' : 'unavailable', rows: [], next: null });
+                    publish({ status: snapshot.workerAvailable ? 'searching' : 'unavailable', rows: [], next: null, coverage });
                     timer = setTimeout(() => void run(), 1500);
                 } else {
                     current.current = null;
-                    publish({ status: 'failed', rows: [], next: null, error: searchGuidance(snapshot.errorCode) || 'Search again.' });
+                    publish({ status: 'failed', rows: [], next: null, error: searchGuidance(snapshot.errorCode) || 'Search again.', coverage });
                 }
             } catch {
-                if (!stopped && !controller.signal.aborted) publish({ status: 'failed', rows: [], next: null, error: 'Search unavailable. Try again.' });
+                if (!stopped && !controller.signal.aborted) publish({ status: 'failed', rows: [], next: null, error: 'Search unavailable. Try again.', coverage });
             }
         }
         // Wait until typing settles before creating a ranked search job.

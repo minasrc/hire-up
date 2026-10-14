@@ -5,7 +5,7 @@ import { staffWorkspaceUrl } from '@/lib/staff-workspace-fetch';
 import Link from 'next/link';
 import { useSyncExternalStore } from 'react';
 import { useRouter } from 'next/navigation';
-import { FileText, LoaderCircle, Search, X } from 'lucide-react';
+import { AlertCircle, FileText, LoaderCircle, Search, X } from 'lucide-react';
 
 import { Button } from '@/components/staff-ui/button';
 import { Input } from '@/components/staff-ui/input';
@@ -25,6 +25,7 @@ import { candidateSearchIntent } from '@/lib/candidate-search-query';
 import { candidateDirectoryQuery } from '@/lib/staff-directory-query';
 import { useDirectoryNavigation } from '../use-directory-navigation';
 import { CandidateUploadDialog } from './candidate-upload-dialog';
+import { searchIndexingStatus } from './search/search-model';
 import { useCandidateSearch } from './use-candidate-search';
 import { StaffDate } from '../staff-date';
 
@@ -85,6 +86,7 @@ export function CandidatesBrowser({
         navigate({ query: value, page: 1 }, debounce);
     const rankedMode = semanticSearchEnabled && profileOptions?.canWrite === true && query.trim().length >= 3 && total === 0 && !candidateSearchIntent(query).experience;
     const ranked = useCandidateSearch(query.trim(), rankedMode && !pending);
+    const indexing = rankedMode ? searchIndexingStatus(ranked.state?.coverage) : null;
     const rows = rankedMode ? ranked.state?.rows ?? [] : candidates;
     const searching = pending || (rankedMode && (!ranked.state || ranked.state.status === 'searching'));
     const totalPages = Math.max(1, Math.ceil(total / pageSize));
@@ -146,13 +148,22 @@ export function CandidatesBrowser({
                 {rankedMode && ['unavailable', 'failed'].includes(ranked.state?.status ?? '') ? <Button variant="ghost" size="sm" onClick={ranked.retry}>Retry</Button> : null}
             </span>
 
+            {indexing ? (
+                <div role="status" aria-label="Search indexing status" className="flex flex-wrap items-center gap-2 rounded-lg bg-hover px-3 py-2 text-sm">
+                    {indexing.pending ? <LoaderCircle aria-hidden="true" className="h-4 w-4 motion-safe:animate-spin" /> : <AlertCircle aria-hidden="true" className="h-4 w-4" />}
+                    <span>{indexing.label}</span>
+                    {indexing.incomplete ? <span className="text-xs text-muted-foreground">Results may be incomplete</span> : null}
+                    <Button variant="ghost" size="sm" className="ml-auto" disabled={searching} onClick={ranked.retry}>Refresh results</Button>
+                </div>
+            ) : null}
+
             {!rows.length && !searching ? (
                 <div className="flex flex-col items-center gap-2 rounded-lg border border-dashed border-border bg-card px-6 py-12 text-center">
-                    <p className="text-sm font-medium text-foreground">{rankedMode && ranked.state?.status !== 'completed' ? 'Try searching by name or email' : 'No candidates found'}</p>
+                    <p className="text-sm font-medium text-foreground">{rankedMode && ranked.state?.status !== 'completed' ? 'Try searching by name or email' : indexing?.incomplete ? 'No matches in indexed profiles' : 'No candidates found'}</p>
                     <p className="max-w-sm text-sm text-muted-foreground">
                         {!query
                             ? 'Add a candidate or import from Telegram.'
-                            : 'Try clearing the search.'}
+                            : indexing?.incomplete ? 'Search by name or email.' : 'Try clearing the search.'}
                     </p>
                 </div>
             ) : (
