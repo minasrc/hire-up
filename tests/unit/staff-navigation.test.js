@@ -40,7 +40,7 @@ function loadShell() {
             StaffAuthRecoveryPrompt: () => null,
         },
         'react/jsx-runtime': jsxRuntime,
-        'next/link': {
+        'next/link': { useLinkStatus: () => ({ pending: false }),
             default: ({ href, children, ...rest }) =>
                 jsx('a', { href, ...rest, children }),
         },
@@ -142,7 +142,7 @@ test('the matching section stays active on detail pages', () => {
 
 test('Telegram navigation requires explicit authorization and stays active across its workflows', () => {
     const { NavLinks } = loadShell();
-    const href = '/staff/telegram-intake/chats';
+    const href = '/staff/telegram-intake';
     for (const capabilities of [null, 'denied', { candidates: true }, { telegram: false }]) {
         assert.equal(renderAnchors(NavLinks, capabilities).some(anchor => anchor.href === href), false);
     }

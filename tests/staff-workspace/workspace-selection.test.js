@@ -157,7 +157,7 @@ test('workspace selection fences stale tabs and verifies MFA separately for the 
         await oldTab.goto(`${baseURL}/staff/candidates`);
         await oldTab.waitForFunction(() => window.__testWorkspaceBoundaryReady === true);
         await expect(oldTab.getByText('Workspace A candidate sentinel', { exact: true })).toBeVisible();
-        await oldTab.getByLabel('Name/email lookup', { exact: true }).fill('Workspace A');
+        await oldTab.getByLabel('Search candidates', { exact: true }).fill('Workspace A');
         await expect(oldTab).toHaveURL(new RegExp(`q=Workspace\\+A.*_workspace=${AUTHZ_ID.ORG_A}`));
         const oldDocument = await oldTab.evaluate(() => performance.timeOrigin);
         await oldTab.route('**/api/staff/**', route => route.abort());
@@ -178,7 +178,7 @@ test('workspace selection fences stale tabs and verifies MFA separately for the 
         assert.ok(await oldTab.evaluate(() => performance.timeOrigin) > oldDocument, 'A new document must replace the stale workspace layout');
         await expect(oldTab.getByText('Workspace B candidate sentinel', { exact: true })).toBeVisible();
         await expect(oldTab.getByText('Workspace A candidate sentinel', { exact: true })).toHaveCount(0);
-        await expect(oldTab.getByLabel('Name/email lookup', { exact: true })).toHaveValue('');
+        await expect(oldTab.getByLabel('Search candidates', { exact: true })).toHaveValue('');
         await expect(oldTab.locator('aside').getByText(names[AUTHZ_ID.ORG_B], { exact: true })).toBeVisible();
         await oldTab.unroute('**/api/staff/**');
         // Repeat the stale-cookie case with a debounced, programmatic RSC
@@ -200,7 +200,7 @@ test('workspace selection fences stale tabs and verifies MFA separately for the 
             const url = new URL(request.url());
             return url.pathname === '/staff/candidates' && url.searchParams.get('_workspace') === AUTHZ_ID.ORG_B;
         });
-        await oldTab.getByLabel('Name/email lookup', { exact: true }).fill('candidate');
+        await oldTab.getByLabel('Search candidates', { exact: true }).fill('candidate');
         await scopedFilter;
         await expect(oldTab.getByRole('heading', { name: 'Choose your workspace', exact: true })).toBeVisible();
         await expect(oldTab.getByText('Workspace A candidate sentinel', { exact: true })).toHaveCount(0);

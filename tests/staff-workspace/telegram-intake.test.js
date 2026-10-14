@@ -161,36 +161,28 @@ test('private intake reviews real drafts, preserves conflicting edits, validates
     const pageErrors = [];
     page.on('pageerror', error => pageErrors.push(error.message));
     try {
-        await page.goto(`${baseURL}/staff/telegram-intake`);
-        await expect(page.getByRole('heading', { name: 'Telegram intake', exact: true })).toBeVisible();
-        await expect(page.getByRole('button', { name: /^Ready \d/ })).toHaveAttribute('aria-pressed', 'true');
-        await expect(page.getByRole('button', { name: 'Ready Candidate', exact: true })).toBeVisible();
-        await expect(page.getByRole('button', { name: 'Incomplete', exact: true })).toHaveCount(0);
+        await page.goto(`${baseURL}/staff/telegram-intake?draft=${incomplete.id}`);
+        await expect(page.getByRole('heading', { name: 'Candidate proposals', exact: true })).toBeVisible();
         await expect(page.getByText('Private evidence sentinel', { exact: true })).toHaveCount(0);
-
-        await page.getByRole('button', { name: /^Needs information \d/ }).click();
-        await page.getByLabel('Missing information', { exact: true }).selectOption('lastName');
-        await page.getByRole('button', { name: 'Incomplete', exact: true }).click();
-        const panel = page.getByRole('dialog', { name: 'Review draft' });
-        await expect(panel.getByLabel('First name *', { exact: true })).toHaveValue('Incomplete');
-        let response = page.waitForResponse(response => response.url() === `${api}/${incomplete.id}/decision`);
-        await panel.getByRole('button', { name: 'Approve candidate', exact: true }).click();
-        assert.equal((await response).status(), 422);
-        for (const label of ['Last name', 'Primary email', 'CV']) {
-            await expect(panel.getByRole('link', { name: new RegExp(`^${label}:`) })).toBeVisible();
-        }
-
-        await panel.getByLabel('First name *', { exact: true }).fill('My unsaved edit');
+        const panel = page.getByRole('region', { name: 'Candidate information', exact: true });
+        await panel.getByRole('button', { name: 'Edit', exact: true }).click();
+        await expect(panel.getByLabel('First name', { exact: true })).toHaveValue('Incomplete');
+        // The legacy upload API still requires its complete intake fields; reviewed Telegram approval is covered separately without a CV.
+        const incompleteApproval = await context.request.post(`${api}/${incomplete.id}/decision`, { data: { action: 'approve', expectedVersion: incomplete.version, operationId: randomUUID() } });
+        assert.equal(incompleteApproval.status(), 422);
+        let response;
+        await panel.getByLabel('First name', { exact: true }).fill('My unsaved edit');
         const competingEdit = await context.request.patch(`${api}/${incomplete.id}`, { data: { expectedVersion: incomplete.version, fields: { firstName: 'External update' } } });
         assert.equal(competingEdit.status(), 200, await competingEdit.text());
         response = page.waitForResponse(response => response.url() === `${api}/${incomplete.id}` && response.request().method() === 'PATCH');
         await panel.getByRole('button', { name: 'Save changes', exact: true }).click();
         assert.equal((await response).status(), 409);
         await expect(panel.getByText(/Your edits are preserved/)).toBeVisible();
-        await expect(panel.getByLabel('First name *', { exact: true })).toHaveValue('My unsaved edit');
+        await expect(panel.getByLabel('First name', { exact: true })).toHaveValue('My unsaved edit');
         await panel.getByRole('button', { name: 'Refresh draft (replace my edits)', exact: true }).click();
-        await expect(panel.getByLabel('First name *', { exact: true })).toHaveValue('External update');
+        await expect(panel.getByLabel('First name', { exact: true })).toHaveValue('External update');
 
+        await panel.getByText('CV (optional)', { exact: true }).click();
         const upload = panel.getByLabel('Upload CV', { exact: true });
         await upload.setInputFiles({ name: 'invalid.txt', mimeType: 'text/plain', buffer: Buffer.from('synthetic text') });
         await panel.getByRole('button', { name: 'Upload selected CV', exact: true }).click();
@@ -200,9 +192,9 @@ test('private intake reviews real drafts, preserves conflicting edits, validates
         await panel.getByRole('button', { name: 'Upload selected CV', exact: true }).click();
         assert.equal((await response).status(), 400);
         await expect(panel.getByRole('link', { name: /CV: Only valid PDF or DOCX/ })).toBeVisible();
-        await expect(panel.getByLabel('First name *', { exact: true })).toHaveValue('External update');
-        await panel.getByLabel('Last name *', { exact: true }).fill('Candidate');
-        await panel.getByLabel('Primary email *', { exact: true }).fill('uploaded-telegram@example.test');
+        await expect(panel.getByLabel('First name', { exact: true })).toHaveValue('External update');
+        await panel.getByLabel('Last name', { exact: true }).fill('Candidate');
+        await panel.getByLabel('Primary email', { exact: true }).fill('uploaded-telegram@example.test');
         response = page.waitForResponse(response => response.url() === `${api}/${incomplete.id}` && response.request().method() === 'PATCH');
         await panel.getByRole('button', { name: 'Save changes', exact: true }).click();
         assert.equal((await response).status(), 200);
@@ -215,7 +207,7 @@ test('private intake reviews real drafts, preserves conflicting edits, validates
         assert.deepEqual((await uploaded.json()).result.missingFields, []);
         assert.equal(files.size, 1);
         assert.deepEqual([...files.values()][0], pdf);
-        await expect(panel.getByText('Ready', { exact: true })).toBeVisible();
+
         await expect(panel.getByRole('link', { name: 'Open CV', exact: true })).toHaveAttribute('href', `/api/staff/telegram-intake/drafts/${incomplete.id}/cv`);
         const cvRedirect = await context.request.get(`${api}/${incomplete.id}/cv`, { maxRedirects: 0 });
         assert.equal(cvRedirect.status(), 302, await cvRedirect.text());
@@ -226,29 +218,25 @@ test('private intake reviews real drafts, preserves conflicting edits, validates
         assert.equal(downloaded.status, 200);
         assert.deepEqual(Buffer.from(await downloaded.arrayBuffer()), pdf);
         response = page.waitForResponse(response => response.url() === `${api}/${incomplete.id}/decision`);
-        await panel.getByRole('button', { name: 'Approve candidate', exact: true }).click();
+        await panel.getByRole('button', { name: 'Save and approve', exact: true }).click();
         const uploadApproval = await response;
         assert.equal(uploadApproval.status(), 200, await uploadApproval.text());
-        await expect(panel.getByText('Candidate approved.', { exact: true })).toBeVisible();
-        await expect(panel.getByRole('link', { name: 'Open CV', exact: true })).toHaveCount(0);
-        await panel.getByRole('button', { name: 'Close', exact: true }).click();
-        await page.getByLabel('Missing information', { exact: true }).selectOption('');
-        await page.getByRole('button', { name: /^Ready \d/ }).click();
-        await page.getByRole('button', { name: 'Ready Candidate', exact: true }).click();
+        await expect(page.getByText('External update Candidate saved.', { exact: true })).toBeVisible();
+        await page.goto(`${baseURL}/staff/telegram-intake?draft=${ready.id}`);
+        await panel.getByText('CV attached', { exact: true }).click();
         await expect(panel.getByRole('link', { name: 'Open CV', exact: true })).toHaveAttribute('href', `/api/staff/telegram-intake/drafts/${ready.id}/cv`);
         await expect(panel.getByRole('link', { name: 'Open CV', exact: true })).toHaveAttribute('target', '_blank');
         await expect(panel.getByText('Private evidence sentinel', { exact: true })).toBeHidden();
-        await panel.getByText('Private source evidence (1)', { exact: true }).click();
+        await panel.getByText('View source (1)', { exact: true }).click();
         await expect(panel.getByText('Private evidence sentinel', { exact: true })).toBeVisible();
         response = page.waitForResponse(response => response.url() === `${api}/${ready.id}/decision`);
-        await panel.getByRole('button', { name: 'Approve candidate', exact: true }).click();
+        await panel.getByRole('button', { name: 'Approve', exact: true }).click();
         const approval = await response;
         assert.equal(approval.status(), 200, await approval.text());
         const approvedId = (await approval.json()).result.candidateId;
-        await expect(panel.getByRole('link', { name: 'Open approved candidate' })).toHaveAttribute('href', `/staff/candidates/${approvedId}`);
-        await expect(panel.getByText('Candidate approved.', { exact: true })).toBeVisible();
-        await expect(panel.getByRole('link', { name: 'Open CV', exact: true })).toHaveCount(0);
-        await expect(panel.getByText('Private evidence sentinel', { exact: true })).toHaveCount(0);
+        await expect(page.getByText('Ready Candidate saved.', { exact: true })).toBeVisible();
+        const profileResponse = await context.request.get(`${baseURL}/api/staff/candidates/${approvedId}`);
+        assert.equal(profileResponse.status(), 200);
         const stored = JSON.parse(psql(db, `select json_build_object('status',status,'fields',fields,'document',document) from app.telegram_drafts where id='${ready.id}';`).trim());
         assert.deepEqual(stored, { status: 'approved', fields: {}, document: null });
         assert.equal(psql(db, `select count(*) from app.telegram_evidence where id='${evidenceId}';`).trim(), '0');

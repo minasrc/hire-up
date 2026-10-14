@@ -73,6 +73,7 @@ const MIGRATIONS = [
     '20261002110000_staff_shell_capabilities.sql',
     '20261002120000_staff_list_pagination.sql',
     '20261004100000_staff_candidate_directory.sql',
+    '20261014140000_candidate_hybrid_search.sql',
     '20261004110000_staff_application_directory.sql',
     '20261003090000_staff_mfa_backup_codes.sql',
     '20261006090000_staff_totp_stable_enrollment.sql',
@@ -477,12 +478,14 @@ test('staff workspace end-to-end in a real browser', async (t) => {
         await page.getByRole('link', { name: /^Open roles 0$/ }).waitFor();
 
         await page.getByText('To-do').waitFor();
-        await page.getByLabel('Application review tasks').waitFor();
-        await page.getByRole('heading', { name: 'Clients hiring' }).waitFor();
-        await page.getByLabel('Application review tasks').getByRole('link', { name: /Synthetic Candidate B/ }).waitFor();
-        await expect(page.getByRole('tab', { name: 'All 1', exact: true })).toBeVisible();
-        await expect(page.getByRole('tab', { name: 'Review 1', exact: true })).toBeVisible();
-        await expect(page.getByText('You’re up to date', { exact: true })).not.toBeVisible();
+        await page.getByLabel('Application review tasks')
+            .getByRole('link', { name: 'Synthetic Candidate B' }).click();
+        await expect(page).toHaveURL(`${baseURL}/staff`);
+        const preview = page.getByRole('dialog', { name: 'Synthetic Candidate B' });
+        await expect(preview).toBeVisible({ timeout: 20_000 });
+        await expect(preview.getByRole('tab', { name: /Applications/ })).toBeVisible();
+        await preview.getByRole('link', { name: 'Open full candidate' }).click();
+        await page.waitForURL(/\/staff\/candidates\/[0-9a-f-]{36}/);
     });
 
     await runCase('candidate and application pagination navigate without losing full totals', async () => {
@@ -741,7 +744,7 @@ test('staff workspace end-to-end in a real browser', async (t) => {
         await tasksFetch;
 
         const todo = page.locator('#tasks');
-        await expect(todo.locator('ul li')).toHaveCount(20);
+        await expect(todo.locator('ul li').filter({ has: page.getByRole('checkbox') })).toHaveCount(20);
         const labels = () => todo.locator('ul li [role="checkbox"]')
             .evaluateAll(
                 (nodes) => nodes.map((node) => node.getAttribute('aria-label')),
@@ -759,7 +762,7 @@ test('staff workspace end-to-end in a real browser', async (t) => {
         await showMore.click({ force: true });
         await secondPage;
         await page.unroute('**/api/staff/tasks?*offset=20*');
-        await expect(todo.locator('ul li')).toHaveCount(25);
+        await expect(todo.locator('ul li').filter({ has: page.getByRole('checkbox') })).toHaveCount(25);
         const seen = await labels();
         assert.equal(
             new Set(seen).size, seen.length,
@@ -775,7 +778,7 @@ test('staff workspace end-to-end in a real browser', async (t) => {
         });
         await todo.getByRole('tab', { name: /^Notes/ }).click();
         await todo.getByRole('tab', { name: /^Review/ }).click();
-        await todo.getByText('No tasks in this category').waitFor();
+        await expect(todo.getByLabel('Application review tasks')).toBeVisible();
         await page.waitForTimeout(3500);
         assert.equal(
             await todo.getByText('Batch task 000').count(), 0,
@@ -791,7 +794,7 @@ test('staff workspace end-to-end in a real browser', async (t) => {
             }));
         await page.reload({ waitUntil: 'domcontentloaded' });
         await todo.getByRole('link', { name: 'Sign in again' }).waitFor();
-        assert.equal(await todo.locator('ul li').count(), 0);
+        assert.equal(await todo.locator('ul li').filter({ has: page.getByRole('checkbox') }).count(), 0);
         await page.unroute('**/api/staff/tasks?*');
         await todo.getByRole('button', { name: 'Retry access' }).click();
         await expect(todo.getByRole('link', { name: 'Sign in again' })).toHaveCount(0);
@@ -812,7 +815,7 @@ test('staff workspace end-to-end in a real browser', async (t) => {
                 && response.request().method() === 'GET' && response.ok());
         await retry.click();
         await tasksFetch;
-        await todo.locator('ul li').first().waitFor();
+        await todo.locator('ul li').filter({ has: page.getByRole('checkbox') }).first().waitFor();
 
         await page.route('**/api/staff/tasks', (route) => {
             if (route.request().method() === 'POST') {
@@ -1541,13 +1544,8 @@ test('staff workspace end-to-end in a real browser', async (t) => {
         await page.getByRole('link', { name: /^Candidates \d+$/ }).click();
         await page.waitForURL(/\/staff\/candidates$/);
         await gotoStaff(page, `${baseURL}/staff`);
-        await page.locator('#review-queue')
+        await page.getByLabel('Application review tasks')
             .getByRole('link', { name: 'Synthetic Candidate B' }).click();
-        await expect(page).toHaveURL(`${baseURL}/staff`);
-        const preview = page.getByRole('dialog', { name: 'Synthetic Candidate B' });
-        await expect(preview).toBeVisible({ timeout: 20_000 });
-        await expect(preview.getByRole('tab', { name: /Applications/ })).toBeVisible();
-        await preview.getByRole('link', { name: 'Open full candidate' }).click();
         await page.waitForURL(/\/staff\/candidates\/[0-9a-f-]{36}/);
     });
 

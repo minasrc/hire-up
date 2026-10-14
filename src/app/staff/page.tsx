@@ -1,6 +1,7 @@
 import Link from 'next/link';
 import { ArrowRight, Send } from 'lucide-react';
 import type { IntakeResult } from './telegram-intake/intake-model';
+import { listApplicationDirectory } from '@/lib/pipeline-operations';
 import { listTelegramDrafts } from '@/lib/telegram-intake-operations';
 import { Suspense } from 'react';
 import { Card, CardContent } from '@/components/staff-ui/card';
@@ -53,7 +54,7 @@ async function OverviewSection({ section }: { section: SummarySection }) {
 }
 
 async function OverviewTasks() {
-    const [{ capabilities, gate }, { summary }] = await Promise.all([loadStaffCapabilities(), loadStaffWorkspace()]);
+    const { capabilities, gate } = await loadStaffCapabilities();
     let reviewTasks = null;
     let reviewCount = 0;
     if (capabilities?.telegram && gate.stage === 'verified') {
@@ -88,9 +89,12 @@ async function OverviewTasks() {
             reviewTasks = <Link href="/staff/telegram-intake" className="text-sm underline">Check candidate proposals</Link>;
         }
     }
-    if (summary?.capabilities.applications && summary.attention.reviewApplications !== null) {
-        reviewCount += summary.attention.reviewApplications;
-        reviewTasks = <>{reviewTasks}<ApplicationReviewTasks summary={summary} /></>;
+    if (capabilities?.applications && gate.stage === 'verified') {
+        try {
+            const queue = await listApplicationDirectory(gate.pool, gate.identity, gate.organizationId, { review: 'true' });
+            reviewCount += queue.total;
+            reviewTasks = <>{reviewTasks}<ApplicationReviewTasks rows={queue.rows.slice(0, 5)} total={queue.total} /></>;
+        } catch { /* Application queue failures must not remove manual tasks. */ }
     }
     if (capabilities?.tasks === true) {
         return <StaffTodoList writeEnabled={capabilities.writeTasks === true} reviewTasks={reviewTasks} reviewCount={reviewCount} />;

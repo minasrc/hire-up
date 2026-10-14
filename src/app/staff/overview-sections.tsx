@@ -4,7 +4,7 @@ import { ArrowRight, Building2, Inbox, Lock } from 'lucide-react';
 
 import { Badge } from '@/components/staff-ui/badge';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/staff-ui/card';
-import type { StaffWorkspaceSummary } from '@/lib/workspace-types';
+import type { StaffWorkspaceRecentApplication, StaffWorkspaceSummary } from '@/lib/workspace-types';
 import { cn } from '@/lib/utils';
 
 function MetricCard({
@@ -80,10 +80,8 @@ function PermissionNote({ permission }: { permission: string }) {
 
 export const overviewReviewLinkClass = 'flex items-center gap-3 rounded-md px-3 py-2 text-sm outline-none transition-colors hover:bg-hover focus-visible:bg-hover focus-visible:ring-2 focus-visible:ring-ring';
 
-export function ApplicationReviewTasks({ summary }: { summary: StaffWorkspaceSummary }) {
-    const rows = summary.recentApplications;
-    const total = summary.attention.reviewApplications;
-    if (!summary.capabilities.applications || total === null || total === 0) return null;
+export function ApplicationReviewTasks({ rows, total }: { rows: StaffWorkspaceRecentApplication[]; total: number }) {
+    if (total === 0) return null;
     return (
         <div aria-label="Application review tasks" className="rounded-lg border border-border p-2">
             <Link href="/staff/applications?review=1" className={`${overviewReviewLinkClass} font-medium`}>

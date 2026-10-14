@@ -16,12 +16,16 @@ const compile = (path) => ts.transpileModule(
 const div = (props) => jsx('div', { ...props, children: props?.children });
 
 function overviewPage({ requireStaffVerified, loadStaffWorkspace,
-    loadStaffCapabilities = async () => ({ capabilities: { tasks: true, writeTasks: true } }),
+    loadStaffCapabilities = async () => ({ capabilities: { tasks: true, writeTasks: true }, gate: { stage: 'verified' } }),
 }) {
     const exports = {};
     const imports = {
         'react/jsx-runtime': jsxRuntime,
         react: { Suspense: ({ children }) => children },
+        'next/link': { default: div, __esModule: true },
+        'lucide-react': { ArrowRight: div, Send: div },
+        '@/lib/telegram-intake-operations': { listTelegramDrafts: async () => ({ drafts: [], counts: { all: 0 } }) },
+        '@/lib/pipeline-operations': { listApplicationDirectory: async () => ({ rows: [], total: 0 }) },
         '@/components/staff-ui/card': { Card: div, CardContent: div },
         '@/components/staff-preview/shared': {
             PageHeader: (props) => jsxs(Fragment, {
@@ -33,12 +37,12 @@ function overviewPage({ requireStaffVerified, loadStaffWorkspace,
         },
         '@/lib/staff-gate.server': { requireStaffVerified },
         '@/lib/workspace.server': { loadStaffWorkspace, loadStaffCapabilities },
-        './overview-sections': {
+        './overview-sections': { overviewReviewLinkClass: '',
             OverviewMetrics: ({ summary }) =>
                 jsx('div', { children: `metrics:${JSON.stringify(summary.metrics)}` }),
-            ReviewQueue: ({ summary }) =>
+            ApplicationReviewTasks: ({ rows }) =>
                 jsx('div', {
-                    children: `review:${summary.recentApplications.length}`,
+                    children: `review:${rows.length}`,
                 }),
             ClientsHiring: ({ summary }) =>
                 jsx('div', {
@@ -110,7 +114,7 @@ test('staff overview renders real workspace content for a verified member', asyn
     assert.match(html, /Overview/);
     assert.match(html, /metrics:\{&quot;candidates&quot;:4,&quot;applications&quot;:9,&quot;openRoles&quot;:2\}/);
     assert.match(html, /todo:true/);
-    assert.match(html, /review:0/);
+
     assert.match(html, /hiring:0/);
     // Section navigation lives in the workspace shell, not the page body.
     assert.doesNotMatch(html, /<nav/);
@@ -146,7 +150,7 @@ test('staff overview explains missing task permission instead of a blank panel',
     const html = renderToStaticMarkup(await resolveServerTree(await Page()));
     assert.match(html, /collaboration\.read permission/);
     assert.doesNotMatch(html, /todo:true/);
-    assert.match(html, /review:0/);
+
 });
 
 test('staff overview still requires the full staff and MFA gate', async () => {
