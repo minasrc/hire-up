@@ -246,7 +246,7 @@ test('Telegram extraction protects recruiter edits, reviews evidence and approve
         await expect(page.getByRole('button', { name: 'Connect Telegram', exact: true })).toBeVisible();
         assert.equal((await context.request.post(extractionURL, { data: { action: 'setExtraction', chats: [{ chatId: chat.id, expectedVersion: (await getChats()).chats.find(item => item.id === chat.id).version }], enabled: true } })).status(), 200);
         await page.goto(`${baseURL}/staff/telegram-intake/extraction`);
-        await expect(page.getByRole('heading', { name: 'Candidate extraction', exact: true })).toBeVisible();
+        await expect(page.getByRole('heading', { name: 'Import activity', exact: true })).toBeVisible();
         let job = (await extractWorker('claim')).job;
         const originalDigest = job.sourceDigest;
         await extractWorker('fail', { jobId: job.id, leaseToken: job.leaseToken, code: 'INVALID_RESULT', retryAfterSeconds: 1 });

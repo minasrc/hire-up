@@ -91,7 +91,7 @@ test('extraction worker delivers bounded private history through provider failur
       const fact = (field, value) => ({ field, value, evidence: [{ messageId: first.messageId, quote: first.text }] });
       const result = { subjects: [{ key: 'candidate', identity: { kind: 'telegram_sender', messageId: first.messageId, quote: first.text },
         facts: [fact('firstName', 'Synthetic'), fact('lastName', 'Candidate'), fact('primaryEmail', 'synthetic@example.test')], attachments: [] }] };
-      if (providerMode === 'invalid') result.subjects[0].facts[0].evidence[0].quote = 'Invented quote absent from source';
+      if (providerMode === 'invalid') for (const fact of result.subjects[0].facts) fact.evidence[0].quote = 'Invented quote absent from source';
       response.setHeader('content-type', 'application/json'); response.end(JSON.stringify({ model: 'synthetic-reported-model', choices: [{ finish_reason: 'stop', message: { content: JSON.stringify(result) } }] }));
     } catch { response.writeHead(500); response.end('Synthetic test server assertion failed'); }
   });
@@ -130,7 +130,7 @@ test('extraction worker delivers bounded private history through provider failur
     providerMode = 'valid'; assert.equal(await runtime.tick(), 'completed');
     assert.equal(await runtime.tick(), 'completed'); assert.equal(await runtime.tick(), 'idle');
     const final = await status(); assert.equal(final.counts.completed, 3); assert.equal(final.counts.failed, 0);
-    assert.deepEqual(sourceCounts, [40, 40, 40, 40, 5]);
+    assert.deepEqual(sourceCounts, [40, 40, 40, 40, 40, 5]);
     assert.equal(new Set(completions.flatMap(item => item.result.draftIds)).size, 1, 'Same observed sender resolves to one private draft');
     assert.equal(Number(psql(db, 'select count(*) from app.telegram_extraction_sources').trim()), 85);
     assert.equal(Number(psql(db, "select count(*) from app.telegram_extraction_jobs where metadata->>'model'='synthetic-model' and metadata->>'reportedModel'='synthetic-reported-model'").trim()), 3);

@@ -23,8 +23,35 @@ export function extractionRequest(model, source, schemaVersion = EXTRACTION_SCHE
     messages: [{ role: 'system', content: context ? CONTEXT_SYSTEM_PROMPT : SYSTEM_PROMPT }, { role: 'user', content: JSON.stringify({ schemaVersion, source }) }],
   };
 }
-export function createProvider(config, { fetchImpl = fetch, readTokenImpl = readToken } = {}) {
+
+// Preserve independently valid facts without inventing replacement values or
+// evidence. Invalid identity becomes unknown, so it can never merge profiles.
+function validatedSubset(input, source) {
+  if (!input || Object.keys(input).join(',') !== 'subjects' || !Array.isArray(input.subjects) || input.subjects.length > 12) return null;
+  const subjects = [];
+  for (const subject of input.subjects) {
+    if (!subject || Object.keys(subject).sort().join(',') !== 'attachments,facts,identity,key'
+        || !Array.isArray(subject.facts) || subject.facts.length > 12 || !Array.isArray(subject.attachments) || subject.attachments.length > 8) continue;
+    const facts = [];
+    for (const fact of subject.facts) {
+      try { facts.push(validateExtractionResult({ subjects: [{ ...subject, identity: null, facts: [fact], attachments: [] }] }, source).subjects[0].facts[0]); } catch { /* Unsupported facts never enter a draft. */ }
+    }
+    if (!facts.length) continue;
+    const candidate = { ...subject, identity: null, facts, attachments: [] };
+    try { validateExtractionResult({ subjects: [candidate] }, source); } catch { continue; }
+    for (const attachment of subject.attachments) {
+      try { validateExtractionResult({ subjects: [{ ...candidate, attachments: [attachment] }] }, source); candidate.attachments.push(attachment); } catch { /* Invalid references cannot retrieve a file. */ }
+    }
+    try { validateExtractionResult({ subjects: [{ ...candidate, identity: subject.identity }] }, source); candidate.identity = subject.identity; } catch { /* Unknown identity cannot merge people. */ }
+    if (subjects.some(item => item.key === candidate.key)) continue;
+    subjects.push(candidate);
+  }
+  return subjects.length ? validateExtractionResult({ subjects }, source) : null;
+}
+export function createProvider(config, { fetchImpl = fetch, readTokenImpl = readToken, repairAttempt = false } = {}) {
   return async (source, { signal, schemaVersion = EXTRACTION_SCHEMA_VERSION } = {}) => {
+    // A single corrective retry shares the original deadline and lease budget.
+    signal = signal ? AbortSignal.any([signal, AbortSignal.timeout(60000)]) : AbortSignal.timeout(60000);
     let response;
     try {
       if (![EXTRACTION_SCHEMA_VERSION, EXTRACTION_CONTEXT_SCHEMA_VERSION].includes(schemaVersion) || (schemaVersion === EXTRACTION_CONTEXT_SCHEMA_VERSION) !== Object.hasOwn(source ?? {}, 'contextOnly')) throw new ExtractionWorkerError('INVALID_PAYLOAD');
@@ -33,7 +60,9 @@ export function createProvider(config, { fetchImpl = fetch, readTokenImpl = read
       const singleton = source?.messages?.length === 1 && sourceBytes > EXTRACTION_SOURCE_LIMIT;
       if (!Array.isArray(source?.messages) || sourceBytes > (singleton ? EXTRACTION_SINGLE_SOURCE_LIMIT : EXTRACTION_SOURCE_LIMIT)) throw new ExtractionWorkerError('INVALID_PAYLOAD');
       const token = await readTokenImpl(config.providerTokenFile);
-      response = await requestJson(`${config.providerBaseUrl}/chat/completions`, token, extractionRequest(config.providerModel, source, schemaVersion), { fetchImpl, signal, timeoutMs: 60000, maxRequestBytes: singleton ? 1048576 : 131072, maxResponseBytes: 262144 });
+      const request = extractionRequest(config.providerModel, source, schemaVersion);
+      if (repairAttempt) request.messages[0].content += '\nYour previous result failed validation. Check every quotation against primary message text. Use only supported fields and values. For v2, every value must occur verbatim in its quoted evidence. Do not paraphrase summaries, invent identities, or infer names from filenames. Omit unsupported facts rather than guessing. Return the corrected complete JSON schema.';
+      response = await requestJson(`${config.providerBaseUrl}/chat/completions`, token, request, { fetchImpl, signal, timeoutMs: 60000, maxRequestBytes: singleton ? 1048576 : 131072, maxResponseBytes: 262144 });
     } catch (error) {
       if (error.code === 'STOPPED') throw error;
       throw new ExtractionWorkerError(error.code === 'INVALID_RESPONSE' || error.code === 'INVALID_PAYLOAD' ? 'INVALID_RESULT' : 'PROVIDER_UNAVAILABLE');
@@ -44,10 +73,18 @@ export function createProvider(config, { fetchImpl = fetch, readTokenImpl = read
       const message = choice.message;
       if (choice.finish_reason !== 'stop' || !message || message.refusal || message.function_call || (message.tool_calls != null && (!Array.isArray(message.tool_calls) || message.tool_calls.length > 0)) || typeof message.content !== 'string' || !message.content.trim()) throw new Error();
       const parsed = JSON.parse(message.content);
-      const result = validateExtractionResult(parsed, source);
+      let result;
+      try { result = validateExtractionResult(parsed, source); }
+      catch {
+        result = validatedSubset(parsed, source);
+        if (!result) {
+          if (!repairAttempt && !signal.aborted) return await createProvider(config, { fetchImpl, readTokenImpl, repairAttempt: true })(source, { signal, schemaVersion });
+          throw new ExtractionWorkerError('INVALID_RESULT');
+        }
+      }
       const reported = response.model;
       const reportedModel = typeof reported === 'string' && /^[a-zA-Z0-9][a-zA-Z0-9._:/-]{0,119}$/.test(reported) && !reported.includes('://') ? reported : null;
       return { result, metadata: { model: config.providerModel, promptVersion: schemaVersion === EXTRACTION_CONTEXT_SCHEMA_VERSION ? EXTRACTION_CONTEXT_PROMPT_VERSION : PROMPT_VERSION, reportedModel } };
-    } catch { throw new ExtractionWorkerError('INVALID_RESULT'); }
+    } catch (error) { if (error instanceof ExtractionWorkerError) throw error; throw new ExtractionWorkerError('INVALID_RESULT'); }
   };
 }

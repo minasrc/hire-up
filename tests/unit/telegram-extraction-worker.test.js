@@ -62,7 +62,7 @@ test('compatible provider sends untrusted text as data with strict schema, no to
 
 test('provider rejects refusal, truncation, tools, malformed JSON and fabricated evidence instead of heuristic fallback', async () => {
   const invented = structuredClone(result); invented.subjects[0].facts[0].evidence[0].quote = 'Invented name';
-  const responses = [modelResponse(invented), modelResponse({}, { choices: [] }), { choices: [{ finish_reason: 'length', message: { content: JSON.stringify(result) } }] }, { choices: [{ finish_reason: 'stop', message: { content: 'secret malformed provider response' } }] }, { choices: [{ finish_reason: 'stop', message: { content: JSON.stringify(result), refusal: 'secret' } }] }, { choices: [{ finish_reason: 'stop', message: { content: JSON.stringify(result), tool_calls: [{ name: 'send_data' }] } }] }];
+  const responses = [modelResponse({ subjects: [{ ...invented.subjects[0], facts: [invented.subjects[0].facts[0]] }] }), modelResponse({}, { choices: [] }), { choices: [{ finish_reason: 'length', message: { content: JSON.stringify(result) } }] }, { choices: [{ finish_reason: 'stop', message: { content: 'secret malformed provider response' } }] }, { choices: [{ finish_reason: 'stop', message: { content: JSON.stringify(result), refusal: 'secret' } }] }, { choices: [{ finish_reason: 'stop', message: { content: JSON.stringify(result), tool_calls: [{ name: 'send_data' }] } }] }];
   for (const body of responses) await assert.rejects(fakeProvider(body)(source), error => error.code === 'INVALID_RESULT' && error.message === 'INVALID_RESULT');
   const output = await fakeProvider(modelResponse(result, { model: 'https://secret-provider.test/private' }))(source);
   assert.equal(output.metadata.reportedModel, null);
@@ -72,6 +72,31 @@ test('provider network errors remain redacted and do not produce empty successfu
   const provider = createProvider({ providerBaseUrl: 'https://example.test/v1', providerModel: 'demo', providerTokenFile: '/private/fake' }, { readTokenImpl: async () => 'token', fetchImpl: async () => { throw new Error('token and private prompt'); } });
   await assert.rejects(provider(source), error => error.code === 'PROVIDER_UNAVAILABLE' && error.message === 'PROVIDER_UNAVAILABLE');
   assert.equal(safeErrorCode(new Error('token and private prompt')), 'WORKER_ERROR');
+});
+
+test('one corrective retry can recover invalid evidence without weakening validation', async () => {
+  const invented = structuredClone(result); for (const fact of invented.subjects[0].facts) fact.evidence[0].quote = 'Invented name';
+  let calls = 0;
+  const provider = createProvider({ providerBaseUrl: 'https://example.test/v1', providerModel: 'demo-model', providerTokenFile: '/private/fake' }, {
+    readTokenImpl: async () => 'synthetic-token',
+    fetchImpl: async (_url, options) => {
+      const request = JSON.parse(options.body);
+      if (++calls === 2) assert.match(request.messages[0].content, /previous result failed validation/);
+      return new Response(JSON.stringify(modelResponse(calls === 1 ? invented : result)), { headers: { 'content-type': 'application/json' } });
+    },
+  });
+  assert.deepEqual((await provider(source)).result, result);
+  assert.equal(calls, 2);
+});
+
+test('one unsupported fact does not discard valid facts from the same candidate', async () => {
+  const partial = structuredClone(result);
+  partial.subjects[0].facts[0].evidence[0].quote = 'Invented name';
+  partial.subjects[0].identity = { kind: 'email', email: 'invented@example.test' };
+  const recovered = (await fakeProvider(modelResponse(partial))(source)).result.subjects[0];
+  assert.equal(recovered.identity, null);
+  assert.deepEqual(recovered.facts, [result.subjects[0].facts[1]]);
+  assert.deepEqual(recovered.attachments, result.subjects[0].attachments);
 });
 
 test('lost completion ACK retries exact durable result after restart without calling provider twice', async () => {

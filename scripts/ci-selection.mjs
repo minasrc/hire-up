@@ -20,6 +20,10 @@ const all = () => ({ selection: Object.fromEntries(JOBS.map((job) => [job, true]
 // applies this migration and checks its permissions, lifecycle and audit rules.
 // Pin its contents: editing or deleting it must restore full schema coverage.
 const SCOPED_MIGRATIONS = {
+    'supabase/migrations/20261014160000_telegram_cv_recovery.sql': {
+        sha256: '43f31df519076f80bbc73ce2117582ebe047232ce13ef566f257c62f5b6915f2',
+        jobs: ['cv-analysis', 'telegram-cv', 'telegram-extraction', 'telegram-intake'],
+    },
     'supabase/migrations/20261009090000_document_preview_versions.sql': {
         sha256: 'b4651b4fab822ef00bd063035cb8d437a2a759fc5b91b65b1127514da1d87577',
         jobs: ['staff-workspace'],
@@ -69,6 +73,8 @@ export function selectJobs(files, full = false, readFile = readRepoFile) {
         else if (file === 'tests/telegram-connector/native-sdk.test.js') jobs = ['telegram-source-updates'];
         else if (file === 'tests/telegram-connector/hosted-entrypoint.test.js') jobs = ['telegram-connection'];
         else if (/^tests\/evals\/telegram-context\//.test(file)) jobs = ['telegram-extraction'];
+        else if (file === 'services/telegram-extraction-worker/provider.mjs') jobs = ['telegram-extraction', 'telegram-intake'];
+        else if (file === 'src/app/staff/telegram-intake/processing-status.tsx') jobs = ['telegram-intake', 'telegram-history', 'profile-search'];
         else if (/^src\/app\/staff\/telegram-intake\/context\//.test(file)) jobs = ['telegram-context', 'telegram-connection'];
         else if (/^src\/app\/staff\/telegram-intake\/chats\//.test(file)) jobs = ['telegram-history', 'telegram-source-updates', 'telegram-connection'];
         else if (/^src\/app\/staff\/telegram-intake\/cv\//.test(file)) jobs = ['telegram-cv', 'cv-analysis'];
@@ -81,7 +87,7 @@ export function selectJobs(files, full = false, readFile = readRepoFile) {
         else if (/^src\/app\/api\/(?:staff\/)?telegram-connection\//.test(file)) jobs = ['telegram-connection', 'telegram-history', 'telegram-context', 'telegram-source-updates', 'telegram-extraction', 'telegram-cv', 'telegram-retention', 'cv-analysis', 'worker-pairing'];
         else if (/^src\/app\/api\/(?:staff\/)?telegram-extraction\//.test(file)) jobs = ['telegram-extraction', 'telegram-cv', 'telegram-retention', 'cv-analysis'];
         else if (/^src\/app\/api\/(?:staff\/)?telegram-cv\//.test(file)) jobs = ['telegram-cv', 'cv-analysis'];
-        else if (/^src\/app\/api\/(?:staff\/)?cv-analysis\//.test(file)) jobs = ['cv-analysis', 'cv-search'];
+        else if (/^src\/app\/api\/(?:staff\/)?cv-analysis\//.test(file)) jobs = ['cv-analysis', 'cv-search', 'telegram-cv'];
         else if (/^src\/app\/api\/(?:staff\/)?profile-search\//.test(file)) jobs = ['profile-search', 'cv-search'];
         else if (/^src\/app\/api\/staff\//.test(file)) jobs = STAFF;
         else if (/^(src\/app\/staff\/|src\/components\/staff)/.test(file)) jobs = STAFF_BROWSER;
@@ -120,7 +126,7 @@ function testJobs(file) {
         [/^telegram-extraction/, ['telegram-extraction']],
         [/^telegram-cv/, ['telegram-cv']],
         [/^telegram-(retention|sync)/, ['telegram-retention', 'telegram-history']],
-        [/^profile-search/, ['profile-search']],
+        [/^(profile-search|telegram-candidate-flow)/, ['profile-search']],
         [/^cv-analysis/, ['cv-analysis']],
         [/^cv-search/, ['cv-search']],
         [/^worker-pairing/, ['worker-pairing']],

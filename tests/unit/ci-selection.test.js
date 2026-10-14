@@ -81,6 +81,22 @@ test('shared security keeps staff coverage; schema, dependencies and unknown fil
     }
 });
 
+test('CV recovery runs its workflow checks and altered migration contents restore full coverage', () => {
+    const file = 'supabase/migrations/20261014160000_telegram_cv_recovery.sql';
+    assert.deepEqual(new Set(selected([file])), new Set(['quality', 'cv-analysis', 'telegram-cv', 'telegram-extraction', 'telegram-intake']));
+    assert.deepEqual(selectJobs([file], false, () => 'changed migration').selection,
+        Object.fromEntries(JOBS.map(job => [job, true])));
+    const suite = readFileSync(new URL('../../tests/database/cv-analysis-runtime.test.js', import.meta.url), 'utf8');
+    assert.ok(suite.includes(file.split('/').at(-1)));
+    assert.ok(suite.includes('unregistered tokens cannot create CV drafts'));
+});
+
+test('extraction provider and activity UI select their consumers without unrelated staff workflows', () => {
+    assert.deepEqual(new Set(selected(['services/telegram-extraction-worker/provider.mjs'])), new Set(['quality', 'telegram-extraction', 'telegram-intake']));
+    assert.deepEqual(new Set(selected(['src/app/staff/telegram-intake/processing-status.tsx'])), new Set(['quality', 'telegram-intake', 'telegram-history', 'profile-search']));
+    assert.deepEqual(new Set(selected(['tests/staff-workspace/telegram-candidate-flow.test.js'])), new Set(['quality', 'profile-search']));
+});
+
 test('shared layouts cover every staff browser workflow without unrelated database-only jobs', () => {
     for (const file of ['src/app/layout.jsx', 'src/app/staff/layout.tsx', 'src/app/staff/session-provider.tsx',
         'src/lib/staff-auth-recovery.js', 'src/lib/staff-mutation.ts']) {
@@ -171,7 +187,7 @@ test('feature APIs retain all downstream workflow consumers without unrelated st
         'telegram-extraction': ['telegram-extraction', 'telegram-cv', 'telegram-retention', 'cv-analysis'],
         'telegram-cv': ['telegram-cv', 'cv-analysis'],
         'profile-search': ['profile-search', 'cv-search'],
-        'cv-analysis': ['cv-analysis', 'cv-search'],
+        'cv-analysis': ['cv-analysis', 'cv-search', 'telegram-cv'],
     };
     for (const [feature, suites] of Object.entries(dependents)) {
         for (const prefix of ['src/app/api/staff/', 'src/app/api/']) {
