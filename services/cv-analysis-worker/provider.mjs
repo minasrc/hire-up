@@ -9,6 +9,29 @@ Describe only the CV subject. References, previous employers, recruiter/sender n
 Every fact needs one to three exact block quotations. Each evidence uses blockOrdinal and half-open UTF8 BYTE offsets startByte/endByte within that block. quote must exactly equal those bytes. Account for multibyte Unicode; never use character offsets as byte offsets. Never alter quotation spacing or spelling. First name, last name and each email require literal support within the quoted text. Do not guess identity from an email handle, infer preferences from an employer's requirements, or invent compensation.
 Extract supported facts only, preserving uncertainty and distinguishing current preferences from historical experience. Summarize supported professional experience faithfully; do not truncate the document or claim you read image content. The recruiter will review suggestions and full parsed text. Return no explanations, markdown, extra keys or tool calls.`;
 
+function groundCvFacts(input, blocks) {
+    if (!input || Object.keys(input).sort().join(',') !== 'facts,issues' || !Array.isArray(input.facts) || input.facts.length > 12 || !Array.isArray(input.issues) || input.issues.length) return validateCvFactsResult(input, blocks);
+    const byOrdinal = new Map(blocks.map(block => [block.ordinal, block]));
+    const facts = [];
+    for (const original of input.facts) {
+        const fact = structuredClone(original);
+        if (!Array.isArray(fact?.evidence) || fact.evidence.length < 1 || fact.evidence.length > 3) continue;
+        for (const evidence of fact.evidence) {
+            const block = byOrdinal.get(evidence?.blockOrdinal);
+            if (!block || typeof evidence.quote !== 'string' || !evidence.quote || !Number.isInteger(evidence.startByte) || !Number.isInteger(evidence.endByte)) continue;
+            const bytes = Buffer.from(block.text, 'utf8');
+            if (bytes.subarray(evidence.startByte, evidence.endByte).toString('utf8') === evidence.quote) continue;
+            const at = block.text.indexOf(evidence.quote);
+            if (at < 0 || block.text.indexOf(evidence.quote, at + 1) !== -1) continue;
+            evidence.startByte = Buffer.byteLength(block.text.slice(0, at), 'utf8');
+            evidence.endByte = evidence.startByte + Buffer.byteLength(evidence.quote, 'utf8');
+        }
+        try { facts.push(validateCvFactsResult({ facts: [fact], issues: [] }, blocks).facts[0]); } catch { /* Unsupported facts never enter the profile. */ }
+    }
+    if (input.facts.length && !facts.length) throw new ParserError('INVALID_RESULT');
+    return validateCvFactsResult({ facts, issues: [] }, blocks);
+}
+
 export function createCvAnalysisProvider(config, { fetchImpl = fetch, readTokenImpl = readToken } = {}) {
     return async (source, { signal } = {}) => {
         let response;
@@ -26,7 +49,7 @@ export function createCvAnalysisProvider(config, { fetchImpl = fetch, readTokenI
             if (!Array.isArray(response?.choices) || response.choices.length !== 1) throw new Error();
             const choice = response.choices[0]; const message = choice.message;
             if (choice.finish_reason !== 'stop' || !message || message.refusal || message.function_call || (message.tool_calls != null && (!Array.isArray(message.tool_calls) || message.tool_calls.length)) || typeof message.content !== 'string' || !message.content.trim()) throw new Error();
-            const result = validateCvFactsResult(JSON.parse(message.content), source.blocks);
+            const result = groundCvFacts(JSON.parse(message.content), source.blocks);
             const reportedModel = typeof response.model === 'string' && /^[A-Za-z0-9][A-Za-z0-9._:/ -]{0,119}$/u.test(response.model) && !response.model.includes('://') ? response.model : null;
             return { result, metadata: { model: config.providerModel, promptVersion: CV_ANALYSIS_PROMPT_VERSION, reportedModel } };
         } catch { throw new ParserError('INVALID_RESULT'); }

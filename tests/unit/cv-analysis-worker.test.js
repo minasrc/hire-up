@@ -66,15 +66,21 @@ test('cancellation during parsing creates no failure/result and concurrent tick 
     const worker = createCvAnalysisWorker({ vault, host: async action => { assert.equal(action, 'claim'); return { job: job('parse') }; }, readContent: async () => bytes, parse: async () => { started(); await waiting; return parsed; } });
     const tick = worker.tick({ signal: controller.signal }); await ready; assert.equal(await worker.tick(), 'busy'); controller.abort(); finish(); await assert.rejects(tick, { code: 'STOPPED' }); assert.equal(vault.load(), undefined);
 });
-test('real loopback provider uses strict schema/no tools and validates UTF8 evidence rather than trusting JSON', async t => {
-    let invalid = false; const endpoint = await server(t, async (request, response) => {
+test('real loopback provider repairs unique exact quote offsets while rejecting fabricated evidence', async t => {
+    let mode = 'valid'; const endpoint = await server(t, async (request, response) => {
         let body = ''; for await (const chunk of request) body += chunk;
         const submitted = JSON.parse(body); assert.equal(submitted.messages[0].content, SYSTEM_PROMPT); assert.equal(submitted.response_format.type, 'json_schema'); assert.equal(submitted.tools, undefined);
-        const output = structuredClone(result); if (invalid) output.facts[0].evidence[0].endByte -= 1;
+        const output = structuredClone(result);
+        if (mode === 'offset') output.facts[0].evidence[0].endByte -= 1;
+        if (mode === 'fabricated') output.facts[0].evidence[0].quote = 'Invented person';
         response.setHeader('Content-Type', 'application/json'); response.end(JSON.stringify({ model: 'synthetic-model', choices: [{ finish_reason: 'stop', message: { content: JSON.stringify(output) } }] }));
     });
     const provider = createCvAnalysisProvider({ providerBaseUrl: endpoint, providerModel: 'synthetic-model', providerTokenFile: 'unused' }, { readTokenImpl: async () => 'synthetic-provider-token' });
-    assert.deepEqual((await provider(job('facts').source)).result, result); invalid = true; await assert.rejects(provider(job('facts').source), { code: 'INVALID_RESULT' });
+    assert.deepEqual((await provider(job('facts').source)).result, result);
+    mode = 'offset'; assert.deepEqual((await provider(job('facts').source)).result, result);
+    const repeated = job('facts').source; repeated.blocks[0].text = 'Álex Álex';
+    await assert.rejects(provider(repeated), { code: 'INVALID_RESULT' });
+    mode = 'fabricated'; await assert.rejects(provider(job('facts').source), { code: 'INVALID_RESULT' });
 });
 test('scoped content transport enforces streaming length and preserves permission status', async () => {
     const reader = createContentReader({ serverUrl: 'https://synthetic.example', workerToken: 'synthetic', fetchImpl: async (_url, options) => { assert.equal(options.redirect, 'error'); return new Response(new Uint8Array(4194305)); } });
