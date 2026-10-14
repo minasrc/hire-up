@@ -23,6 +23,31 @@ export function extractionRequest(model, source, schemaVersion = EXTRACTION_SCHE
     messages: [{ role: 'system', content: context ? CONTEXT_SYSTEM_PROMPT : SYSTEM_PROMPT }, { role: 'user', content: JSON.stringify({ schemaVersion, source }) }],
   };
 }
+
+// Preserve independently valid facts without inventing replacement values or
+// evidence. Invalid identity becomes unknown, so it can never merge profiles.
+function validatedSubset(input, source) {
+  if (!input || Object.keys(input).join(',') !== 'subjects' || !Array.isArray(input.subjects) || input.subjects.length > 12) return null;
+  const subjects = [];
+  for (const subject of input.subjects) {
+    if (!subject || Object.keys(subject).sort().join(',') !== 'attachments,facts,identity,key'
+        || !Array.isArray(subject.facts) || subject.facts.length > 12 || !Array.isArray(subject.attachments) || subject.attachments.length > 8) continue;
+    const facts = [];
+    for (const fact of subject.facts) {
+      try { facts.push(validateExtractionResult({ subjects: [{ ...subject, identity: null, facts: [fact], attachments: [] }] }, source).subjects[0].facts[0]); } catch { /* Unsupported facts never enter a draft. */ }
+    }
+    if (!facts.length) continue;
+    const candidate = { ...subject, identity: null, facts, attachments: [] };
+    try { validateExtractionResult({ subjects: [candidate] }, source); } catch { continue; }
+    for (const attachment of subject.attachments) {
+      try { validateExtractionResult({ subjects: [{ ...candidate, attachments: [attachment] }] }, source); candidate.attachments.push(attachment); } catch { /* Invalid references cannot retrieve a file. */ }
+    }
+    try { validateExtractionResult({ subjects: [{ ...candidate, identity: subject.identity }] }, source); candidate.identity = subject.identity; } catch { /* Unknown identity cannot merge people. */ }
+    if (subjects.some(item => item.key === candidate.key)) continue;
+    subjects.push(candidate);
+  }
+  return subjects.length ? validateExtractionResult({ subjects }, source) : null;
+}
 export function createProvider(config, { fetchImpl = fetch, readTokenImpl = readToken, repairAttempt = false } = {}) {
   return async (source, { signal, schemaVersion = EXTRACTION_SCHEMA_VERSION } = {}) => {
     // A single corrective retry shares the original deadline and lease budget.
@@ -51,8 +76,11 @@ export function createProvider(config, { fetchImpl = fetch, readTokenImpl = read
       let result;
       try { result = validateExtractionResult(parsed, source); }
       catch {
-        if (!repairAttempt && !signal.aborted) return await createProvider(config, { fetchImpl, readTokenImpl, repairAttempt: true })(source, { signal, schemaVersion });
-        throw new ExtractionWorkerError('INVALID_RESULT');
+        result = validatedSubset(parsed, source);
+        if (!result) {
+          if (!repairAttempt && !signal.aborted) return await createProvider(config, { fetchImpl, readTokenImpl, repairAttempt: true })(source, { signal, schemaVersion });
+          throw new ExtractionWorkerError('INVALID_RESULT');
+        }
       }
       const reported = response.model;
       const reportedModel = typeof reported === 'string' && /^[a-zA-Z0-9][a-zA-Z0-9._:/-]{0,119}$/.test(reported) && !reported.includes('://') ? reported : null;
