@@ -155,7 +155,7 @@ test('Telegram browser connects with QR and encrypted 2FA, waits for logout ackn
         await page.getByRole('button', { name: 'Continue', exact: true }).click();
         assert.equal((await retry).status(), 200);
         await update({ status: 'connected', profile: { telegramUserId: '123456789', username: 'synthetic_recruiter', displayName: 'Synthetic Recruiter' } });
-        await page.getByText('Telegram connected', { exact: true }).first().click();
+        await page.locator('details > summary').filter({ hasText: 'Telegram connected' }).click();
         await expect(page.getByRole('heading', { name: 'Telegram connected', exact: true })).toBeVisible();
         await expect(page.getByText('@synthetic_recruiter', { exact: true })).toBeVisible();
         await expect(page.getByRole('tab', { name: /^Available/ })).toBeVisible();

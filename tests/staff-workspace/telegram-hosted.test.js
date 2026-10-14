@@ -270,7 +270,7 @@ test('Hosted Telegram browser starts on demand, cancels setup and protects QR/pa
         await expect(password).toHaveValue('');
         task = (await worker('claim')).connection;
         await update({ status: 'connected', profile: { telegramUserId: '123456789', username: 'synthetic_recruiter', displayName: 'Synthetic Recruiter' } });
-        await page.getByText('Telegram connected', { exact: true }).first().click();
+        await page.locator('details > summary').filter({ hasText: 'Telegram connected' }).click();
         await expect(page.getByRole('heading', { name: 'Telegram connected', exact: true })).toBeVisible();
         await expect(page.getByRole('tab', { name: /^Available/ })).toBeVisible();
         await expect(page.getByRole('button', { name: 'Choose chats to import', exact: true })).toHaveCount(0);
@@ -320,7 +320,7 @@ test('Hosted Telegram browser starts on demand, cancels setup and protects QR/pa
         await historyAction(page.getByRole('button', { name: 'Pause Hosted journey chat', exact: true }));
         await expect(page.getByText('Paused', { exact: true })).toBeVisible();
         await historyAction(page.getByRole('button', { name: 'Resume Hosted journey chat', exact: true }));
-        await page.getByText('Telegram connected', { exact: true }).first().click();
+        await page.locator('details > summary').filter({ hasText: 'Telegram connected' }).click();
         await page.getByRole('button', { name: 'Disconnect Telegram', exact: true }).click();
         await expect(page.getByRole('heading', { name: 'Waiting for Telegram to disconnect', exact: true })).toBeVisible();
         await expect(page.getByText(/To revoke access immediately, open Telegram on your phone/)).toBeVisible();
@@ -343,7 +343,7 @@ test('Hosted Telegram browser starts on demand, cancels setup and protects QR/pa
         await expect(page.getByRole('heading', { name: 'Preparing Telegram sign-in', exact: true })).toBeVisible();
         task = (await worker('claim')).connection;
         await update({ status: 'connected', profile: { telegramUserId: '123456789', username: 'synthetic_recruiter', displayName: 'Synthetic Recruiter' } });
-        await page.getByText('Telegram connected', { exact: true }).first().click();
+        await page.locator('details > summary').filter({ hasText: 'Telegram connected' }).click();
         await expect(page.getByRole('heading', { name: 'Telegram connected', exact: true })).toBeVisible();
         await page.getByRole('tab', { name: /^Connected/ }).click();
         await expect(page.getByText('Hosted journey chat', { exact: true })).toBeVisible();
@@ -392,7 +392,7 @@ test('Hosted Telegram browser starts on demand, cancels setup and protects QR/pa
         await lostCall('update',{connectionId:lostTask.id,generation:lostTask.generation,leaseToken:lostTask.leaseToken,status:'connected',profile:{telegramUserId:'123456789',displayName:'Synthetic recovered owner'}});
         psql(db,`update app.telegram_workers set revoked_at=clock_timestamp() where id='${lostWorker}'`);
         await page.reload();
-        await page.getByText('Telegram connected', { exact: true }).first().click();
+        await page.locator('details > summary').filter({ hasText: 'Telegram connected' }).click();
         await page.getByText('Advanced recovery options',{exact:true}).click();
         const resetButton=page.getByRole('button',{name:'Reset registration',exact:true});await expect(resetButton).toBeDisabled();
         await page.getByRole('checkbox',{name:'I revoked the old session, or verified it is absent, in Telegram Settings → Devices.',exact:true}).check();
