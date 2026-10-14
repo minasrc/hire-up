@@ -6,6 +6,7 @@ import {
     ClientJobContractError,
     normalizeJobDocument,
 } from '@/lib/client-job-contracts.js';
+import { editorJobDocument } from '@/lib/editor-job-document.js';
 import { cn } from '@/lib/utils';
 
 import type { JobDocument, JobDocumentNode } from './types';
@@ -132,7 +133,7 @@ function renderBlock(node: JobDocumentNode, key: string): ReactNode {
 
 export function canonicalJobDocument(value: unknown): JobDocument | null {
     try {
-        return normalizeJobDocument(value) as JobDocument;
+        return normalizeJobDocument(editorJobDocument(value)) as JobDocument;
     } catch (error) {
         if (error instanceof ClientJobContractError) return null;
         throw error;
@@ -147,7 +148,10 @@ export function JobDocumentView({
     className?: string;
 }) {
     const canonical = useMemo(() => canonicalJobDocument(document), [document]);
-    if (!canonical || canonical.content.length === 0) {
+    if (!canonical) {
+        return <p role="alert" className="text-sm text-destructive">This description couldn’t be previewed. Your text is still in the editor.</p>;
+    }
+    if (canonical.content.length === 0 || canonical.content.every((node) => node.type === 'paragraph' && !node.content?.length)) {
         return <p className="text-sm text-muted-foreground">No description provided yet.</p>;
     }
     return (

@@ -301,3 +301,20 @@ test('shared hosted processing covers Telegram and model workers without unrelat
 test('candidate proposal review regression selects its actual intake suite', () => {
     assert.deepEqual(selected(['tests/database/telegram-candidate-review.test.js']), ['quality', 'telegram-intake']);
 });
+
+
+test('job draft UI runs its authenticated workflow and public description consumers', () => {
+    for (const file of ['src/app/staff/job-form.tsx', 'src/app/staff/form-guard.tsx',
+        'src/lib/job-form-ui.js', 'src/lib/editor-job-document.js',
+        'src/components/staff-preview/rich-text-editor.tsx', 'src/components/staff-preview/job-document.tsx']) {
+        assert.deepEqual(selected([file]), ['quality', 'browser-tests', 'staff-workspace']);
+    }
+    assert.deepEqual(selected(['src/components/staff-ui/select.tsx']), ['quality', 'browser-tests', 'staff-workspace']);
+    assert.deepEqual(selected(['src/components/staff-ui/discard-confirmation.tsx']), ['quality', 'browser-tests', 'staff-workspace']);
+    const changed = selectJobs(['src/components/staff-ui/select.tsx'], false, () => 'changed control');
+    assert.ok(changed.selection['telegram-connection']);
+    assert.ok(changed.selection['worker-pairing']);
+    assert.ok(!changed.selection['database-foundation']);
+    assert.deepEqual(selected(['src/lib/job-form-ui.js', 'package-lock.json']), JOBS);
+    assert.deepEqual(selected(['src/lib/job-form-ui.js', 'src/lib/staff-authorization.js']), selected(['src/lib/staff-authorization.js']));
+});

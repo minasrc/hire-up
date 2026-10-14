@@ -2,7 +2,7 @@
 
 import * as React from 'react';
 import { Select as SelectPrimitive } from 'radix-ui';
-import { Check, ChevronDown, ChevronUp } from 'lucide-react';
+import { Check, ChevronsUpDown, ChevronDown, ChevronUp } from 'lucide-react';
 
 import { cn } from '@/lib/utils';
 
@@ -24,7 +24,7 @@ const SelectTrigger = React.forwardRef<
     >
         {children}
         <SelectPrimitive.Icon asChild>
-            <ChevronDown className="h-4 w-4 opacity-60" />
+            <ChevronsUpDown className="h-4 w-4 text-muted-foreground" aria-hidden="true" />
         </SelectPrimitive.Icon>
     </SelectPrimitive.Trigger>
 ));
@@ -61,17 +61,19 @@ SelectScrollDownButton.displayName = 'SelectScrollDownButton';
 const SelectContent = React.forwardRef<
     React.ComponentRef<typeof SelectPrimitive.Content>,
     React.ComponentPropsWithoutRef<typeof SelectPrimitive.Content>
->(({ className, children, position = 'popper', ...props }, ref) => (
+>(({ className, children, position = 'popper', align = 'start', sideOffset = 4, ...props }, ref) => (
     <SelectPrimitive.Portal>
         <SelectPrimitive.Content
             ref={ref}
             className={cn(
-                'staff-scope relative z-50 max-h-96 min-w-[8rem] overflow-hidden rounded-lg border border-border bg-popover text-popover-foreground shadow-md data-[state=open]:animate-in data-[state=open]:fade-in-0 data-[state=open]:zoom-in-95 data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=closed]:zoom-out-95',
+                'staff-scope relative z-50 max-h-[var(--radix-select-content-available-height)] min-w-[8rem] overflow-hidden rounded-lg border border-border bg-popover text-popover-foreground shadow-md data-[state=open]:animate-in data-[state=open]:fade-in-0 data-[state=open]:zoom-in-95 data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=closed]:zoom-out-95',
                 position === 'popper'
-                    && 'data-[side=bottom]:translate-y-1 data-[side=top]:-translate-y-1',
+                    && 'w-[var(--radix-select-trigger-width)]',
                 className,
             )}
             position={position}
+            align={align}
+            sideOffset={sideOffset}
             {...props}
         >
             <SelectScrollUpButton />
@@ -79,7 +81,7 @@ const SelectContent = React.forwardRef<
                 className={cn(
                     'p-1',
                     position === 'popper'
-                        && 'h-[var(--radix-select-trigger-height)] w-full min-w-[var(--radix-select-trigger-width)]',
+                        && 'w-full',
                 )}
             >
                 {children}
@@ -109,7 +111,7 @@ const SelectItem = React.forwardRef<
     <SelectPrimitive.Item
         ref={ref}
         className={cn(
-            'relative flex w-full cursor-pointer items-center rounded-md py-1.5 pr-8 pl-2 text-sm outline-none select-none focus:bg-hover focus:text-foreground data-[disabled]:pointer-events-none data-[disabled]:opacity-50',
+            'relative flex w-full cursor-pointer items-center rounded-md py-2.5 pr-9 pl-3 text-sm outline-none select-none data-[highlighted]:bg-accent data-[highlighted]:text-accent-foreground data-[disabled]:pointer-events-none data-[disabled]:opacity-50',
             className,
         )}
         {...props}

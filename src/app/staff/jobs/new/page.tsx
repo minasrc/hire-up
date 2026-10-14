@@ -55,7 +55,7 @@ export default async function StaffJobNewPage({
     }
 
     return (
-        <section className="mx-auto flex w-full max-w-5xl flex-col gap-6">
+        <section className="mx-auto flex w-full max-w-6xl flex-col gap-6">
             <Link
                 href="/staff/jobs"
                 className="inline-flex w-fit items-center gap-1.5 text-sm text-muted-foreground underline-offset-4 hover:text-foreground"
@@ -91,17 +91,10 @@ export default async function StaffJobNewPage({
                     }
                 />
             ) : (
-                <Card>
-                    <CardContent className="pt-6">
-                        <JobForm
-                            clients={clients.map((client) => ({
-                                id: client.id,
-                                name: client.name,
-                            }))}
-                            preselectedClientId={preselectedClientId}
-                        />
-                    </CardContent>
-                </Card>
+                <JobForm
+                    clients={clients.map((client) => ({ id: client.id, name: client.name }))}
+                    preselectedClientId={preselectedClientId}
+                />
             )}
         </section>
     );

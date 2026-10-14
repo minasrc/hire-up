@@ -29,6 +29,13 @@ const SCOPED_MIGRATIONS = {
         jobs: ['staff-workspace'],
     },
 };
+// Reviewed presentation-only controls: keep representative keyboard, mobile,
+// read-only and navigation coverage. Changed contents fall back to all staff
+// browser workflows; these exceptions never scope server security or packages.
+const SCOPED_UI_CONTROLS = {
+    'src/components/staff-ui/select.tsx': { sha256: '5ed67b90ecb0e33feb8d18c62ec59c602b7c2a585aa0764d2900ca51522e8e19', jobs: ['browser-tests', 'staff-workspace'] },
+    'src/components/staff-ui/discard-confirmation.tsx': { sha256: '6d6b5fcd3391f47ee31e15503ea68e79854a892d15ef326bab4ab1bf93214ad7', jobs: ['browser-tests', 'staff-workspace'] },
+};
 const readRepoFile = (file) => readFileSync(new URL(`../${file}`, import.meta.url));
 
 // Unknown paths and shared security/schema changes deliberately fail closed.
@@ -53,6 +60,23 @@ export function selectJobs(files, full = false, readFile = readRepoFile) {
                 if (createHash('sha256').update(readFile(file)).digest('hex') !== reviewed.sha256) return all();
             } catch { return all(); }
             jobs = reviewed.jobs;
+        } else if (Object.hasOwn(SCOPED_UI_CONTROLS, file)) {
+            const reviewed = SCOPED_UI_CONTROLS[file];
+            try {
+                jobs = createHash('sha256').update(readFile(file)).digest('hex') === reviewed.sha256
+                    ? reviewed.jobs : STAFF_BROWSER;
+            } catch { jobs = STAFF_BROWSER; }
+        } else if (['src/app/staff/job-form.tsx', 'src/app/staff/form-guard.tsx',
+            'src/lib/job-form-ui.js', 'src/lib/editor-job-document.js',
+            'src/components/staff-preview/cancel-job-button.tsx',
+            'src/components/staff-preview/job-compensation.tsx',
+            'src/components/staff-preview/job-editor-layout.tsx',
+            'src/components/staff-preview/job-form-select.tsx',
+            'src/components/staff-preview/read-job-editor.ts',
+            'src/components/staff-preview/job-document.tsx',
+            'src/components/staff-preview/rich-text-editor.tsx'].includes(file)) {
+            // Draft editing plus both authenticated and public job descriptions.
+            jobs = ['browser-tests', 'staff-workspace'];
         } else if (file === 'src/lib/staff-auth-recovery.js' || file === 'src/lib/staff-mutation.ts') {
             // Shared client recovery/mutation UI, with no server auth or SQL changes.
             jobs = STAFF_BROWSER;

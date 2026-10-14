@@ -4,11 +4,13 @@ import test from 'node:test';
 import { runInNewContext } from 'node:vm';
 import * as jsxRuntime from 'react/jsx-runtime';
 import ts from 'typescript';
+import { jobPreviewLocations } from '../../src/lib/job-form-ui.js';
 import * as contracts from '../../src/lib/client-job-contracts.js';
 import { mapClientFieldErrors } from '../../src/lib/client-form-errors.js';
 import { createStaffAuthRecovery } from '../../src/lib/staff-auth-recovery.js';
 
 const compile = path => ts.transpileModule(readFileSync(new URL(path, import.meta.url), 'utf8'), { compilerOptions: { module: ts.ModuleKind.CommonJS, jsx: ts.JsxEmit.ReactJSX, target: ts.ScriptTarget.ES2022 } }).outputText;
+const jobCode = compile('../../src/app/staff/job-form.tsx');
 const formCode = compile('../../src/app/staff/workspace-forms.tsx');
 const mutationCode = compile('../../src/lib/staff-mutation.ts');
 const id = '97000000-0000-4000-8000-000000000001';
@@ -28,7 +30,7 @@ function subject(kind, respond) {
     const components = names => Object.fromEntries(names.map(name => [name, name]));
     const imports = {
         'react/jsx-runtime': jsxRuntime,
-        react: { useEffect: () => {}, useRef: current => ({ current }), useState: initial => { const index = states.length; states.push(typeof initial === 'function' ? initial() : initial); return [states[index], value => { states[index] = typeof value === 'function' ? value(states[index]) : value; }]; } },
+        react: { useId: () => 'test-job', useEffect: () => {}, useRef: current => ({ current }), useState: initial => { const index = states.length; states.push(typeof initial === 'function' ? initial() : initial); return [states[index], value => { states[index] = typeof value === 'function' ? value(states[index]) : value; }]; } },
         'next/navigation': { useRouter: () => ({ push: path => navigation.push(['push', path]), refresh: () => navigation.push(['refresh']) }) },
         'lucide-react': components(['Plus', 'Trash2']),
         '@/components/staff-ui/button': components(['Button']),
@@ -40,17 +42,36 @@ function subject(kind, respond) {
         '@/components/staff-ui/textarea': components(['Textarea']),
         '@/components/staff-preview/rich-text-editor': components(['RichTextEditor']),
         '@/components/staff-preview/shared': components(['RequiredMark']),
-        '@/lib/client-job-contracts.js': contracts,
+        '@/lib/client-job-contracts.js': { ...contracts, validateJobDraftInput: value => contracts.validateJobDraftInput(JSON.parse(JSON.stringify(value))) },
         '@/lib/client-form-errors.js': { mapClientFieldErrors },
         '@/lib/staff-mutation': mutation,
         '@/lib/staff-workspace-fetch': { staffWorkspaceUrl: href => href, refreshStaffWorkspace: router => router.refresh() },
     };
+    const jobExports = {};
+    const extra = {
+        'next/link': { default: 'Link' },
+        './form-guard': { useUnsavedChangesGuard: () => ({ dialog: null }) },
+        '@/components/staff-preview/read-job-editor': { readJobEditor: (_form, fallback) => fallback },
+        '@/lib/job-form-ui.js': { compensationValue: value => value, friendlyJobErrors: value => value, jobPreviewLocations },
+        '@/lib/location-options.js': { LOCATION_OPTIONS: [], canonicalLocationLabel: value => value },
+        '@/components/staff-preview/demo-data': { BONUS_TYPE_LABELS: {} },
+    };
+    runInNewContext(jobCode, { exports: jobExports, Error, requestAnimationFrame: callback => callback(0), document: { getElementById: () => null },
+        FormData: class { constructor(form) { this.form = form; } get(key) { return this.form[key] ?? null; } },
+        require: name => {
+            if (Object.hasOwn(imports, name)) return imports[name];
+            if (Object.hasOwn(extra, name)) return extra[name];
+            if (name.startsWith('@/components/')) return new Proxy({}, { get: (_target, key) => String(key) });
+            throw new Error(`Unexpected job UI dependency: ${name}`);
+        },
+    });
+    imports['./job-form'] = jobExports;
     const exports = {};
     runInNewContext(formCode, { exports, Error,
         FormData: class { constructor(form) { this.form = form; } get(key) { return this.form[key] ?? null; } },
         require: name => { assert.ok(Object.hasOwn(imports, name), name); return imports[name]; },
     });
-    const input = { title: 'Unsaved synthetic title', clientId: id, publiclyListed: 'false' };
+    const input = { reportValidity: () => true, querySelector: () => null, title: 'Unsaved synthetic title', clientId: id, publiclyListed: 'false' };
     const tree = kind === 'revision'
         ? exports.NewRevisionButton({ jobId: id, expectedJobVersion: '7' })
         : exports.JobForm({ clients: [{ id, name: 'Synthetic client' }], ...(kind === 'edit' ? { jobId: id, revisionId, expectedVersion: '7' } : {}) });

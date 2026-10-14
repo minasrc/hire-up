@@ -51,7 +51,7 @@ export default async function StaffJobPage(
     } catch (error) {
         if (error instanceof StaffAuthorizationError && error.code === 'FORBIDDEN') {
             return (
-                <section className="mx-auto w-full max-w-5xl">
+                <section className="mx-auto w-full max-w-6xl">
                     <PageHeader
                         eyebrow="Jobs"
                         title="Job"
@@ -99,7 +99,7 @@ export default async function StaffJobPage(
     );
 
     return (
-        <section className="mx-auto flex w-full max-w-5xl flex-col gap-6">
+        <section className="mx-auto flex w-full max-w-6xl flex-col gap-6">
             <Link
                 href="/staff/jobs"
                 className="inline-flex w-fit items-center gap-1.5 text-sm text-muted-foreground underline-offset-4 hover:text-foreground"
@@ -113,8 +113,8 @@ export default async function StaffJobPage(
                 title={job.title}
                 description={
                     client?.name
-                        ? `${client.name} · revision workspace for this role`
-                        : 'Revision workspace for this role'
+                        ? client.name
+                        : undefined
                 }
                 actions={
                     <>
@@ -151,12 +151,7 @@ export default async function StaffJobPage(
             <Card>
                 <CardHeader className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
                     <div className="flex flex-col gap-1">
-                        <CardTitle className="text-base">Draft revision</CardTitle>
-                        {draft ? (
-                            <CardDescription>
-                                Revision #{draft.revisionNumber} · version {draft.version}
-                            </CardDescription>
-                        ) : null}
+                        <CardTitle className="text-base">Draft</CardTitle>
                     </div>
                     {canWrite ? (
                         draft ? (
