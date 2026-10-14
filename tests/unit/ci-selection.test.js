@@ -297,3 +297,7 @@ test('shared hosted processing covers Telegram and model workers without unrelat
     for (const job of ['telegram-connection', 'telegram-history', 'telegram-intake', 'telegram-extraction', 'telegram-cv', 'profile-search', 'cv-analysis', 'cv-search', 'worker-pairing']) assert.ok(jobs.includes(job), job);
     for (const job of ['staff-workspace', 'database-client-jobs', 'database-privacy-foundation', 'browser-tests']) assert.ok(!jobs.includes(job), job);
 });
+
+test('candidate proposal review regression selects its actual intake suite', () => {
+    assert.deepEqual(selected(['tests/database/telegram-candidate-review.test.js']), ['quality', 'telegram-intake']);
+});
