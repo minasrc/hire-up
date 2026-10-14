@@ -16,10 +16,13 @@ declare r jsonb; active_count bigint; paused_count bigint; jobs jsonb;
 begin
  r:=app.telegram_extraction_status_before_activity_v1(p_draft,p_view,p_after);
  if r ? 'counts' then
- select count(*) filter(where c.extraction_enabled or (j.status='leased' and j.lease_expires_at>clock_timestamp())),
- count(*) filter(where not c.extraction_enabled and not coalesce(j.status='leased' and j.lease_expires_at>clock_timestamp(),false))
- into active_count,paused_count from app.telegram_extraction_jobs j join app.telegram_history_chats c on c.id=j.chat_id
- where j.status in('queued','waiting','leased');
+ select count(*) into active_count from app.telegram_extraction_jobs j join app.telegram_history_chats c on c.id=j.chat_id
+ where j.status in('queued','waiting','leased') and
+ (c.extraction_enabled or (j.status='leased' and j.lease_expires_at>clock_timestamp()));
+ -- A stopped connected chat is paused even before its next message arrives.
+ select count(*) into paused_count from app.telegram_history_chats c
+ where not c.extraction_enabled and c.removal_state='none' and
+ (c.selected or exists(select 1 from app.telegram_history_jobs h where h.chat_id=c.id));
  r:=jsonb_set(r,'{counts}',(r->'counts')||jsonb_build_object('active',active_count,'paused',paused_count));
  end if;
  if r ? 'jobs' then

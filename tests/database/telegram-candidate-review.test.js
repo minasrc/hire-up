@@ -147,6 +147,9 @@ test('Telegram proposals create candidates without CVs, update exact matches, fe
     assert.equal(history.chats[0].import.status, 'paused');
     assert.equal((await telegramHistoryRecentStatus(...args, { view: 'available' })).chats.length, 0, 'paused chats remain connected');
     assert.equal(history.chats[0].extractionEnabled, false, 'Pause stops candidate processing as well as synchronization');
+    const idlePaused = await telegramExtractionStatus(...args);
+    assert.equal(idlePaused.counts.active, 0);
+    assert.equal(idlePaused.counts.paused, 1, 'a stopped chat stays visibly paused without queued work');
     const pausedJob = randomUUID();
     psql(db, `insert into app.telegram_extraction_jobs(id,organization_id,owner_user_id,chat_id,source,source_digest,message_count) values('${pausedJob}','${org}','${AUTHZ_ID.USER_ADMIN2}','${chat}','{"chat":{},"messages":[]}',sha256(convert_to('paused-test','UTF8')),0);`);
     let activity = await telegramExtractionStatus(...args);
