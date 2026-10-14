@@ -41,7 +41,8 @@ export function telegramHistoryAction(pool, identity, org, input) {
     const action = historyStaffAction(input);
     return staff(pool, identity, org, async ({ client }) => {
         const modern = (await client.query("select to_regprocedure('app.telegram_candidate_start_v1(jsonb)') is not null as ready")).rows[0].ready;
-        const result = (await client.query(action.action === 'start' && modern ? 'select app.telegram_candidate_start_v1($1::jsonb) as result' : 'select app.telegram_history_action_v1($1::jsonb) as result', [JSON.stringify(action)])).rows[0].result;
+        const coordinatedPause = action.action === 'pause' && (await client.query("select to_regprocedure('app.telegram_candidate_pause_v1(jsonb)') is not null as ready")).rows[0].ready;
+        const result = (await client.query(coordinatedPause ? 'select app.telegram_candidate_pause_v1($1::jsonb) as result' : action.action === 'start' && modern ? 'select app.telegram_candidate_start_v1($1::jsonb) as result' : 'select app.telegram_history_action_v1($1::jsonb) as result', [JSON.stringify(action)])).rows[0].result;
         if (action.action === 'resume' && modern) await client.query('select app.telegram_extraction_action_v1($1::jsonb)', [JSON.stringify({ action: 'enqueue', chatIds: [action.chatId] })]);
         return result;
     });

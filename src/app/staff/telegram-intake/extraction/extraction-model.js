@@ -1,4 +1,5 @@
 export function extractionStatus(job) {
+    if (job.processingPaused === true || (job.extractionEnabled === false && ['queued', 'waiting'].includes(job.status))) return 'Paused';
     if (job.status === 'completed') {
         const retention = job.sourceRetention;
         const noHolds = retention?.holds && retention.holds.openDrafts + retention.holds.pendingProposals + retention.holds.activeCv === 0;

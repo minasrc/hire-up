@@ -212,10 +212,10 @@ test('Candidate intake has a compact chat picker and approve/edit/reject review 
             const action = req.postDataJSON();
             if (action.action === 'start') {
                 started = action; await new Promise(resolve => { releaseStart = resolve; });
-                for (const selected of action.chats) Object.assign(chats.find(chat => chat.id === selected.chatId), { selected: true, historyCompleted: true, import: { status: 'completed', errorCode: null }, version: 2 });
+                for (const selected of action.chats) Object.assign(chats.find(chat => chat.id === selected.chatId), { selected: true, extractionEnabled: true, historyCompleted: true, import: { status: 'completed', errorCode: null }, version: 2 });
             } else {
                 const chat = chats.find(chat => chat.id === action.chatId);
-                chat.import.status = action.action === 'pause' ? 'paused' : 'completed'; chat.version += 1;
+                chat.import.status = action.action === 'pause' ? 'paused' : 'completed'; chat.extractionEnabled = action.action !== 'pause'; chat.version += 1;
             }
             return route.fulfill({ json: { ok: true } });
         }
@@ -272,6 +272,43 @@ test('Candidate intake has a compact chat picker and approve/edit/reject review 
     await page.setViewportSize({ width: 390, height: 844 });
     await page.screenshot({ path: join(root,'test-results/candidate-flow-mobile.png'), fullPage: true });
     assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth), true, 'mobile has no horizontal overflow');
+    // A legacy chat can keep syncing while extraction is disabled. The row,
+    // activity banner, and resume action must all reflect that same state.
+    let processingResume;
+    chats[0].extractionEnabled = false;
+    await page.route('**/api/staff/telegram-extraction*', async route => {
+        if (route.request().method() === 'POST') {
+            processingResume = route.request().postDataJSON();
+            assert.equal(processingResume.action, 'setExtraction');
+            assert.equal(processingResume.enabled, true);
+            for (const selected of processingResume.chats) {
+                const chat = chats.find(item => item.id === selected.chatId);
+                assert.equal(selected.expectedVersion, chat.version);
+                chat.extractionEnabled = true; chat.version += 1;
+            }
+            return route.fulfill({ json: { ok: true } });
+        }
+        const paused = chats.filter(chat => chat.selected && !chat.extractionEnabled).length;
+        return route.fulfill({ json: { counts: { active: 0, paused, queued: paused, leased: 0, waiting: 0, failed: 0, completed: 0, needsReview: 0 }, jobs: [] } });
+    });
+    await page.reload();
+    await page.getByRole('tab', { name: 'Connected (2)', exact: true }).click();
+    const activity = page.getByRole('status', { name: 'Telegram activity' });
+    await expect(activity).toContainText('Processing paused');
+    await expect(activity.getByRole('progressbar')).toHaveCount(0);
+    await expect(page.getByText('Processing paused', { exact: true })).toBeVisible();
+    await expect(page.getByRole('button', { name: 'Resume Chat 1', exact: true })).toBeVisible();
+    await expect(page.getByRole('button', { name: 'Pause Chat 1', exact: true })).toHaveCount(0);
+    await page.screenshot({ path: join(root, 'test-results/candidate-flow-processing-paused.png'), fullPage: true });
+    await activity.getByRole('link', { name: 'View paused chats', exact: true }).click();
+    await expect(page.getByRole('tab', { name: 'Connected (2)', exact: true })).toHaveAttribute('aria-selected', 'true');
+    const processingResponse = page.waitForResponse(response => response.url().includes('/api/staff/telegram-extraction') && response.request().method() === 'POST');
+    await page.getByRole('button', { name: 'Resume Chat 1', exact: true }).click();
+    assert.equal((await processingResponse).status(), 200);
+    await expect(page.getByRole('button', { name: 'Pause Chat 1', exact: true })).toBeVisible();
+    assert.equal(chats[0].import.status, 'completed', 'resume extraction does not restart an already synced history import');
+    await expect(activity).not.toContainText('Processing paused');
+    await expect(activity.getByRole('progressbar')).toHaveCount(0);
     let meaningQuery;
     let meaningCoverage = { eligible: 4, indexed: 1, fullyIndexed: 1, pending: 2, failed: 1 };
     let emptyMeaningResults = false;
