@@ -178,6 +178,9 @@ test('Telegram history UI discovers, selects and resumes private full-history im
         await expect(page.getByRole('checkbox', { name: /^Select Synthetic/ })).toHaveCount(50);
         assert.equal(rejectedCursor, true);
         await page.unroute('**/api/staff/telegram-history?*');
+        // Tied dates are ordered by random IDs; a named chat may be on either page.
+        await page.getByRole('textbox', { name: 'Search chats', exact: true }).fill('Synthetic chat 01');
+        await page.getByRole('button', { name: 'Search chats', exact: true }).click();
         await page.getByRole('checkbox', { name: 'Select Synthetic chat 01', exact: true }).check();
         const started = page.waitForResponse(response => response.url() === staffURL && response.request().postDataJSON()?.action === 'start');
         await page.getByRole('button', { name: 'Start', exact: true }).click();

@@ -201,7 +201,7 @@ test('Candidate intake has a compact chat picker and approve/edit/reject review 
     await page.getByRole('link', { name: 'Telegram', exact: true }).first().click();
     await expect(page).toHaveURL(`${baseURL}/staff/telegram-intake`);
     await expect(page.getByRole('heading', { name: 'Candidate proposals', exact: true })).toBeVisible();
-    const chats = Array.from({ length: 60 }, (_, index) => ({ id: `a0000000-0000-4000-8000-${String(index + 1).padStart(12, '0')}`, peer: { kind: 'user', id: String(index+1) }, title: `Chat ${index+1}`, username: null, selected: false, version: 1, extractionEnabled: false, extractionPending: false, import: null }));
+    const chats = Array.from({ length: 60 }, (_, index) => ({ id: `a0000000-0000-4000-8000-${String(index + 1).padStart(12, '0')}`, peer: { kind: 'user', id: String(index+1) }, title: `Chat ${index+1}`, username: null, excluded: false, selected: false, version: 1, extractionEnabled: false, extractionPending: false, import: null }));
     let started;
     let releaseStart;
     let releaseHistory;
@@ -210,7 +210,10 @@ test('Candidate intake has a compact chat picker and approve/edit/reject review 
         const req = route.request();
         if (req.method() === 'POST') {
             const action = req.postDataJSON();
-            if (action.action === 'start') {
+            if (['exclude','excludeMany','restore'].includes(action.action)) {
+                const rows=action.action==='excludeMany' ? action.chats : [action];
+                for (const row of rows) { const chat=chats.find(chat=>chat.id===row.chatId); assert.equal(chat.version,row.expectedVersion); chat.excluded=action.action!=='restore'; chat.version+=1; }
+            } else if (action.action === 'start') {
                 started = action; await new Promise(resolve => { releaseStart = resolve; });
                 for (const selected of action.chats) Object.assign(chats.find(chat => chat.id === selected.chatId), { selected: true, extractionEnabled: true, historyCompleted: true, import: { status: 'completed', errorCode: null }, version: 2 });
             } else {
@@ -221,12 +224,13 @@ test('Candidate intake has a compact chat picker and approve/edit/reject review 
         }
         await historyReady;
         const params = new URL(req.url()).searchParams;
-        const available = chats.filter(chat => !chat.selected);
-        const connected = chats.filter(chat => chat.selected);
-        const group = params.get('view') === 'connected' ? connected : available;
+        const available = chats.filter(chat => !chat.excluded && !chat.selected);
+        const connected = chats.filter(chat => !chat.excluded && chat.selected);
+        const excluded=chats.filter(chat=>chat.excluded);
+        const group = params.get('view') === 'excluded' ? excluded : params.get('view') === 'connected' ? connected : available;
         const filtered = params.get('q') ? group.filter(chat => chat.title === params.get('q')) : group;
         const rows = params.get('view') === 'active' ? [] : params.get('after') ? filtered.slice(50) : filtered.slice(0, 50);
-        return route.fulfill({ json: { connection: { id: 'b0000000-0000-4000-8000-000000000001', generation: 1, status: 'connected', accountUserId: '123' }, account: { id: 'c0000000-0000-4000-8000-000000000001', accountUserId: '123' }, canImport: true, blockedReason: null, discovery: { status: 'completed', jobs: [] }, totals: { chats: 60, selected: connected.length, available: available.length, connected: connected.length, messages: 0, bytes: 0, maxMessages: 100000, maxBytes: 10000000 }, chats: rows, nextCursor: !params.get('after') && filtered.length > 50 ? 'next-page' : null } });
+        return route.fulfill({ json: { connection: { id: 'b0000000-0000-4000-8000-000000000001', generation: 1, status: 'connected', accountUserId: '123' }, account: { id: 'c0000000-0000-4000-8000-000000000001', accountUserId: '123' }, canImport: true, blockedReason: null, discovery: { status: 'completed', jobs: [] }, totals: { chats: 60-excluded.length, excluded:excluded.length, selected: connected.length, available: available.length, connected: connected.length, messages: 0, bytes: 0, maxMessages: 100000, maxBytes: 10000000 }, chats: rows, nextCursor: !params.get('after') && filtered.length > 50 ? 'next-page' : null } });
     });
     await page.goto(`${baseURL}/staff/telegram-intake/chats`);
     await expect(page.getByRole('status', { name: 'Loading Telegram chats' })).toBeVisible();
@@ -236,6 +240,19 @@ test('Candidate intake has a compact chat picker and approve/edit/reject review 
     await expect(page.getByRole('heading', { name: 'Pair your Mac', exact: true })).not.toBeVisible();
     await expect(page.getByRole('heading', { name: 'Choose chats', exact: true })).toBeVisible();
     await expect(page.getByRole('list', { name: 'Telegram onboarding steps' })).not.toBeVisible();
+    await page.getByRole('button', { name: 'Exclude Chat 2', exact: true }).click();
+    await expect(page.getByRole('checkbox', { name: 'Select Chat 2', exact: true })).toHaveCount(0);
+    await expect(page.getByRole('tab', { name: 'Excluded (1)', exact: true })).toBeVisible();
+    await page.reload();
+    await expect(page.getByRole('checkbox', { name: 'Select Chat 2', exact: true })).toHaveCount(0);
+    await page.getByRole('tab', { name: 'Excluded (1)', exact: true }).click();
+    await expect(page.getByRole('button', { name: 'Restore Chat 2', exact: true })).toBeVisible();
+    await expect(page.getByRole('tab', { name: 'Excluded (1)', exact: true })).toHaveAttribute('aria-selected', 'true');
+    await page.screenshot({path:join(root,'test-results/telegram-excluded-chats.png'),fullPage:true});
+    await page.getByRole('button', { name: 'Restore Chat 2', exact: true }).click();
+    await expect(page.getByRole('tab', { name: 'Excluded (0)', exact: true })).toBeVisible();
+    await page.getByRole('tab', { name: 'Available (60)', exact: true }).click();
+    await expect(page.getByRole('checkbox', { name: 'Select Chat 2', exact: true })).toBeVisible();
     await page.getByRole('checkbox', { name: 'Select Chat 1', exact: true }).check();
     await page.getByRole('button', { name: 'More chats' }).click();
     await page.getByRole('checkbox', { name: 'Select Chat 51', exact: true }).check();

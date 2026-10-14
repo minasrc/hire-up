@@ -48,3 +48,13 @@ test('sync cursors retain decimal checkpoints including empty-history zero, with
     for (const afterMessageId of [0, null, '-1', '00', '2147483648']) assert.throws(() => historyCursor({ beforeMessageId: null, upperMessageId: null, afterMessageId }, 'history'));
     assert.throws(() => historyCursor({ beforeMessageId: null, upperMessageId: null, afterMessageId: '0', secret: 'private' }, 'history'));
 });
+
+test('exclude and restore use versioned private chat identifiers and bounded batches', () => {
+ const chat={chatId:randomUUID(),expectedVersion:2};
+ assert.deepEqual(historyStaffAction({action:'exclude',...chat}),{action:'exclude',...chat});
+ assert.deepEqual(historyStaffAction({action:'restore',...chat}),{action:'restore',...chat});
+ assert.deepEqual(historyStaffAction({action:'excludeMany',chats:[chat]}),{action:'excludeMany',chats:[chat]});
+ assert.throws(()=>historyStaffAction({action:'excludeMany',chats:[chat,chat]}));
+ assert.throws(()=>historyStaffAction({action:'excludeMany',chats:[]}));
+ assert.throws(()=>historyStaffAction({action:'exclude',...chat,expectedVersion:0}));
+});

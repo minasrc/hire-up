@@ -63,14 +63,15 @@ export function historyWorkerInput(action, input) {
 }
 export function historyStaffAction(input) {
     if (input?.action === 'discover') { exact(input, ['action']); return input; }
-    if (['selectMany', 'start'].includes(input?.action)) {
-        exact(input, ['action', 'chats', 'selected']);
-        if (!Array.isArray(input.chats) || !input.chats.length || input.chats.length > 50 || (input.action !== 'start' && typeof input.selected !== 'boolean')) fail('chats');
+    if (['selectMany', 'start', 'excludeMany'].includes(input?.action)) {
+        exact(input, input.action === 'excludeMany' ? ['action', 'chats'] : ['action', 'chats', 'selected']);
+        if (!Array.isArray(input.chats) || !input.chats.length || input.chats.length > 50 || (['selectMany'].includes(input.action) && typeof input.selected !== 'boolean')) fail('chats');
         const chats = input.chats.map(c => { exact(c, ['chatId', 'expectedVersion']); return { chatId: assertUuid(c.chatId, 'chatId'), expectedVersion: number(c.expectedVersion, 1, Number.MAX_SAFE_INTEGER, 'expectedVersion') }; });
         if (new Set(chats.map(c => c.chatId)).size !== chats.length) fail('chats');
+        if (input.action === 'excludeMany') return { action: input.action, chats };
         return { action: input.action, chats, selected: input.action === 'start' ? true : input.selected };
     }
     exact(input, input?.action === 'select' ? ['action', 'chatId', 'expectedVersion', 'selected'] : ['action', 'chatId', 'expectedVersion']);
-    if (!['select', 'pause', 'resume', 'cancel'].includes(input.action) || (input.action === 'select' && (input.action !== 'start' && typeof input.selected !== 'boolean'))) fail('action');
+    if (!['select', 'pause', 'resume', 'cancel', 'exclude', 'restore'].includes(input.action) || (input.action === 'select' && (['selectMany'].includes(input.action) && typeof input.selected !== 'boolean'))) fail('action');
     return { action: input.action, chatId: assertUuid(input.chatId, 'chatId'), expectedVersion: number(input.expectedVersion, 1, Number.MAX_SAFE_INTEGER, 'expectedVersion'), ...(input.action === 'select' ? { selected: input.selected } : {}) };
 }

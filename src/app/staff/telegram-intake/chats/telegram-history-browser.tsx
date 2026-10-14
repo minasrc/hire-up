@@ -4,7 +4,7 @@ import { staffWorkspaceFetch } from '@/lib/staff-workspace-fetch';
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 import Link from 'next/link';
-import { CheckCircle2, LoaderCircle, MessageSquare, RefreshCw, Search } from 'lucide-react';
+import { EyeOff, CheckCircle2, LoaderCircle, MessageSquare, RefreshCw, Search } from 'lucide-react';
 import { Button } from '@/components/staff-ui/button';
 import { InitialsAvatar } from '@/components/staff-preview/shared';
 import { Badge } from '@/components/staff-ui/badge';
@@ -18,12 +18,12 @@ import { TelegramConnectionBrowser } from '../connect/telegram-connection-browse
 import { chatDisplayTitle, discoveryPresentation, historyPollingDelay } from './history-model';
 
 type Job = { id?: string; jobId?: string; status: string; importedMessages?: number; importedBytes?: number; errorCode: string | null; retryAt: string | null };
-type Chat = { id: string; peer: { kind: string; id: string }; title: string; lastMessageAt?: string | null; username: string | null; selected: boolean; historyCompleted?: boolean; progress?: { lastProgressAt: string | null; oldestImportedAt: string | null; newestImportedAt: string | null }; removalState?: 'none' | 'pending' | 'device_pending' | 'completed'; removal?: RemovalReceipt | null; version: number; extractionEnabled: boolean; extractionPending: boolean; import: Job | null; sync?: { enabled: boolean; status: string; lastSyncedAt: string | null; nextSyncAt: string | null; checkpoint: string } };
+type Chat = { id: string; peer: { kind: string; id: string }; title: string; lastMessageAt?: string | null; username: string | null; excluded?: boolean; selected: boolean; historyCompleted?: boolean; progress?: { lastProgressAt: string | null; oldestImportedAt: string | null; newestImportedAt: string | null }; removalState?: 'none' | 'pending' | 'device_pending' | 'completed'; removal?: RemovalReceipt | null; version: number; extractionEnabled: boolean; extractionPending: boolean; import: Job | null; sync?: { enabled: boolean; status: string; lastSyncedAt: string | null; nextSyncAt: string | null; checkpoint: string } };
 type Snapshot = {
     connection: { id: string; generation: number; status: string; accountUserId: string | null } | null;
     account: { id: string; accountUserId: string } | null; canImport: boolean; blockedReason: string | null;
     discovery: { status: string; jobs: Job[] };
-    totals: { chats: number; selected: number; messages: number; bytes: number; maxMessages: number; maxBytes: number; available?: number; connected?: number };
+    totals: { chats: number; selected: number; messages: number; bytes: number; maxMessages: number; maxBytes: number; available?: number; connected?: number; excluded?: number };
     chats: Chat[]; nextCursor: string | null;
 };
 
@@ -47,7 +47,7 @@ async function request(url: string, init?: RequestInit) {
 
 export function TelegramHistoryBrowser({ workspaceId, hostedEnabled = false, onboarding = false, initialGroup = 'available' }: { workspaceId: string; hostedEnabled?: boolean; onboarding?: boolean; initialGroup?: 'available' | 'connected' }) {
     const [snapshot, setSnapshot] = useState<Snapshot | null>(null);
-    const [view, setView] = useState<'available' | 'connected'>(initialGroup);
+    const [view, setView] = useState<'available' | 'connected' | 'excluded'>(initialGroup);
     const [search, setSearch] = useState('');
     const [query, setQuery] = useState('');
     const [cursors, setCursors] = useState<string[]>(['']);
@@ -72,8 +72,8 @@ export function TelegramHistoryBrowser({ workspaceId, hostedEnabled = false, onb
     const delay = historyPollingDelay(snapshot);
     const blocked = !snapshot?.canImport || busy || loading || denied;
     const discovery = discoveryPresentation(snapshot);
-    const showChats = discovery.hasChats;
-    const visibleChats = snapshot?.chats.filter(chat => view === 'available' ? !chat.selected && !chat.import && (!chat.removalState || chat.removalState === 'none') : chat.selected || Boolean(chat.import) || Boolean(chat.removalState && chat.removalState !== 'none')) ?? [];
+    const showChats = discovery.hasChats || (view === 'excluded' && Boolean(snapshot?.chats.length));
+    const visibleChats = snapshot?.chats.filter(chat => view === 'excluded' ? chat.excluded : !chat.excluded && (view === 'available' ? !chat.selected && !chat.import && (!chat.removalState || chat.removalState === 'none') : chat.selected || Boolean(chat.import) || Boolean(chat.removalState && chat.removalState !== 'none'))) ?? [];
     const eligibleChats = visibleChats.filter(chat => !chat.selected && !chat.import && (!chat.removalState || chat.removalState === 'none'));
     const selectedRows = useRef(new Map<string, Chat>());
     const initialGroupChosen = useRef(false);
@@ -205,7 +205,7 @@ export function TelegramHistoryBrowser({ workspaceId, hostedEnabled = false, onb
     }
     useEffect(() => {
         const account = snapshot?.connection?.accountUserId;
-        if (!snapshot?.canImport || !account || snapshot.totals.chats || !['idle', 'not_started'].includes(snapshot.discovery.status) || busy || loading || denied || autoDiscovery.current === account) return;
+        if (!snapshot?.canImport || !account || (snapshot.totals.chats || snapshot.totals.excluded) || !['idle', 'not_started'].includes(snapshot.discovery.status) || busy || loading || denied || autoDiscovery.current === account) return;
         autoDiscovery.current = account;
         void act({ action: 'discover' }, 'Loading your chats…');
         // One discovery attempt per connected account; retries remain explicit.
@@ -227,8 +227,8 @@ export function TelegramHistoryBrowser({ workspaceId, hostedEnabled = false, onb
         {snapshot?.canImport || starting ? <ProcessingStatus key={importRevision} starting={starting} imported={imported} reviewLink onProposalCount={setProposalCount} /> : null}
         {snapshot?.canImport ? <Tabs value={view} onValueChange={value => {
             if (busy) return; currentRead.current?.abort(); requestId.current += 1;
-            setView(value as 'available' | 'connected'); setMarked([]); setCursors(['']); setLoading(true);
-        }} aria-label="Chat groups"><TabsList><TabsTrigger value="available">Available ({snapshot.totals.available ?? snapshot.totals.chats - snapshot.totals.selected})</TabsTrigger><TabsTrigger value="connected">Connected ({snapshot.totals.connected ?? snapshot.totals.selected})</TabsTrigger></TabsList></Tabs> : null}
+            setView(value as 'available' | 'connected' | 'excluded'); setMarked([]); setCursors(['']); setLoading(true);
+        }} aria-label="Chat groups"><TabsList><TabsTrigger value="available">Available ({snapshot.totals.available ?? snapshot.totals.chats - snapshot.totals.selected})</TabsTrigger><TabsTrigger value="connected">Connected ({snapshot.totals.connected ?? snapshot.totals.selected})</TabsTrigger><TabsTrigger value="excluded">Excluded ({snapshot.totals.excluded ?? 0})</TabsTrigger></TabsList></Tabs> : null}
         {snapshot?.canImport ? <Card className="overflow-hidden">
             <div className="flex items-center justify-between gap-3 border-b p-4"><h2 ref={chatPanel} tabIndex={-1} className="scroll-mt-24 font-semibold">Your chats</h2><Button ref={discoveryPanel} variant="ghost" size="sm" disabled={blocked || snapshot.discovery.status === 'active'} onClick={() => void act({ action: 'discover' }, 'Updating chats…')} aria-label="Refresh chat list"><RefreshCw className={snapshot.discovery.status === 'active' ? 'motion-safe:animate-spin' : ''} /></Button></div>
             <form className="flex items-center gap-2 p-4" onSubmit={event => { event.preventDefault(); setQuery(search.trim()); setCursors(['']); setLoading(true); }}>
@@ -236,7 +236,7 @@ export function TelegramHistoryBrowser({ workspaceId, hostedEnabled = false, onb
             </form>
             {view === 'available' && eligibleChats.length ? <label className="flex cursor-pointer items-center gap-3 border-b px-4 pb-3 text-sm"><input type="checkbox" checked={allMarked} disabled={busy || loading} onChange={event => mark(eligibleChats.map(chat => chat.id), event.target.checked)} className="h-4 w-4 accent-primary" />Select this page</label> : null}
             <div aria-busy={loading || busy} className="divide-y">
-                {!showChats || !visibleChats.length ? <div className="flex flex-col items-center gap-3 p-10 text-center"><MessageSquare className="h-7 w-7 text-muted-foreground" /><p role="status" className="text-sm text-muted-foreground">{snapshot.discovery.status === 'active' || loading ? 'Loading your chats…' : query ? 'No matching chats' : view === 'connected' ? 'No connected chats yet' : 'No new chats available'}</p>{snapshot.discovery.status !== 'active' && !loading && !query && snapshot.totals.chats === 0 ? <Button onClick={() => void act({ action: 'discover' }, 'Loading your chats…')} disabled={blocked}>Load chats</Button> : null}</div> : visibleChats.map(chat => {
+                {!showChats || !visibleChats.length ? <div className="flex flex-col items-center gap-3 p-10 text-center"><MessageSquare className="h-7 w-7 text-muted-foreground" /><p role="status" className="text-sm text-muted-foreground">{snapshot.discovery.status === 'active' || loading ? 'Loading your chats…' : query ? 'No matching chats' : view === 'excluded' ? 'No excluded chats' : view === 'connected' ? 'No connected chats yet' : 'No new chats available'}</p>{snapshot.discovery.status !== 'active' && !loading && !query && snapshot.totals.chats === 0 && !snapshot.totals.excluded ? <Button onClick={() => void act({ action: 'discover' }, 'Loading your chats…')} disabled={blocked}>Load chats</Button> : null}</div> : visibleChats.map(chat => {
                     const removing = chat.removalState === 'pending' || chat.removalState === 'device_pending';
                     const removed = chat.removalState === 'completed';
                     const historyPaused = ['paused', 'cancelled', 'capacity_paused', 'failed'].includes(chat.import?.status ?? '') || !chat.selected;
@@ -245,13 +245,14 @@ export function TelegramHistoryBrowser({ workspaceId, hostedEnabled = false, onb
                     const status = removing ? 'Removing' : removed ? 'Removed' : chat.import?.errorCode || ['failed', 'capacity_paused'].includes(chat.import?.status ?? '') ? 'Needs attention' : historyPaused ? 'Paused' : processingPaused ? 'Processing paused' : ['queued', 'leased', 'waiting'].includes(chat.import?.status ?? '') ? 'Syncing' : chat.historyCompleted || chat.import?.status === 'completed' ? 'Synced' : 'Syncing';
                     return <div key={chat.id} className="flex flex-wrap items-center gap-3 px-4 py-3 hover:bg-hover">
                         {view === 'available' ? <label className="flex min-w-0 flex-1 cursor-pointer items-center gap-3"><input type="checkbox" aria-label={`Select ${chatDisplayTitle(chat, snapshot.account?.accountUserId)}`} checked={marked.includes(chat.id)} disabled={busy || loading || chat.selected || Boolean(chat.import) || (marked.length >= 50 && !marked.includes(chat.id))} onChange={event => mark([chat.id], event.target.checked)} className="h-4 w-4 shrink-0 accent-primary" /><InitialsAvatar name={chatDisplayTitle(chat, snapshot.account?.accountUserId)} /><span className="truncate text-sm font-medium">{chatDisplayTitle(chat, snapshot.account?.accountUserId)}</span></label>
-                            : <><InitialsAvatar name={chatDisplayTitle(chat, snapshot.account?.accountUserId)} /><div className="flex min-w-0 flex-1 flex-col gap-1 sm:flex-row sm:items-center sm:gap-3"><span className="truncate text-sm font-medium sm:flex-1">{chatDisplayTitle(chat, snapshot.account?.accountUserId)}</span><Badge variant="secondary" className="w-fit max-w-full whitespace-normal sm:shrink-0 sm:whitespace-nowrap">{status}</Badge></div></>}
+                            : <><InitialsAvatar name={chatDisplayTitle(chat, snapshot.account?.accountUserId)} /><div className="flex min-w-0 flex-1 flex-col gap-1 sm:flex-row sm:items-center sm:gap-3"><span className="truncate text-sm font-medium sm:flex-1">{chatDisplayTitle(chat, snapshot.account?.accountUserId)}</span>{view !== 'excluded' ? <Badge variant="secondary" className="w-fit max-w-full whitespace-normal sm:shrink-0 sm:whitespace-nowrap">{status}</Badge> : null}</div></>}
+                        <Button size="sm" variant="ghost" title={view === 'excluded' ? 'Restore chat' : 'Exclude chat'} aria-label={`${view === 'excluded' ? 'Restore' : 'Exclude'} ${chatDisplayTitle(chat, snapshot.account?.accountUserId)}`} disabled={blocked || removing} onClick={() => void act({ action: view === 'excluded' ? 'restore' : 'exclude', chatId: chat.id, expectedVersion: chat.version }, view === 'excluded' ? 'Chat restored.' : 'Chat excluded.', true)}>{view === 'excluded' ? 'Restore' : <EyeOff className="h-4 w-4" aria-hidden="true" />}</Button>
                         {view === 'connected' ? <div className="flex items-center gap-2">{!removing && !removed ? <Button size="sm" variant="outline" aria-label={`${paused ? 'Resume' : 'Pause'} ${chatDisplayTitle(chat, snapshot.account?.accountUserId)}`} disabled={blocked} onClick={() => void (processingPaused && !historyPaused ? act({ action: 'setExtraction', chats: [{ chatId: chat.id, expectedVersion: chat.version }], enabled: true }, 'Processing resumed.', false, '/api/staff/telegram-extraction') : act({ action: paused ? 'resume' : 'pause', chatId: chat.id, expectedVersion: chat.version }, paused ? 'Chat resumed.' : 'Chat paused.'))}>{paused ? 'Resume' : 'Pause'}</Button> : null}<ChatRemoval compact chatId={chat.id} title={chat.title} state={chat.removalState} receipt={chat.removal} disabled={busy || loading} accessBlocked={denied} connected={Boolean(snapshot.canImport)} onChanged={refreshStatus} onDenied={denyRemovalAccess} /></div> : null}
                     </div>;
                 })}
             </div>
             {snapshot.nextCursor || cursors.length > 1 ? <div className="flex justify-between border-t p-3"><Button size="sm" variant="ghost" disabled={loading || busy || cursors.length === 1} onClick={() => { setCursors(stack => stack.slice(0, -1)); setLoading(true); }}>Previous</Button><Button size="sm" variant="ghost" disabled={loading || busy || !snapshot.nextCursor} onClick={() => { setCursors(stack => [...stack, snapshot.nextCursor!]); setLoading(true); }}>More chats</Button></div> : null}
-            {view === 'available' && ((snapshot.totals.available ?? snapshot.totals.chats - snapshot.totals.selected) > 0 || marked.length > 0) ? <div className="sticky bottom-0 flex items-center justify-between gap-3 border-t bg-card p-4"><span className="text-sm text-muted-foreground" role="status">{starting ? 'Starting import…' : marked.length ? `${marked.length} selected` : 'Select chats to start'}{marked.length === 50 ? ' · Maximum 50 per import' : ''}</span><Button disabled={blocked || !marked.length} onClick={() => void start()}>{starting ? 'Starting…' : loading ? 'Loading…' : 'Start'}</Button></div> : null}
+            {view === 'available' && ((snapshot.totals.available ?? snapshot.totals.chats - snapshot.totals.selected) > 0 || marked.length > 0) ? <div className="sticky bottom-0 flex items-center justify-between gap-3 border-t bg-card p-4"><span className="text-sm text-muted-foreground" role="status">{starting ? 'Starting import…' : marked.length ? `${marked.length} selected` : 'Select chats to start'}{marked.length === 50 ? ' · Maximum 50 per import' : ''}</span><div className="flex gap-2"><Button variant="ghost" disabled={blocked || !marked.length} onClick={() => void act({ action: 'excludeMany', chats: marked.map(id => selectedRows.current.get(id)).filter((chat): chat is Chat => Boolean(chat)).map(chat => ({ chatId: chat.id, expectedVersion: chat.version })) }, 'Chats excluded.', true)}>Exclude</Button><Button disabled={blocked || !marked.length} onClick={() => void start()}>{starting ? 'Starting…' : loading ? 'Loading…' : 'Start'}</Button></div></div> : null}
         </Card> : null}
         {notice ? <p role="status" className="text-sm text-muted-foreground">{notice}</p> : null}
         {snapshot && snapshot.totals.messages >= snapshot.totals.maxMessages ? <p role="alert" className="text-sm">Storage is full. Review pending proposals to release their sources.</p> : null}
