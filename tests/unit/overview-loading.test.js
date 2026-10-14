@@ -16,14 +16,18 @@ function subject({ capabilities = { tasks: true, writeTasks: true }, summary = {
     const imports = {
         'react/jsx-runtime': jsxRuntime,
         react: { Suspense: 'Suspense' },
+        'next/link': { default: 'Link', __esModule: true },
+        'lucide-react': { ArrowRight: 'ArrowRight', Send: 'Send' },
+        '@/lib/telegram-intake-operations': { listTelegramDrafts: async () => ({ drafts: [], counts: { all: 0 } }) },
+        '@/lib/pipeline-operations': { listApplicationDirectory: async () => ({ rows: [], total: 0 }) },
         '@/components/staff-ui/card': { Card: 'Card', CardContent: 'CardContent' },
         '@/components/staff-preview/shared': { PageHeader: 'PageHeader' },
         '@/lib/staff-gate.server': { requireStaffVerified: async () => { calls.push('gate'); if (denied) throw new Error('denied'); } },
         '@/lib/workspace.server': {
-            loadStaffCapabilities: async () => { calls.push('capabilities'); return { capabilities }; },
+            loadStaffCapabilities: async () => { calls.push('capabilities'); return { capabilities, gate: { stage: 'verified' } }; },
             loadStaffWorkspace: async () => { calls.push('summary'); return readSummary ? readSummary() : { summary }; },
         },
-        './overview-sections': { ClientsHiring: 'ClientsHiring', OverviewMetrics: 'OverviewMetrics', ReviewQueue: 'ReviewQueue' },
+        './overview-sections': { ClientsHiring: 'ClientsHiring', OverviewMetrics: 'OverviewMetrics', ApplicationReviewTasks: 'ApplicationReviewTasks', overviewReviewLinkClass: '' },
         './staff-todo-list': { StaffTodoList: 'StaffTodoList' },
         './summary-retry': { SummaryRetry: 'SummaryRetry' },
     };
@@ -36,7 +40,7 @@ async function sections(page) {
     const tasks = all.find(node => node.type.name === 'OverviewTasks');
     assert.ok(tasks, 'tasks must be an independent server component');
     const summary = all.filter(node => node.type.name === 'OverviewSection');
-    assert.equal(summary.length, 3);
+    assert.equal(summary.length, 2);
     const taskBoundary = all.find(node => node.type === 'Suspense' && node.props.children === tasks);
     assert.ok(taskBoundary, 'task rendering must not sit inside a dashboard suspense boundary');
     return { tasks, summary };

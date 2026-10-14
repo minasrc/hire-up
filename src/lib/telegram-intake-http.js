@@ -36,6 +36,8 @@ export function telegramErrorResponse(error) {
     if (error instanceof ClientJobContractError) return telegramJson({ error: 'Check the highlighted fields.', fields: error.fieldErrors }, error.code === 'DRAFT_INCOMPLETE' ? 422 : 400);
     const status = { FORBIDDEN: 403, UNAUTHORIZED: 401, '42501': 403, P0002: 404, '40001': 409, '23505': 409, '22023': 400, '23514': 422 }[error?.code];
     if (status) return telegramJson({ error: status === 409 ? 'The draft changed. Refresh before retrying.' : 'Operation rejected.', code: error.code }, status);
-    // Never return/log errors containing Telegram text, worker tokens or SQL parameters.
+    // Only a bounded error code is logged; never text, tokens or SQL parameters.
+    const code = typeof error?.code === 'string' && /^[A-Z0-9_]{1,40}$/.test(error.code) ? error.code : 'UNKNOWN';
+    console.error('telegram operation failed', { code });
     return telegramJson({ error: 'Temporarily unavailable. Please retry.' }, 503);
 }

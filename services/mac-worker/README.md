@@ -64,7 +64,7 @@ existing private files. Never paste secrets into command arguments or logs.
   "telegram": {"apiId": 12345, "apiHash": "YOUR_TELEGRAM_API_HASH"},
   "provider": {
     "baseUrl": "http://127.0.0.1:8317/v1",
-    "model": "codex-dev",
+    "model": "gpt-6-luna",
     "tokenFile": "./provider.token"
   },
   "embedding": {

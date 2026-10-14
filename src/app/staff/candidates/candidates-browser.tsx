@@ -3,8 +3,9 @@
 import { staffWorkspaceUrl } from '@/lib/staff-workspace-fetch';
 
 import Link from 'next/link';
+import { useSyncExternalStore } from 'react';
 import { useRouter } from 'next/navigation';
-import { FileText, Search, X } from 'lucide-react';
+import { AlertCircle, Clock3, FileText, LoaderCircle, Search, X } from 'lucide-react';
 
 import { Button } from '@/components/staff-ui/button';
 import { Input } from '@/components/staff-ui/input';
@@ -20,9 +21,13 @@ import {
 import {
     type CandidateProfileOptions,
 } from './candidate-profile-dialog';
+import { candidateSearchIntent } from '@/lib/candidate-search-query';
 import { candidateDirectoryQuery } from '@/lib/staff-directory-query';
 import { useDirectoryNavigation } from '../use-directory-navigation';
 import { CandidateUploadDialog } from './candidate-upload-dialog';
+import { searchIndexingStatus } from './search/search-model';
+import { useSearchIndexing } from './use-search-indexing';
+import { useCandidateSearch } from './use-candidate-search';
 import { StaffDate } from '../staff-date';
 
 export interface CandidateRow {
@@ -36,6 +41,10 @@ export interface CandidateRow {
     headline?: string | null;
     location?: string | null;
 }
+
+const subscribeToHydration = () => () => {};
+const clientSnapshot = () => true;
+const serverSnapshot = () => false;
 
 const formatDate = (iso: string) => <StaffDate value={iso} />;
 
@@ -57,6 +66,7 @@ export function CandidatesBrowser({
     profileOptions = null,
     profileUnavailable = false,
     semanticSearchEnabled = false,
+    pendingProposalCount = 0,
 }: {
     candidates: CandidateRow[];
     total: number;
@@ -66,27 +76,32 @@ export function CandidatesBrowser({
     profileOptions?: CandidateProfileOptions | null;
     profileUnavailable?: boolean;
     semanticSearchEnabled?: boolean;
+    pendingProposalCount?: number;
 }) {
     const router = useRouter();
+    const clientReady = useSyncExternalStore(subscribeToHydration, clientSnapshot, serverSnapshot);
     const { filters, update: navigate, pending } = useDirectoryNavigation(
         '/staff/candidates', parseFilters, serializeFilters);
     const query = filters.query;
     const updateQuery = (value: string, debounce = false) =>
         navigate({ query: value, page: 1 }, debounce);
+    const rankedMode = semanticSearchEnabled && profileOptions?.canWrite === true && query.trim().length >= 3 && total === 0 && !candidateSearchIntent(query).experience;
+    const backgroundIndexing = useSearchIndexing(semanticSearchEnabled && profileOptions?.canWrite === true, total);
+    const ranked = useCandidateSearch(query.trim(), rankedMode && !pending, backgroundIndexing.revision);
+    const indexing = searchIndexingStatus(backgroundIndexing.coverage ?? (rankedMode ? ranked.state?.coverage : null));
+    const rows = rankedMode ? ranked.state?.rows ?? [] : candidates;
+    const searching = pending || (rankedMode && (!ranked.state || ranked.state.status === 'searching'));
     const totalPages = Math.max(1, Math.ceil(total / pageSize));
 
     return (
         <div className="flex flex-col gap-6">
             <div className="flex flex-col gap-1.5">
-                <p className="text-[11px] font-semibold tracking-[0.08em] text-accent-foreground uppercase">
-                    Workspace
-                </p>
                 <h1 className="text-[26px] leading-8 font-medium text-foreground">Candidates</h1>
             </div>
 
             <div className="flex flex-wrap items-end gap-3 rounded-lg border border-border bg-card p-4">
                 <div className="flex flex-1 flex-col gap-1.5">
-                    <Label htmlFor="candidate-search">Name/email lookup</Label>
+                    <Label htmlFor="candidate-search" className="sr-only">Search candidates</Label>
                     <div className="relative">
                         <Search
                             className="absolute top-1/2 left-3 h-4 w-4 -translate-y-1/2 text-muted-foreground"
@@ -94,8 +109,9 @@ export function CandidatesBrowser({
                         />
                         <Input
                             id="candidate-search"
+                            disabled={!clientReady}
                             className="pl-9"
-                            placeholder="Search name or email…"
+                            placeholder="Search by name, email, or describe a candidate…"
                             value={query}
                             maxLength={200}
                             onChange={(event) => updateQuery(event.target.value, true)}
@@ -108,7 +124,7 @@ export function CandidatesBrowser({
                         Clear
                     </Button>
                 ) : null}
-                {semanticSearchEnabled && profileOptions?.canWrite === true ? <><Button asChild variant="outline"><Link href="/staff/telegram-intake">Telegram intake</Link></Button><Button asChild variant="outline"><Link href="/staff/candidates/search">Search by meaning</Link></Button></> : null}
+                {pendingProposalCount > 0 && profileOptions?.canWrite === true ? <Button asChild variant="outline"><Link href="/staff/telegram-intake">Review proposals ({pendingProposalCount})</Link></Button> : null}
                 {canReviewDuplicates ? (
                     <Button asChild variant="outline">
                         <Link href="/staff/candidates/duplicates">Review matches</Link>
@@ -129,21 +145,34 @@ export function CandidatesBrowser({
                 </p>
             ) : null}
 
-            <span role="status" className="text-xs text-muted-foreground">
-                {total} candidate{total === 1 ? '' : 's'}{pending ? ' · Updating…' : ''}
-            </span>
+            <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-muted-foreground">
+                <span role="status">
+                    {searching ? <span className="flex items-center gap-2"><LoaderCircle aria-hidden="true" className="h-3.5 w-3.5 motion-safe:animate-spin" />Searching…</span> : rankedMode ? ranked.state?.status === 'unavailable' ? 'Search temporarily unavailable' : ranked.state?.status === 'failed' ? ranked.state.error : `${rows.length} match${rows.length === 1 ? '' : 'es'} · Best matches first` : `${total} candidate${total === 1 ? '' : 's'}`}
+                </span>
+                {indexing ? (
+                    <span role="status" aria-label="Search indexing status" className="flex flex-wrap items-center gap-1.5">
+                        {backgroundIndexing.animated ? <LoaderCircle aria-hidden="true" className="h-3.5 w-3.5 motion-safe:animate-spin" /> : indexing.failed ? <AlertCircle aria-hidden="true" className="h-3.5 w-3.5" /> : <Clock3 aria-hidden="true" className="h-3.5 w-3.5" />}
+                        <span>{indexing.pending ? `${indexing.pending} profile${indexing.pending === 1 ? '' : 's'} processing for search` : indexing.failed ? 'Some profiles need attention' : indexing.label}</span>
+                        {indexing.pending && indexing.failed ? <span>· Some profiles need attention</span> : null}
+                        {rankedMode && indexing.incomplete ? <span>· Results may be incomplete</span> : null}
+                        <Button variant="ghost" size="sm" onClick={() => { backgroundIndexing.refresh(); if (rankedMode) ranked.retry(); }}>Refresh</Button>
+                    </span>
+                ) : null}
+                {rankedMode && ranked.state?.status === 'completed' && ranked.state.error ? <span role="status">{ranked.state.error}</span> : null}
+                {rankedMode && (['unavailable', 'failed'].includes(ranked.state?.status ?? '') || ranked.state?.error) ? <Button variant="ghost" size="sm" onClick={ranked.retry}>Retry search</Button> : null}
+            </div>
 
-            {candidates.length === 0 ? (
+            {!rows.length && !searching ? (
                 <div className="flex flex-col items-center gap-2 rounded-lg border border-dashed border-border bg-card px-6 py-12 text-center">
-                    <p className="text-sm font-medium text-foreground">No candidates found</p>
+                    <p className="text-sm font-medium text-foreground">{rankedMode && ranked.state?.status !== 'completed' ? 'Try searching by name or email' : rankedMode && indexing?.incomplete ? 'No matches in searchable profiles' : 'No candidates found'}</p>
                     <p className="max-w-sm text-sm text-muted-foreground">
                         {!query
-                            ? 'Candidates appear here after submissions are imported from the applications page.'
-                            : 'Try clearing the search.'}
+                            ? 'Add a candidate or import from Telegram.'
+                            : rankedMode && indexing?.incomplete ? 'Search by name or email.' : 'Try clearing the search.'}
                     </p>
                 </div>
             ) : (
-                <div aria-busy={pending} className="overflow-hidden rounded-lg border border-border bg-card">
+                <div aria-busy={searching} className="overflow-hidden rounded-lg border border-border bg-card">
                     <Table>
                     <TableHeader>
                         <TableRow>
@@ -156,7 +185,7 @@ export function CandidatesBrowser({
                         </TableRow>
                     </TableHeader>
                     <TableBody>
-                        {candidates.map((row) => (
+                        {rows.map((row) => (
                             <TableRow key={row.candidateId}>
                                 <TableCell>
                                     <a
@@ -197,14 +226,14 @@ export function CandidatesBrowser({
                 </div>
             )}
             <nav aria-label="Directory pages" className="flex items-center justify-between gap-3">
-                <Button variant="outline" size="sm" disabled={pending || page <= 1}
-                    onClick={() => navigate({ ...filters, page: page - 1 })}>Previous</Button>
+                <Button variant="outline" size="sm" disabled={searching || (rankedMode ? ranked.page <= 1 : page <= 1)}
+                    onClick={() => rankedMode ? ranked.previous() : navigate({ ...filters, page: page - 1 })}>Previous</Button>
                 <span className="text-xs text-muted-foreground">
-                    Page {page} of {totalPages}
-                    {total > 0 ? ` · ${(page - 1) * pageSize + 1}–${Math.min(page * pageSize, total)} of ${total}` : ''}
+                    {rankedMode ? `Page ${ranked.page}` : `Page ${page} of ${totalPages}`}
+                    {!rankedMode && total > 0 ? ` · ${(page - 1) * pageSize + 1}–${Math.min(page * pageSize, total)} of ${total}` : ''}
                 </span>
-                <Button variant="outline" size="sm" disabled={pending || page >= totalPages}
-                    onClick={() => navigate({ ...filters, page: page + 1 })}>Next</Button>
+                <Button variant="outline" size="sm" disabled={searching || (rankedMode ? !ranked.state?.next : page >= totalPages)}
+                    onClick={() => rankedMode ? ranked.next() : navigate({ ...filters, page: page + 1 })}>Next</Button>
             </nav>
         </div>
     );

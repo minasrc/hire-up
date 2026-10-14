@@ -18,6 +18,11 @@ export function telegramChatRemovalOperation(pool, identity, org, input) {
     }
     return withStaffTransaction(
         pool, identity, org, ['candidates.read', 'candidates.write'],
-        async ({ client }) => (await client.query(sql, args)).rows[0].result,
+        async ({ client }) => {
+            const before = p.action === 'reimport' ? (await client.query('select app.telegram_chat_removal_status_v1($1) as result', [p.chatId])).rows[0].result : null;
+            const result = (await client.query(sql, args)).rows[0].result;
+            if (p.action === 'reimport' && before.state === 'completed' && before.version === p.expectedVersion) await client.query('select app.telegram_extraction_action_v1($1::jsonb)', [JSON.stringify({ action: 'enqueue', chatIds: [p.chatId] })]);
+            return result;
+        },
     );
 }

@@ -173,7 +173,7 @@ test('saved zone hydrates without changing dates until one explicit acceptance',
     const ui = await mount(page);
     expect(ui.beforeHydration).toBe('1 Oct 2026');
     await dates(page, '1 Oct 2026');
-    await expect(ui.banner).toContainText('Switch from Europe/Madrid?');
+    await expect(ui.banner).toContainText('Use America/New_York instead of Europe/Madrid?');
     expect(ui.posts).toHaveLength(0);
     await ui.banner.getByRole('button', { name: 'Switch', exact: true }).evaluate(button => { button.click(); button.click(); });
     await dates(page, '30 Sept 2026');
@@ -186,7 +186,7 @@ test('an unset preference stays UTC after hydration until the device zone is acc
     const ui = await mount(page, { savedTimeZone: null, version: '0', deviceZone: 'Asia/Tokyo' });
     expect(ui.beforeHydration).toBe('30 Sept 2026');
     await dates(page, '30 Sept 2026');
-    await expect(ui.banner).toContainText('UTC default');
+    await expect(ui.banner).toContainText('Use Asia/Tokyo?');
     expect(ui.posts).toHaveLength(0);
     expect(await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth)).toBeLessThanOrEqual(0);
     await page.screenshot({ path: testInfo.outputPath('time-zone-banner.png') });
@@ -199,7 +199,7 @@ test('an unset preference stays UTC after hydration until the device zone is acc
 
 test('keeping a zone persists dismissal and a later travel zone can prompt again', async ({ page }) => {
     const ui = await mount(page);
-    await ui.banner.getByRole('button', { name: 'Keep current zone' }).click();
+    await ui.banner.getByRole('button', { name: 'Keep current' }).click();
     await expect(ui.banner).toHaveCount(0);
     expect(ui.posts).toHaveLength(0);
     await ui.reload();

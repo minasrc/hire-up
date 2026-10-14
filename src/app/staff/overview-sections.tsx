@@ -1,14 +1,11 @@
 import Link from 'next/link';
 import type { ReactNode } from 'react';
-import { Building2, Inbox, Lock } from 'lucide-react';
+import { ArrowRight, Building2, Inbox, Lock } from 'lucide-react';
 
 import { Badge } from '@/components/staff-ui/badge';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/staff-ui/card';
-import type { StaffWorkspaceSummary } from '@/lib/workspace-types';
+import type { StaffWorkspaceRecentApplication, StaffWorkspaceSummary } from '@/lib/workspace-types';
 import { cn } from '@/lib/utils';
-import { StaffDate } from './staff-date';
-
-const formatDate = (iso: string) => <StaffDate value={iso} />;
 
 function MetricCard({
     label,
@@ -81,76 +78,32 @@ function PermissionNote({ permission }: { permission: string }) {
     );
 }
 
-export function ReviewQueue({ summary }: { summary: StaffWorkspaceSummary }) {
-    const rows = summary.recentApplications;
-    const total = summary.attention.reviewApplications;
+export const overviewReviewLinkClass = 'flex min-w-0 items-center gap-3 rounded-md px-3 py-2 text-sm outline-none transition-colors hover:bg-hover focus-visible:bg-hover focus-visible:ring-2 focus-visible:ring-ring';
+
+export function ApplicationReviewTasks({ rows, total }: { rows: StaffWorkspaceRecentApplication[]; total: number }) {
+    if (total === 0) return null;
     return (
-        <Card id="review-queue">
-            <CardHeader className="gap-1">
-                <CardTitle className="flex items-center gap-2 text-base">
-                    <span className="flex h-6 w-6 items-center justify-center rounded-full bg-secondary">
-                        <Inbox
-                            className="h-3.5 w-3.5 text-secondary-foreground"
-                            aria-hidden="true"
-                        />
-                    </span>
-                    Awaiting review
-                </CardTitle>
-            </CardHeader>
-            <CardContent className="flex flex-col gap-3">
-                {!summary.capabilities.applications ? (
-                    <PermissionNote permission="applications.read" />
-                ) : rows.length === 0 ? (
-                    <p className="rounded-lg border border-dashed border-border px-4 py-8 text-center text-sm text-muted-foreground">
-                        No applications awaiting review.
-                    </p>
-                ) : (
-                    <ul className="flex flex-col gap-2">
-                        {rows.map((row) => (
-                            <li
-                                key={row.applicationId}
-                                className="flex items-start justify-between gap-3 rounded-lg border border-border px-3 py-2.5"
-                            >
-                                <div className="flex min-w-0 flex-col">
-                                    <Link
-                                        href={`/staff/candidates/${row.candidateId}`}
-                                        className="w-fit truncate rounded-sm text-sm font-medium text-foreground outline-none hover:text-accent-foreground hover:underline focus-visible:ring-2 focus-visible:ring-ring"
-                                    >
-                                        {row.candidateName}
-                                    </Link>
-                                    <span className="text-xs text-muted-foreground">
-                                        <Link
-                                            href={`/staff/jobs/${row.jobId}`}
-                                            className="rounded-sm outline-none hover:underline focus-visible:ring-2 focus-visible:ring-ring"
-                                        >
-                                            {row.jobTitle}
-                                        </Link>
-                                        {' · '}
-                                        <Link
-                                            href={`/staff/clients/${row.clientId}`}
-                                            className="rounded-sm outline-none hover:underline focus-visible:ring-2 focus-visible:ring-ring"
-                                        >
-                                            {row.clientName}
-                                        </Link>
-                                    </span>
-                                </div>
-                                <span className="shrink-0 text-xs text-muted-foreground">
-                                    {formatDate(row.receivedAt)}
-                                </span>
-                            </li>
-                        ))}
-                    </ul>
-                )}
-                {summary.capabilities.applications && total !== null && total > 0 ? (
-                    <Link
-                        href="/staff/applications?review=1"
-                        className="w-fit rounded-sm text-xs font-medium text-accent-foreground outline-none hover:underline focus-visible:ring-2 focus-visible:ring-ring"
-                    >
-                        View all {total} awaiting review
-                    </Link>
-                ) : null}
-            </CardContent>
-        </Card>
+        <div aria-label="Application review tasks" className="min-w-0 rounded-lg border border-border p-2">
+            <Link href="/staff/applications?review=1" className={`${overviewReviewLinkClass} font-medium`}>
+                <Inbox className="h-4 w-4" aria-hidden="true" />
+                Application reviews
+                <span className="ml-auto text-muted-foreground">{total}</span>
+                <ArrowRight className="h-4 w-4" aria-hidden="true" />
+            </Link>
+            <ul className="mt-1 space-y-1">
+                {rows.map(row => (
+                    <li key={row.applicationId}>
+                        <Link href={`/staff/candidates/${row.candidateId}`} className={overviewReviewLinkClass}>
+                            <span className="flex min-w-0 flex-1 flex-col">
+                                <span className="truncate">{row.candidateName}</span>
+                                <span className="truncate text-xs text-muted-foreground">{row.jobTitle} · {row.clientName}</span>
+                            </span>
+                            <span className="ml-auto shrink-0 text-xs text-muted-foreground">Application</span>
+                        </Link>
+                    </li>
+                ))}
+            </ul>
+        </div>
     );
 }
 
@@ -184,7 +137,7 @@ export function ClientsHiring({ summary }: { summary: StaffWorkspaceSummary }) {
                                 key={row.clientId}
                                 className="flex flex-col items-start gap-2 rounded-lg border border-border px-3 py-2.5 sm:flex-row sm:items-center sm:justify-between sm:gap-3"
                             >
-                                <div className="flex min-w-0 flex-col">
+                                <div className="flex min-w-0 flex-1 flex-col">
                                     <span className="flex min-w-0 flex-wrap items-center gap-2">
                                         <Link
                                             href={`/staff/clients/${row.clientId}`}

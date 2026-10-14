@@ -23,8 +23,8 @@ test('CV access, content and index invalidation remove cached snippets, cursor a
     assert.equal(searchInvalidated('SEARCH_CAPACITY'), false);
 });
 test('capacity and stale access guidance require an explicit fresh search', () => {
-    assert.equal(searchGuidance('INDEX_CHANGED'), 'Our search index was updated. Run this search again.');
-    assert.match(searchGuidance('SEARCH_CAPACITY'), /Search profiles only/);
-    assert.match(searchGuidance('CV_RESULTS_CHANGED'), /Previous results were cleared/);
+    assert.equal(searchGuidance('INDEX_CHANGED'), 'Search updated. Search again.');
+    assert.match(searchGuidance('SEARCH_CAPACITY'), /Search without CVs/);
+    assert.match(searchGuidance('CV_RESULTS_CHANGED'), /CV changed/);
     assert.match(searchGuidance('CV_ACCESS_CHANGED'), /access.*changed/);
 });

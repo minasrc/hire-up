@@ -231,7 +231,7 @@ test('Telegram CV retrieval validates selected files and preserves profile edits
     const page = await context.newPage();
     page.setDefaultTimeout(20_000);
     const pageErrors = []; page.on('pageerror', error => pageErrors.push(error.message));
-    const panel = page.getByRole('dialog', { name: 'Review draft' });
+    const panel = page.getByRole('region', { name: 'Candidate information', exact: true });
     const retrieval = panel.getByRole('region', { name: 'Retrieve CV from Telegram', exact: true });
     const cvButton = filename => retrieval.getByRole('button', { name: `Retrieve CV: ${filename}`, exact: true });
     async function action(button, action) {
@@ -251,6 +251,8 @@ test('Telegram CV retrieval validates selected files and preserves profile edits
     try {
         await disconnectAccount();
         await page.goto(`${baseURL}/staff/telegram-intake?draft=${ada.id}`);
+        await panel.getByRole('button', { name: 'Edit', exact: true }).click();
+        await panel.getByText('CV (optional)', { exact: true }).click();
         await expect(retrieval.getByRole('link', { name: 'Manage Telegram connection', exact: true })).toBeVisible();
         await expect(cvButton('Candidate-primary.pdf')).toBeDisabled();
         accountUserId = '999999'; await connectAccount();
@@ -279,10 +281,8 @@ test('Telegram CV retrieval validates selected files and preserves profile edits
         await refreshCv();
         await expect(retrieval.getByText(/will not substitute a different file/)).toBeVisible();
         await expect(panel.getByText('No CV attached', { exact: true })).toBeVisible();
-        const approvalMissing = page.waitForResponse(response => response.url().endsWith(`/drafts/${ada.id}/decision`));
-        await panel.getByRole('button', { name: 'Approve candidate', exact: true }).click();
-        assert.equal((await approvalMissing).status(), 422);
-        await expect(panel.getByRole('link', { name: /^CV:/ })).toBeVisible();
+        const missingDraft = (await (await context.request.get(`${draftURL}/${ada.id}`)).json()).result;
+        assert.equal((await context.request.post(`${draftURL}/${ada.id}/decision`, { data: { action: 'approve', expectedVersion: missingDraft.version, operationId: randomUUID() } })).status(), 422);
         await action(cvButton('Candidate-primary.pdf'), 'retrieve');
         claimed = await cvWorker('claim');
         await panel.getByLabel('Location', { exact: true }).fill('London');
@@ -301,10 +301,12 @@ test('Telegram CV retrieval validates selected files and preserves profile edits
         await retrieval.scrollIntoViewIfNeeded();
         await page.screenshot({ path: join(root, 'test-results/staff-workspace-telegram-cv-retrieved.png'), fullPage: true });
         const approval = page.waitForResponse(response => response.url().endsWith(`/drafts/${ada.id}/decision`));
-        await panel.getByRole('button', { name: 'Approve candidate', exact: true }).click();
+        await panel.getByRole('button', { name: 'Save and approve', exact: true }).click();
         assert.equal((await approval).status(), 200);
-        await expect(panel.getByRole('link', { name: 'Open approved candidate', exact: true })).toBeVisible();
+        await expect(page.getByText('Ada Lovelace saved.', { exact: true })).toBeVisible();
         await page.goto(`${baseURL}/staff/telegram-intake?draft=${charles.id}`);
+        await panel.getByRole('button', { name: 'Edit', exact: true }).click();
+        await panel.getByText('CV (optional)', { exact: true }).click();
         await action(cvButton('Charles-original.pdf'), 'retrieve');
         claimed = await cvWorker('claim');
         await panel.getByLabel('Upload CV', { exact: true }).setInputFiles({ name: 'Manual-choice.docx', mimeType: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document', buffer: docx });
@@ -329,7 +331,7 @@ test('Telegram CV retrieval validates selected files and preserves profile edits
         await retrieval.getByRole('button', { name: 'Refresh retrieval', exact: true }).click();
         await expect(panel.getByText(/Your unsaved changes were not saved/)).toBeVisible();
         await expect(panel.getByLabel('Your unsaved changes', { exact: true })).toHaveValue('Location: Not saved locally');
-        await expect(panel.getByRole('button', { name: 'Approve candidate', exact: true })).toHaveCount(0);
+        await expect(panel.getByRole('button', { name: 'Save and approve', exact: true })).toHaveCount(0);
         assert.deepEqual(pageErrors, []);
     } catch (error) { console.error(output.join('').slice(-18000)); throw error; }
 });

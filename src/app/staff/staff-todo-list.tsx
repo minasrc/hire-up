@@ -2,7 +2,7 @@
 
 import { staffWorkspaceFetch } from '@/lib/staff-workspace-fetch';
 
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
 import { ClipboardList, Plus } from 'lucide-react';
 
 import { Badge } from '@/components/staff-ui/badge';
@@ -45,7 +45,7 @@ const CATEGORIES: { value: 'all' | StaffTaskCategory; label: string }[] = [
 
 const PAGE_SIZE = 20;
 
-export function StaffTodoList({ writeEnabled }: { writeEnabled: boolean }) {
+export function StaffTodoList({ writeEnabled, reviewTasks, reviewCount = 0 }: { writeEnabled: boolean; reviewTasks?: ReactNode; reviewCount?: number }) {
     const recovery = useStaffAuthRecovery();
     const [authRevision, setAuthRevision] = useState(0);
     const [category, setCategory] = useState<'all' | StaffTaskCategory>('all');
@@ -244,8 +244,11 @@ export function StaffTodoList({ writeEnabled }: { writeEnabled: boolean }) {
         }
     };
 
+    const showReviews = !showCompleted && (category === 'all' || category === 'review');
     const countFor = (value: 'all' | StaffTaskCategory) =>
-        data?.counts ? data.counts[value] : '–';
+        data?.counts
+            ? data.counts[value] + (!showCompleted && (value === 'all' || value === 'review') ? reviewCount : 0)
+            : '–';
 
     return (
         <Card id="tasks">
@@ -336,6 +339,8 @@ export function StaffTodoList({ writeEnabled }: { writeEnabled: boolean }) {
                             </TabsList>
                         </Tabs>
 
+                        {showReviews ? reviewTasks : null}
+
                         <span role="status" aria-live="polite" className="sr-only">
                             {actionError ?? actionStatus ?? ''}
                         </span>
@@ -367,7 +372,7 @@ export function StaffTodoList({ writeEnabled }: { writeEnabled: boolean }) {
                                     Retry
                                 </Button>
                             </div>
-                        ) : data.tasks.length === 0 ? (
+                        ) : data.tasks.length === 0 && showReviews && reviewCount > 0 && data.total === 0 ? null : data.tasks.length === 0 ? (
                             <p className="rounded-lg border border-dashed border-border px-4 py-8 text-center text-sm text-muted-foreground">
                                 {data.total > 0
                                     ? 'More tasks remain in this view. Choose Show more to load them.'
@@ -382,7 +387,7 @@ export function StaffTodoList({ writeEnabled }: { writeEnabled: boolean }) {
                                 {data.tasks.map((task) => (
                                     <li
                                         key={task.id}
-                                        className="flex items-start gap-3 rounded-lg border border-border px-3 py-2.5"
+                                        className="flex items-start gap-3 rounded-lg border border-border px-3 py-2.5 transition-colors hover:bg-hover focus-within:bg-hover"
                                     >
                                         {writeEnabled ? (
                                             <Checkbox

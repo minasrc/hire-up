@@ -27,7 +27,7 @@ test('coverage warns on pending, failed and unindexed eligible profiles', () => 
 
 test('token and timeout failures have actionable copy without echoing raw worker errors', () => {
     assert.match(searchGuidance('INPUT_TOO_LONG'), /Shorten/);
-    assert.match(searchGuidance('SEARCH_TIMEOUT'), /narrower scope/);
-    assert.match(searchGuidance('SOURCE_TOO_LARGE'), /exceeds the indexing limit/);
+    assert.match(searchGuidance('SEARCH_TIMEOUT'), /shorter description/);
+    assert.match(searchGuidance('SOURCE_TOO_LARGE'), /too large/);
     assert.doesNotMatch(searchGuidance('Private query: secret phrase'), /secret phrase/);
 });

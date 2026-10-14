@@ -147,7 +147,7 @@ test('Profile search separates keyword lookup, private scopes and asynchronous r
     const otherRegistered = (await otherRegisteredResponse.json()).result;
     const vector = first => [first, Math.sqrt(1 - first * first), ...Array(382).fill(0)];
     async function worker(action, data = {}, token = registered.token, expectedStatus = 200) {
-        if (action === 'claim') data = { capabilities: ['minilm-v1'], ...data };
+        if (action === 'claim') data = { capabilities: ['minilm-v1', 'approved-cv-v1'], ...data };
         const response = await fetch(`${baseURL}/api/profile-search/worker/${action}`, { method: 'POST', headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json' }, body: JSON.stringify(data) });
         assert.equal(response.status, expectedStatus, await response.clone().text()); return response.json();
     }
@@ -166,62 +166,26 @@ test('Profile search separates keyword lookup, private scopes and asynchronous r
     }
     const page = await context.newPage(); page.setDefaultTimeout(20000);
     const pageErrors = []; page.on('pageerror', error => pageErrors.push(error.stack || error.message));
-    const queryInput = page.getByLabel('Describe the candidate you need', { exact: true });
-    async function search(text) {
-        await queryInput.fill(text);
-        const response = page.waitForResponse(response => response.url() === endpoint && response.request().method() === 'POST' && response.request().postDataJSON()?.action === 'search');
-        await page.getByRole('button', { name: 'Search by meaning', exact: true }).click();
-        const received = await response; assert.equal(received.status(), 202);
-        return received.json();
-    }
-    async function refresh() {
-        await page.getByRole('button', { name: 'Refresh status', exact: true }).click();
-        await expect(page.getByText('Loading search status…', { exact: true })).toHaveCount(0);
+    const queryInput = page.getByLabel('Search candidates', { exact: true });
+    async function search(query, options = {}) {
+        const response = await context.request.post(endpoint, { data: { action: 'search', query, scope: 'all', readyOnly: false, includeCv: false, operationId: randomUUID(), ...options } });
+        assert.equal(response.status(), 202, await response.text()); return response.json();
     }
     try {
-        await page.goto(`${baseURL}/staff/candidates`);
-        await expect(page.getByLabel('Name/email lookup', { exact: true })).toBeVisible();
-        await expect(page.getByRole('link', { name: 'Telegram intake', exact: true })).toBeVisible();
-        await page.getByRole('link', { name: 'Search by meaning', exact: true }).click();
-        await expect(page.getByLabel('Include approved CV text', { exact: true })).toBeChecked();
-        await page.getByLabel('Include approved CV text', { exact: true }).uncheck();
-        await expect(page.getByText(/The Mac search worker has not checked in recently/)).toBeVisible();
-        await expect(page.getByText(/Coverage is incomplete/)).toBeVisible();
+        // Keep the private-scope, cancellation, retry and pagination contracts independent of the removed search page.
         const cancelled = await search('Private first query Solidity experience');
-        assert.equal(new URL(page.url()).searchParams.get('queryId'), cancelled.queryId);
-        assert.equal(new URL(page.url()).searchParams.has('query'), false);
-        assert.ok(!page.url().includes('Solidity'));
-        await expect(page.getByText('Waiting for the Mac search worker', { exact: true })).toBeVisible();
         const leased = (await worker('claim')).job; assert.equal(leased.kind, 'query');
-        const cancelledResponse = page.waitForResponse(response => response.url() === endpoint && response.request().postDataJSON()?.action === 'cancel');
-        await page.getByRole('button', { name: 'Cancel search', exact: true }).click(); assert.equal((await cancelledResponse).status(), 200);
-        await expect(page.getByRole('heading', { name: 'Search cancelled', exact: true })).toBeVisible();
+        assert.equal((await context.request.post(endpoint, { data: { action: 'cancel', queryId: cancelled.queryId } })).status(), 200);
         await finish(leased, registered.token, 409);
         await indexAll(); await indexAll(otherRegistered.token);
-        // A transient failure after durable planning can be retried without recreating the source.
         psql(db, `update app.profile_search_chunks set embedding=null where source_id in(select id from app.profile_search_sources where source_id='${candidateIds[0]}');
             update app.profile_search_sources set status='failed',error_code='ATTEMPTS_EXHAUSTED',attempts=5 where source_id='${candidateIds[0]}';`);
-        await refresh();
-        const retryResponse = page.waitForResponse(response => response.url() === endpoint && response.request().method() === 'POST' && response.request().postDataJSON()?.action === 'retryIndex');
-        await page.getByRole('button', { name: 'Retry failed indexing', exact: true }).click();
-        const retryReceipt = await retryResponse; assert.equal(retryReceipt.status(), 200);
-        assert.deepEqual(await retryReceipt.json(), { ok: true, retried: 1, remainingFailed: 0 });
-        await expect(page.getByText(/1 profile queued for indexing/)).toBeVisible();
-        await expect(queryInput).toHaveValue('Private first query Solidity experience');
-        assert.equal(new URL(page.url()).searchParams.has('queryId'), false);
-        await expect(page.getByRole('button', { name: 'Retry failed indexing', exact: true })).toHaveCount(0);
-        await indexAll(); await refresh();
-        await expect(page.getByText('Current search coverage: 30 of 30 accessible profiles indexed', { exact: true })).toBeVisible();
+        const retry = await context.request.post(endpoint, { data: { action: 'retryIndex', scope: 'all', includeCv: false } });
+        assert.equal(retry.status(), 200, await retry.text());
+        assert.deepEqual(await retry.json(), { ok: true, retried: 1, remainingFailed: 0 });
+        await indexAll();
         const result = await search('Solidity engineers with Ethereum protocol experience');
-        const queryJob = (await worker('claim')).job; assert.equal(queryJob.kind, 'query'); await finish(queryJob);
-        await refresh();
-        await expect(page.getByRole('heading', { name: 'Ranked results', exact: true })).toBeVisible();
-        const searchUrl = page.url();
-        await expect(page.getByRole('link', { name: 'Ready Engineer', exact: true })).toBeVisible();
-        await expect(page.getByRole('link', { name: 'Missing Engineer', exact: true })).toBeVisible();
-        await expect(page.getByText('My private draft', { exact: true })).toHaveCount(2);
-        await expect(page.getByText(/Still needed: CV/)).toBeVisible();
-        await expect(page.getByText(/SecretOther/)).toHaveCount(0);
+        await finish((await worker('claim')).job);
         const privateQueryResponse = await otherContext.request.get(`${endpoint}?queryId=${result.queryId}`);
         assert.ok([403,404].includes(privateQueryResponse.status()));
         const allResults = []; let after = '';
@@ -230,47 +194,42 @@ test('Profile search separates keyword lookup, private scopes and asynchronous r
             assert.equal(response.status(), 200, await response.text()); const body = await response.json();
             allResults.push(...body.results); after = body.nextAfter ?? '';
         } while (after);
-        assert.equal(allResults.length, 30); assert.equal(allResults.some(row => row.sourceId === privateOtherId), false);
-        await page.getByRole('button', { name: 'Next results', exact: true }).click();
-        await expect(page.getByText('Page 2 · Up to 25 results per page', { exact: true })).toBeVisible();
-        await expect(page.getByRole('button', { name: 'Next results', exact: true })).toBeDisabled();
-        await page.getByRole('button', { name: 'Previous results', exact: true }).click();
-        const firstCandidateName = allResults.find(row => row.sourceType === 'candidate').displayName;
-        await page.getByRole('link', { name: firstCandidateName, exact: true }).click();
-        const preview = page.getByRole('dialog', { name: firstCandidateName, exact: true });
-        await expect(preview).toBeVisible(); await expect(preview.getByRole('link', { name: 'Open full candidate', exact: true })).toBeVisible();
-        assert.equal(page.url(), searchUrl); await page.keyboard.press('Escape');
-        await page.getByRole('link', { name: 'Ready Engineer', exact: true }).click();
-        await expect(page.getByRole('dialog', { name: 'Review draft', exact: true })).toBeVisible();
-        await page.goto(searchUrl);
-        await expect(queryInput).toHaveValue('Solidity engineers with Ethereum protocol experience');
-        await page.getByLabel('Only drafts ready to approve', { exact: true }).check();
-        const filtered = await search('Solidity engineers ready to review');
-        await finish((await worker('claim')).job); await refresh();
+        assert.equal(allResults.length, 30);
+        assert.equal(allResults.some(row => row.sourceId === privateOtherId), false);
+        assert.ok(allResults.some(row => row.sourceId === readyDraft.id));
+        assert.ok(allResults.some(row => row.sourceId === missingDraft.id));
+        const filtered = await search('Solidity engineers ready to review', { readyOnly: true });
+        await finish((await worker('claim')).job);
         const filteredBody = await (await context.request.get(`${endpoint}?queryId=${filtered.queryId}`)).json();
         assert.ok(filteredBody.results.some(row => row.sourceType === 'candidate'));
         assert.ok(filteredBody.results.some(row => row.sourceId === readyDraft.id));
         assert.equal(filteredBody.results.some(row => row.sourceId === missingDraft.id), false);
-        await expect(page.getByRole('link', { name: 'Missing Engineer', exact: true })).toHaveCount(0);
-        mkdirSync(join(root, 'test-results'), { recursive: true });
-        await page.evaluate(() => window.scrollTo(0, 0));
-        await page.screenshot({ path: join(root, 'test-results/staff-workspace-profile-search.png'), fullPage: true });
-        await page.screenshot({ path: join(root, 'test-results/staff-workspace-profile-search-viewport.png') });
-        await page.setViewportSize({ width: 390, height: 844 });
-        await page.screenshot({ path: join(root, 'test-results/staff-workspace-profile-search-mobile.png'), fullPage: true });
-        await page.screenshot({ path: join(root, 'test-results/staff-workspace-profile-search-mobile-viewport.png') });
-        await page.getByLabel('Search scope', { exact: true }).selectOption('my_drafts');
-        const failed = await search('Long query that the synthetic tokenizer rejects');
+        const failed = await search('Long query that the synthetic tokenizer rejects', { scope: 'my_drafts' });
         const failureJob = (await worker('claim')).job;
         await worker('fail', { jobId: failureJob.id, leaseToken: failureJob.leaseToken, kind: 'query', code: 'INPUT_TOO_LONG', retryAfterSeconds: 1 });
-        await refresh();
-        await expect(page.getByText(/Shorten the search description/)).toBeVisible();
         assert.equal((await (await context.request.get(`${endpoint}?queryId=${failed.queryId}`)).json()).status, 'failed');
-        await expect(queryInput).toBeEnabled();
         psql(db, `update app.profile_search_queries set expires_at=now()-interval '1 second' where id='${failed.queryId}';`);
-        await refresh();
-        await expect(page.getByRole('heading', { name: 'Search expired', exact: true })).toBeVisible();
-        await expect(queryInput).toBeEnabled();
+        assert.equal((await (await context.request.get(`${endpoint}?queryId=${failed.queryId}`)).json()).status, 'expired');
+
+        await page.goto(`${baseURL}/staff/candidates/search`);
+        await expect(page).toHaveURL(`${baseURL}/staff/candidates`);
+        await expect(queryInput).toBeVisible();
+        await expect(page.getByRole('link', { name: 'Review proposals (2)', exact: true })).toBeVisible();
+        const request = page.waitForResponse(response => response.url() === endpoint && response.request().postDataJSON()?.action === 'search');
+        await queryInput.fill('Smart contract specialist');
+        const submitted = await request; assert.equal(submitted.status(), 202);
+        const submittedBody = submitted.request().postDataJSON();
+        assert.equal(submittedBody.scope, 'approved');
+        await finish((await worker('claim')).job);
+        await expect(page.getByRole('table').locator('tbody tr')).toHaveCount(25);
+        await expect(page.getByText('SecretOther Engineer', { exact: true })).toHaveCount(0);
+        await expect(page.getByRole('table').getByText('Ready Engineer', { exact: true })).toHaveCount(0);
+        await page.getByRole('button', { name: 'Next', exact: true }).click();
+        await expect(page.getByRole('table').locator('tbody tr')).toHaveCount(3);
+        mkdirSync(join(root, 'test-results'), { recursive: true });
+        await page.screenshot({ path: join(root, 'test-results/staff-workspace-profile-search.png'), fullPage: true });
+        await page.setViewportSize({ width: 390, height: 844 });
+        await page.screenshot({ path: join(root, 'test-results/staff-workspace-profile-search-mobile.png'), fullPage: true });
         assert.deepEqual(pageErrors, []);
     } catch (error) { console.error(output.join('').slice(-20000)); throw error; }
 });

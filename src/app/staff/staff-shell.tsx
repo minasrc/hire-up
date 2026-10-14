@@ -5,7 +5,7 @@ import { staffWorkspaceFetch } from '@/lib/staff-workspace-fetch';
 import { createStaffRefresh } from '@/lib/staff-refresh';
 import { staffAuthRecovery } from '@/lib/staff-auth-recovery';
 import { StaffAuthRecoveryPrompt, useStaffAuthRecovery } from './auth-recovery';
-import Link from 'next/link';
+import Link, { useLinkStatus } from 'next/link';
 import { usePathname } from 'next/navigation';
 import { signOut } from 'next-auth/react';
 import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
@@ -18,6 +18,12 @@ import {
     ChevronRight,
     LayoutDashboard,
     Menu,
+    PanelLeftClose,
+    PanelLeftOpen,
+    Settings,
+    KeyRound,
+    LogOut,
+    LoaderCircle,
     Send,
     UserCog,
     Users,
@@ -51,7 +57,7 @@ const NAV_ITEMS = [
         icon: Users,
         capability: 'candidates',
     },
-    { href: '/staff/telegram-intake/chats', activePrefix: '/staff/telegram-intake', label: 'Telegram', icon: Send, capability: 'telegram' },
+    { href: '/staff/telegram-intake', activePrefix: '/staff/telegram-intake', label: 'Telegram', icon: Send, capability: 'telegram' },
     { href: '/staff/jobs', label: 'Jobs', icon: BriefcaseBusiness, capability: 'jobs' },
     { href: '/staff/clients', label: 'Clients', icon: Building2, capability: 'clients' },
     { href: '/staff/members', label: 'Members', icon: UserCog, capability: 'members' },
@@ -78,17 +84,25 @@ function useSection(pathname: string) {
     return { section, detail };
 }
 
+function NavLinkProgress({ label, compact }: { label: string; compact: boolean }) {
+    const { pending } = useLinkStatus();
+    if (!pending) return null;
+    return <span role="status" aria-label={`Opening ${label}`} className={compact ? 'absolute bottom-0 right-0 rounded-full bg-card p-0.5' : 'ml-auto'}><LoaderCircle aria-hidden="true" className="h-3.5 w-3.5 motion-safe:animate-spin" /></span>;
+}
+
 export function NavLinks({
     pathname,
     capabilities,
     onNavigate,
+    compact = false,
 }: {
     pathname: string;
     capabilities: StaffWorkspaceNotifications['capabilities'] | 'denied' | null;
     onNavigate?: () => void;
+    compact?: boolean;
 }) {
     return (
-        <nav aria-label="Main navigation" className="flex flex-col gap-1">
+        <nav aria-label="Main navigation" className={cn("flex flex-col gap-1", compact && "items-center")}>
             {NAV_ITEMS.filter(
                 (item) =>
                     !('capability' in item)
@@ -105,15 +119,19 @@ export function NavLinks({
                         href={item.href}
                         onClick={onNavigate}
                         aria-current={active ? 'page' : undefined}
+                        aria-label={item.label}
+                        title={compact ? item.label : undefined}
                         className={cn(
-                            'flex items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium outline-none transition-colors focus-visible:ring-2 focus-visible:ring-ring',
+                            'relative flex items-center gap-3 rounded-lg text-sm font-medium outline-none transition-colors focus-visible:ring-2 focus-visible:ring-ring',
+                            compact ? 'h-10 w-10 justify-center px-0' : 'px-3 py-2',
                             active
-                                ? 'border-l-2 border-ring bg-nav-active font-semibold text-foreground'
-                                : 'border-l-2 border-transparent text-muted-foreground hover:bg-hover hover:text-foreground',
+                                ? 'bg-nav-active font-semibold text-foreground'
+                                : 'text-muted-foreground hover:bg-hover hover:text-foreground',
                         )}
                     >
                         <Icon className="h-4 w-4 shrink-0" aria-hidden="true" />
-                        {item.label}
+                        <span className={compact ? 'sr-only' : undefined}>{item.label}</span>
+                        <NavLinkProgress label={item.label} compact={compact} />
                     </Link>
                 );
             })}
@@ -284,6 +302,18 @@ export function StaffShell({
 }) {
     const pathname = usePathname();
     const [sheetOpen, setSheetOpen] = useState(false);
+    const [sidebarCompact, setSidebarCompact] = useState(false);
+    useEffect(() => {
+        const timer = setTimeout(() => {
+            try { setSidebarCompact(localStorage.getItem('agora:sidebar-compact') === 'true'); } catch { /* Storage can be unavailable. */ }
+        }, 0);
+        return () => clearTimeout(timer);
+    }, []);
+    function toggleSidebar() {
+        const next = !sidebarCompact;
+        setSidebarCompact(next);
+        try { localStorage.setItem('agora:sidebar-compact', String(next)); } catch { /* The toggle still works without persistence. */ }
+    }
     const [summary, setSummary] = useState<StaffWorkspaceNotifications | null>(initialSummary);
     const [navCaps, setNavCaps] = useState<StaffWorkspaceNotifications['capabilities'] | null>(
         initialCapabilities,
@@ -418,29 +448,32 @@ export function StaffShell({
         setLoadError(next ? null : 'unavailable');
     }, []);
 
-    const sidebar = (onNavigate?: () => void) => (
+    const sidebar = (onNavigate?: () => void) => {
+        const compact = sidebarCompact && !onNavigate;
+        return (
         <div className="flex h-full flex-col">
-            <div className="flex items-center gap-2.5 px-4 py-5">
+            <div className={cn('flex items-center gap-2.5 py-5', compact ? 'justify-center px-2' : 'px-4')}>
                 <div
                     className="flex h-8 w-8 items-center justify-center rounded-lg bg-primary text-sm font-bold text-primary-foreground"
                     aria-hidden="true"
                 >
                     A
                 </div>
-                <div className="flex flex-col">
+                <div className={compact ? "sr-only" : "flex flex-col"}>
                     <span className="text-sm font-semibold text-foreground">{workspaceName}</span>
                     <span className="text-[11px] text-muted-foreground">Staff workspace</span>
                 </div>
             </div>
             <Separator />
-            <div className="flex-1 overflow-y-auto px-3 py-4">
+            <div className={cn('flex-1 overflow-y-auto py-4', compact ? 'px-2' : 'px-3')}>
                 <NavLinks
                     pathname={pathname}
+                    compact={compact}
                     capabilities={loadError === 'denied' ? 'denied' : navCaps}
                     onNavigate={onNavigate}
                 />
             </div>
-            <div className="flex flex-col gap-3 px-4 pb-5">
+            {compact ? <div className="flex justify-center border-t border-border px-2 py-4"><Popover><PopoverTrigger asChild><Button variant="ghost" size="icon" className="rounded-full" aria-label="Account menu" title="Account menu"><Initials name={userName} /></Button></PopoverTrigger><PopoverContent side="right" align="end" className="w-56 p-2"><div className="border-b border-border px-2 py-2"><p className="truncate text-sm font-medium">{userName}</p><p className="truncate text-xs text-muted-foreground">{userEmail}</p></div><div className="mt-1 flex flex-col gap-1">{multiWorkspace ? <Button asChild variant="ghost" size="sm" className="justify-start"><Link href="/staff/workspaces"><Building2 />Choose workspace</Link></Button> : null}<Button asChild variant="ghost" size="sm" className="justify-start"><Link href="/staff/settings"><Settings />Account settings</Link></Button><Button asChild variant="ghost" size="sm" className="justify-start"><Link href="/staff/mfa/backup-codes"><KeyRound />Backup codes</Link></Button><Button variant="ghost" size="sm" className="justify-start" onClick={() => signOut({ callbackUrl: '/staff/sign-in' })}><LogOut />Sign out</Button></div></PopoverContent></Popover></div> : <div className="flex flex-col gap-3 px-4 pb-5">
                 <Separator />
                 <div className="flex items-center gap-3 px-1 pt-2">
                     <Initials name={userName} />
@@ -472,20 +505,22 @@ export function StaffShell({
                 >
                     Sign out
                 </button>
-            </div>
+            </div>}
         </div>
     );
+    };
 
     return (
         <StaffShellSummaryContext.Provider value={seedSummary}>
         {summaryContent}
         <div className="flex min-h-screen bg-background">
-            <aside className="sticky top-0 hidden h-screen w-60 shrink-0 border-r border-border bg-sidebar md:block">
+            <aside id="staff-sidebar" aria-label="Workspace sidebar" className={cn("sticky top-0 hidden h-screen shrink-0 border-r border-border bg-sidebar motion-safe:transition-[width] motion-safe:duration-200 md:block", sidebarCompact ? "w-16" : "w-60")}>
                 {sidebar()}
             </aside>
 
             <div className="flex min-w-0 flex-1 flex-col">
                 <header className="sticky top-0 z-30 flex h-14 items-center gap-3 border-b border-border bg-card px-4 md:px-6">
+                    <Button variant="ghost" size="icon" className="hidden h-8 w-8 text-muted-foreground md:inline-flex" onClick={toggleSidebar} aria-label={sidebarCompact ? 'Expand sidebar' : 'Collapse sidebar'} aria-expanded={!sidebarCompact} aria-controls="staff-sidebar" title={sidebarCompact ? 'Expand sidebar' : 'Collapse sidebar'}>{sidebarCompact ? <PanelLeftOpen aria-hidden="true" /> : <PanelLeftClose aria-hidden="true" />}</Button>
                     <Sheet open={sheetOpen} onOpenChange={setSheetOpen}>
                         <SheetTrigger asChild>
                             <Button
@@ -531,7 +566,7 @@ export function StaffShell({
                                 {isDetail ? (
                                     <>
                                         <Link
-                                            href={section === 'telegram-intake' ? '/staff/telegram-intake/chats' : `/staff/${section}`}
+                                            href={section === 'telegram-intake' ? '/staff/telegram-intake' : `/staff/${section}`}
                                             className="truncate rounded-sm text-muted-foreground outline-none hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring"
                                         >
                                             {sectionLabel}

@@ -281,7 +281,7 @@ export function CandidateProfileDialog({
                     <DialogTitle>
                         {mode === 'create' ? 'Add candidate' : 'Edit profile'}
                     </DialogTitle>
-                    <DialogDescription>
+                    <DialogDescription className="sr-only">
                         {mode === 'create'
                             ? 'Create a candidate profile manually. All fields except the name are optional.'
                             : 'Update the candidate profile.'}
