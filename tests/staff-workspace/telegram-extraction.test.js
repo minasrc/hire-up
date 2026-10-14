@@ -35,6 +35,8 @@ test('Telegram extraction protects recruiter edits, reviews evidence and approve
     const migrations = readdirSync(migrationsDir).filter(name => name >= '20260922090000_foundation_roles.sql' && name.endsWith('.sql')).sort();
     assert.ok(migrations.some(name => name.includes('telegram_extraction')), 'Extraction migration is required');
     for (const name of migrations) psql(db, readFileSync(join(migrationsDir, name), 'utf8'));
+    // This legacy operator test covers an explicit keep/release choice; the candidate-flow suite covers automatic release.
+    psql(db, 'set role app_owner; alter table app.telegram_extraction_jobs alter column source_release_requested_at drop default; alter table app.telegram_extraction_jobs alter column cleanup_due_at drop default;');
     const runtimePassword = installStaffFixture(db);
     const workerPassword = randomUUID();
     psql(db, clientJobFixtureSql);
@@ -271,10 +273,8 @@ test('Telegram extraction protects recruiter edits, reviews evidence and approve
         await expect(panel.getByLabel('Primary email', { exact: true })).toHaveValue('ada-extraction@example.test');
         await expect(panel.getByLabel('Telegram username', { exact: true })).toHaveValue('ada_demo');
         await expect(panel.getByText('No CV attached', { exact: true })).toBeVisible();
-        await panel.getByText(/^Referenced attachments \(/).click();
-        await expect(panel.getByText('Metadata only', { exact: true })).toBeVisible();
-        await expect(panel.getByText(/not downloaded or validated CV files/)).toBeVisible();
-        await panel.getByText(/^Private source evidence \(/).click();
+        await expect(panel.getByText('Ada-shared-resume.pdf Attachment reference', { exact: true })).toBeVisible();
+        await panel.getByText(/^View source \(/).click();
         await expect(panel.getByText(job.source.messages[0].text, { exact: false }).first()).toBeVisible();
         const initialDraft = (await (await context.request.get(`${baseURL}/api/staff/telegram-intake/drafts/${draftId}`)).json()).result;
         assert.equal((await context.request.post(`${baseURL}/api/staff/telegram-intake/drafts/${draftId}/decision`, { data: { action: 'approve', expectedVersion: initialDraft.version, operationId: randomUUID() } })).status(), 422);
@@ -295,14 +295,13 @@ test('Telegram extraction protects recruiter edits, reviews evidence and approve
         await panel.getByText('CV (optional)', { exact: true }).click();
         await expect(panel.getByLabel('Location', { exact: true })).toHaveValue('Paris');
         await expect(panel.getByLabel('Headline', { exact: true })).toHaveValue('Protocol engineer');
-        const locationSuggestion = panel.getByRole('region', { name: 'Location suggestion', exact: true });
-        const compensationSuggestion = panel.getByRole('region', { name: 'Compensation preference suggestion', exact: true });
-        await expect(locationSuggestion.getByText('Paris', { exact: true })).toBeVisible();
-        await expect(locationSuggestion.getByText(secondResult.subjects[0].facts.find(fact => fact.field === 'location').value, { exact: true })).toBeVisible();
+        const suggestions = (await (await context.request.get(`${extractionURL}?draftId=${draftId}`)).json()).proposals;
+        const locationSuggestion = suggestions.find(item => item.field === 'location');
+        const compensationSuggestion = suggestions.find(item => item.field === 'compensationPreference');
+        assert.ok(locationSuggestion && compensationSuggestion);
         await panel.getByLabel('Location', { exact: true }).fill('Unsaved local edit');
-        await panel.getByRole('button', { name: 'Refresh suggestions', exact: true }).click();
-        await expect(locationSuggestion.getByRole('button', { name: 'Apply suggestion', exact: true })).toBeDisabled();
-        await expect(locationSuggestion.getByRole('button', { name: 'Dismiss suggestion', exact: true })).toBeDisabled();
+        await expect(panel.getByText('Unsaved changes', { exact: true })).toBeVisible();
+        await context.request.get(`${extractionURL}?draftId=${draftId}`);
         await expect(panel.getByLabel('Location', { exact: true })).toHaveValue('Unsaved local edit');
         await panel.getByLabel('Location', { exact: true }).fill('Paris');
         const pdf = createSyntheticPdf();
@@ -312,22 +311,23 @@ test('Telegram extraction protects recruiter edits, reviews evidence and approve
         assert.equal((await response).status(), 200);
         const pendingDraft = (await (await context.request.get(`${baseURL}/api/staff/telegram-intake/drafts/${draftId}`)).json()).result;
         assert.equal((await context.request.post(`${baseURL}/api/staff/telegram-intake/drafts/${draftId}/decision`, { data: { action: 'approve', expectedVersion: pendingDraft.version, operationId: randomUUID() } })).status(), 422);
-        await compensationSuggestion.getByText(/^View message references/).click();
-        await expect(compensationSuggestion.getByText(job.source.messages[0].text, { exact: true })).toBeVisible();
-        mkdirSync(join(root, 'test-results'), { recursive: true });
-        await page.screenshot({ path: join(root, 'test-results/staff-workspace-telegram-extraction-suggestions.png'), fullPage: true });
+        // The legacy suggestion endpoint keeps its version fences; profile-update decisions are checked below in the current UI.
+        const stale = await context.request.post(extractionURL, { data: { action: 'resolve', proposalId: compensationSuggestion.id, decision: 'apply', expectedDraftVersion: 1 } });
+        assert.equal(stale.status(), 409);
+        for (const [proposal, decision] of [[compensationSuggestion, 'apply'], [locationSuggestion, 'dismiss']]) {
+            const current = (await (await context.request.get(`${baseURL}/api/staff/telegram-intake/drafts/${draftId}`)).json()).result;
+            const resolved = await context.request.post(extractionURL, { data: { action: 'resolve', proposalId: proposal.id, decision, expectedDraftVersion: current.version } });
+            assert.equal(resolved.status(), 200, await resolved.text());
+        }
+        await page.goto(`${baseURL}/staff/telegram-intake?draft=${draftId}`);
+        await panel.getByRole('button', { name: 'Edit', exact: true }).click();
+        await expect(panel.getByLabel('Location', { exact: true })).toHaveValue('Paris');
+        await expect(panel.getByLabel('Compensation preference', { exact: true })).toHaveValue(secondResult.subjects[0].facts.find(fact => fact.field === 'compensationPreference').value);
         await page.setViewportSize({ width: 390, height: 844 });
-        await panel.evaluate(element => { element.scrollTop = 0; });
-        await expect(panel).toBeVisible();
+        assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth + 2));
+        mkdirSync(join(root, 'test-results'), { recursive: true });
         await page.screenshot({ path: join(root, 'test-results/staff-workspace-telegram-extraction-review-mobile.png'), fullPage: true });
         await page.setViewportSize({ width: 1280, height: 900 });
-        await waitForAction(compensationSuggestion.getByRole('button', { name: 'Apply suggestion', exact: true }), 'resolve');
-        await expect(panel.getByLabel('Compensation preference', { exact: true })).toHaveValue(secondResult.subjects[0].facts.find(fact => fact.field === 'compensationPreference').value);
-        await waitForAction(locationSuggestion.getByRole('button', { name: 'Dismiss suggestion', exact: true }), 'resolve');
-        await expect(panel.getByLabel('Location', { exact: true })).toHaveValue('Paris');
-        await expect(panel.getByText('No pending suggestions.', { exact: true })).toBeVisible();
-        mkdirSync(join(root, 'test-results'), { recursive: true });
-        await page.screenshot({ path: join(root, 'test-results/staff-workspace-telegram-extraction-review.png'), fullPage: true });
         response = page.waitForResponse(response => response.url().endsWith(`/drafts/${draftId}/decision`));
         await panel.getByRole('button', { name: 'Save and approve', exact: true }).click();
         assert.equal((await response).status(), 200);
@@ -342,10 +342,15 @@ test('Telegram extraction protects recruiter edits, reviews evidence and approve
         assert.deepEqual(late.draftIds, [draftId]);
         await page.goto(`${baseURL}/staff/telegram-intake/extraction`);
         await page.getByRole('link', { name: 'Review draft 1', exact: true }).first().click();
-        await expect(panel.getByText(/New information arrived after this draft was closed/)).toBeVisible();
-        await expect(panel.getByRole('button', { name: 'Apply suggestion', exact: true })).toHaveCount(0);
-        await waitForAction(panel.getByRole('button', { name: 'Dismiss suggestion', exact: true }), 'resolve');
-        await expect(panel.getByRole('link', { name: 'View profile', exact: true })).toHaveAttribute('href', candidateHref);
+        await expect(panel.getByText('Profile update', { exact: true })).toBeVisible();
+        await expect(panel.getByRole('button', { name: 'Save updates', exact: true })).toBeDisabled();
+        const rejectChanges = panel.getByRole('button', { name: /^Reject .* change$/ });
+        assert.ok(await rejectChanges.count() > 0);
+        for (const button of await rejectChanges.all()) await button.click();
+        response = page.waitForResponse(response => response.url().endsWith(`/drafts/${draftId}/decision`));
+        await panel.getByRole('button', { name: 'Save updates', exact: true }).click();
+        assert.equal((await response).status(), 200);
+        assert.equal(psql(db, `select location from app.candidates where id='${candidateId}'`).trim(), 'Paris');
         await page.goto(`${baseURL}/staff/telegram-intake/extraction`);
         job = (await extractWorker('claim')).job;
         const empty = await completeExtraction(job, { subjects: [] });
@@ -376,6 +381,8 @@ test('Telegram extraction protects recruiter edits, reviews evidence and approve
         for (let index = 0; index < 4; index += 1) {
             const batch = page.getByLabel('Extraction batch from Synthetic candidate conversation', { exact: true }).nth(index);
             await batch.getByRole('button', { name: 'Review source messages', exact: true }).click();
+            const keep = batch.getByRole('button', { name: 'Keep context', exact: true });
+            if (await keep.isEnabled()) await waitForAction(keep, 'sourceRetention');
             await batch.getByRole('checkbox', { name: 'I reviewed the entire batch and no longer need its remaining context.', exact: true }).check();
             await waitForAction(batch.getByRole('button', { name: 'Release after candidate review', exact: true }), 'sourceRetention');
             await expect(batch.getByText('Release requested', { exact: true })).toBeVisible();
@@ -432,6 +439,7 @@ test('Telegram extraction protects recruiter edits, reviews evidence and approve
 
     } catch (error) {
         console.error(output.join('').slice(-14_000));
+        console.error((await page.locator('body').innerText()).slice(-10000));
         throw error;
     }
 });

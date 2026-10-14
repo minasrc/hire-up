@@ -34,6 +34,8 @@ test('Automatic extraction pauses and resumes; source release remains an explici
     const migrations = readdirSync(migrationsDir).filter(name => name >= '20260922090000_foundation_roles.sql' && name.endsWith('.sql')).sort();
     assert.ok(migrations.some(name => name.includes('telegram_extraction')), 'Extraction migration is required');
     for (const name of migrations) psql(db, readFileSync(join(migrationsDir, name), 'utf8'));
+    // This legacy operator test covers an explicit keep/release choice; the candidate-flow suite covers automatic release.
+    psql(db, 'set role app_owner; alter table app.telegram_extraction_jobs alter column source_release_requested_at drop default; alter table app.telegram_extraction_jobs alter column cleanup_due_at drop default;');
     const runtimePassword = installStaffFixture(db);
     const workerPassword = randomUUID();
     psql(db, clientJobFixtureSql);

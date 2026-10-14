@@ -538,7 +538,7 @@ test('staff workspace end-to-end in a real browser', async (t) => {
             && r.request().headers()['rsc'] === '1');
         await page.locator('#application-search').fill('no-such-directory-person');
         await expect(page.getByRole('table')).toBeVisible();
-        await expect(page.getByRole('status').filter({ hasText: 'Searching…' })).toBeVisible();
+        await expect(page.getByRole('status').filter({ hasText: 'Updating' })).toBeVisible();
         await response;
         await expect(page.getByText('No applications found', { exact: true })).toBeVisible();
         await page.getByRole('button', { name: 'Clear filters', exact: true }).click();
@@ -1559,7 +1559,7 @@ test('staff workspace end-to-end in a real browser', async (t) => {
         await page.route('**/staff/candidates?q=*', async route => { await new Promise(resolve => setTimeout(resolve, 1000)); await route.continue(); });
         await search.fill('no-such-directory-person');
         await expect(page.getByRole('table')).toBeVisible();
-        await expect(page.getByRole('status').filter({ hasText: 'Updating' })).toBeVisible();
+        await expect(page.getByRole('status').filter({ hasText: 'Searching…' })).toBeVisible();
         await response;
         await page.unroute('**/staff/candidates?q=*');
         await expect(page.getByText('No candidates found', { exact: true })).toBeVisible();
