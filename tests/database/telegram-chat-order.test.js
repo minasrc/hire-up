@@ -8,6 +8,7 @@ import pg from 'pg';
 import { POSTGRES_17_IMAGE, assertLocalTestEnvironment, psql, startPostgresContainer, stopAndRemoveContainer } from '../support/foundation-docker.js';
 import { AUTHZ_ID, installStaffFixture, staffPoolOptions } from '../support/staff-authorization.js';
 import { clientJobFixtureSql } from '../support/client-job-workflows.js';
+import { telegramExtractionStatus } from '../../src/lib/telegram-extraction-operations.js';
 import { createTelegramDraft } from '../../src/lib/telegram-intake-operations.js';
 import { withStaffTransaction } from '../../src/lib/staff-authorization.js';
 import { telegramHistoryRecentStatus, telegramHistoryAction, telegramHistoryStatus } from '../../src/lib/telegram-history-operations.js';
@@ -83,6 +84,9 @@ test('recent history pages retain global tuple order and owner scope', { timeout
       if not exists(select 1 from app.telegram_cv_jobs where id='${cv}' and status='cancelled') then raise exception 'Retrieval must stop'; end if;
       if not exists(select 1 from app.cv_analyses where id='${analysis}' and status='cancelled') then raise exception 'CV analysis must stop'; end if;
     end $$;`);
+    const extractionStatus=await telegramExtractionStatus(pool,identity,org,{});
+    assert.equal(extractionStatus.counts.queued,0,'excluded backlog does not appear as pending work');
+    assert.ok(extractionStatus.jobs.every(job=>job.id!==extraction));
     const visible=await fetch({});
     assert.equal(visible.chats.length,50,'hidden rows do not consume the next page');
     assert.equal(visible.totals.chats,76);
