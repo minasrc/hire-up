@@ -8,8 +8,9 @@ import pg from 'pg';
 import { POSTGRES_17_IMAGE, assertLocalTestEnvironment, psql, startPostgresContainer, stopAndRemoveContainer } from '../support/foundation-docker.js';
 import { AUTHZ_ID, installStaffFixture, staffPoolOptions } from '../support/staff-authorization.js';
 import { clientJobFixtureSql } from '../support/client-job-workflows.js';
+import { createTelegramDraft } from '../../src/lib/telegram-intake-operations.js';
 import { withStaffTransaction } from '../../src/lib/staff-authorization.js';
-import { telegramHistoryRecentStatus } from '../../src/lib/telegram-history-operations.js';
+import { telegramHistoryRecentStatus, telegramHistoryAction, telegramHistoryStatus } from '../../src/lib/telegram-history-operations.js';
 const org = AUTHZ_ID.ORG_B, user = AUTHZ_ID.USER_ADMIN2;
 const identity = { provider: 'google', issuer: 'https://accounts.google.com', subject: '1002' };
 test('recent history pages retain global tuple order and owner scope', { timeout:120000 }, async t => {
@@ -18,7 +19,7 @@ test('recent history pages retain global tuple order and owner scope', { timeout
   let pool;
   t.after(async () => { await pool?.end(); stopAndRemoveContainer(db); });
   const directory = fileURLToPath(new URL('../../supabase/migrations/', import.meta.url));
-  for (const name of readdirSync(directory).filter(n => n.endsWith('.sql') && n >= '20260922090000' && n <= '20261013200000_telegram_chat_order.sql').sort()) psql(db, readFileSync(join(directory, name), 'utf8'));
+  for (const name of readdirSync(directory).filter(n => n.endsWith('.sql') && n >= '20260922090000' && n <= '20261014170000_telegram_chat_exclusions.sql').sort()) psql(db, readFileSync(join(directory, name), 'utf8'));
   const password = installStaffFixture(db); psql(db, clientJobFixtureSql);
   pool = new pg.Pool(staffPoolOptions(db, password, 3));
 
@@ -64,4 +65,52 @@ test('recent history pages retain global tuple order and owner scope', { timeout
     assert.equal(fallback.totals.chats, 126);
     assert.deepEqual((await telegramHistoryRecentStatus(pool,{...identity,subject:'1007'},org,{})).chats,[]);
   } finally { psql(db, 'alter function app.telegram_history_status_pending_v2(text,text,jsonb) rename to telegram_history_status_v2;'); }
+
+  await t.test('exclusions persist, filter before pagination, reject stale/foreign actions and restore without processing', async () => {
+    const current=await fetch({});
+    const extraction=randomUUID(),cv=randomUUID(),analysis=randomUUID();
+    const draft=await createTelegramDraft(pool,identity,org,{fields:{firstName:'Private',lastName:'Source'}});
+    psql(db, `insert into app.telegram_extraction_jobs(id,organization_id,owner_user_id,chat_id,source,source_digest,message_count,status,lease_token,lease_worker_id,lease_expires_at)
+      values('${extraction}','${org}','${user}','${current.chats[0].id}','{}',sha256(convert_to('{}','UTF8')),0,'leased','${randomUUID()}','${worker}',now()+interval '2 minutes');
+      insert into app.telegram_cv_jobs(id,organization_id,owner_user_id,draft_id,account_id,extraction_job_id,connection_id,connection_generation,document_revision,source,source_digest)
+      values('${cv}','${org}','${user}','${draft.id}','${account}','${extraction}','${connection}',1,0,'{}',sha256(convert_to('{}','UTF8')));
+      insert into app.cv_analyses(id,organization_id,owner_user_id,draft_id,document_revision,document_sha256,size_bytes,filename,extension,object_key,extraction_job_id)
+      values('${analysis}','${org}','${user}','${draft.id}',0,'${'a'.repeat(64)}',100,'private.pdf','pdf','synthetic/private.pdf','${extraction}');`);
+    const hidden=current.chats.map(ch=>({chatId:ch.id,expectedVersion:ch.version}));
+    await telegramHistoryAction(pool,identity,org,{action:'excludeMany',chats:hidden});
+    psql(db, `do $$ begin
+      if not exists(select 1 from app.telegram_extraction_jobs where id='${extraction}' and status='queued' and lease_token is null) then raise exception 'Extraction must be fenced'; end if;
+      if not exists(select 1 from app.telegram_cv_jobs where id='${cv}' and status='cancelled') then raise exception 'Retrieval must stop'; end if;
+      if not exists(select 1 from app.cv_analyses where id='${analysis}' and status='cancelled') then raise exception 'CV analysis must stop'; end if;
+    end $$;`);
+    const visible=await fetch({});
+    assert.equal(visible.chats.length,50,'hidden rows do not consume the next page');
+    assert.equal(visible.totals.chats,76);
+    assert.equal(visible.totals.excluded,50);
+    assert.ok(visible.chats.every(ch=>!hidden.some(row=>row.chatId===ch.id)));
+    const excluded=await fetch({view:'excluded'});
+    assert.equal(excluded.chats.length,50);
+    assert.ok(excluded.chats.every(ch=>ch.excluded && !ch.selected && !ch.extractionEnabled));
+    assert.ok(excluded.chats.every(ch=>ch.import.status==='cancelled'));
+    assert.equal((await fetch({q:excluded.chats[0].title})).chats.some(ch=>ch.id===excluded.chats[0].id),false);
+    assert.ok((await telegramHistoryStatus(pool,identity,org,{})).chats.every(ch=>!hidden.some(row=>row.chatId===ch.id)),'legacy reader also hides exclusions');
+    await assert.rejects(telegramHistoryAction(pool,identity,org,{action:'restore',chatId:hidden[0].chatId,expectedVersion:hidden[0].expectedVersion}), {code:'40001'});
+    const row=excluded.chats[0];
+    await assert.rejects(telegramHistoryAction(pool,{...identity,subject:'1007'},org,{action:'restore',chatId:row.id,expectedVersion:row.version}), /unavailable/i);
+    // A dialog refresh updates metadata without resetting the persisted choice.
+    psql(db, `update app.telegram_history_chats set title='Rediscovered personal chat' where id='${row.id}';`);
+    assert.equal((await fetch({q:'Rediscovered personal chat'})).chats.length,0);
+    await telegramHistoryAction(pool,identity,org,{action:'restore',chatId:row.id,expectedVersion:row.version});
+    const restored=(await fetch({q:'Rediscovered personal chat'})).chats[0];
+    assert.equal(restored.excluded,false);
+    assert.equal(restored.selected,false);
+    assert.equal(restored.extractionEnabled,false);
+    assert.equal(restored.import.status,'cancelled');
+    const personal=randomUUID();
+    psql(db, `insert into app.telegram_history_chats(id,organization_id,owner_user_id,account_id,peer_kind,peer_id,title) values('${personal}','${org}','${user}','${account}','user','999999','Never imported personal chat');
+    update app.telegram_connections set status='connected' where id='${connection}';`);
+    await telegramHistoryAction(pool,identity,org,{action:'exclude',chatId:personal,expectedVersion:1});
+    await assert.rejects(telegramHistoryAction(pool,identity,org,{action:'start',selected:true,chats:[{chatId:personal,expectedVersion:2}]}), {code:'23514'});
+    assert.equal((await fetch({view:'excluded',q:'Never imported personal chat'})).chats.length,1);
+  });
 });

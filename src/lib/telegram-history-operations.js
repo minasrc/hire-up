@@ -5,13 +5,13 @@ import { historyStaffAction, historyWorkerInput } from './telegram-history-contr
 const staff = (pool, identity, org, fn) => withStaffTransaction(pool, identity, org, ['candidates.read', 'candidates.write'], fn);
 export function telegramHistoryStatus(pool, identity, org, filters = {}) {
     const { view = 'all', q = '', after = null } = filters;
-    if (!['all', 'selected', 'active', 'paused', 'available', 'connected'].includes(view) || typeof q !== 'string' || !q.isWellFormed() || q.length > 100) throw new ClientJobContractError({ query: 'Invalid history filter.' });
+    if (!['all', 'selected', 'active', 'paused', 'available', 'connected', 'excluded'].includes(view) || typeof q !== 'string' || !q.isWellFormed() || q.length > 100) throw new ClientJobContractError({ query: 'Invalid history filter.' });
     return staff(pool, identity, org, async ({ client }) => (await client.query('select app.telegram_history_status_v1($1,$2,$3) as result', [view, q, after == null ? null : assertUuid(after, 'after')])).rows[0].result);
 }
 // Keep the UUID-based entry point for older worker/database consumers.
 export function telegramHistoryRecentStatus(pool, identity, org, filters = {}) {
     const { view = 'all', q = '', after = null } = filters;
-    if (!['all', 'selected', 'active', 'paused', 'available', 'connected'].includes(view) || typeof q !== 'string' || !q.isWellFormed() || q.length > 100) throw new ClientJobContractError({ query: 'Invalid history filter.' });
+    if (!['all', 'selected', 'active', 'paused', 'available', 'connected', 'excluded'].includes(view) || typeof q !== 'string' || !q.isWellFormed() || q.length > 100) throw new ClientJobContractError({ query: 'Invalid history filter.' });
     const cursor = decodeHistoryCursor(after);
     return staff(pool, identity, org, async ({ client }) => {
         const result = (await client.query('select app.telegram_history_status_v2($1,$2,$3::jsonb) as result', [view, q, cursor == null ? null : JSON.stringify(cursor)])).rows[0].result;
@@ -32,7 +32,7 @@ export function decodeHistoryCursor(value) {
     if (!/^[A-Za-z0-9_-]+$/.test(value)) return invalid();
     let parsed;
     try { const bytes = Buffer.from(value, 'base64url'); if (bytes.toString('base64url') !== value) return invalid(); parsed = JSON.parse(bytes.toString('utf8')); } catch { return invalid(); }
-    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed) || Object.keys(parsed).sort().join(',') !== 'accountId,id,lastMessageAt,q,v,view' || parsed.v !== 1 || !['all','selected','active','paused','available','connected'].includes(parsed.view) || typeof parsed.q !== 'string' || !parsed.q.isWellFormed() || parsed.q.length > 100 || (parsed.lastMessageAt !== null && (typeof parsed.lastMessageAt !== 'string' || !/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,6})?(?:Z|[+-]\d{2}:\d{2})$/.test(parsed.lastMessageAt) || !Number.isFinite(Date.parse(parsed.lastMessageAt))))) return invalid();
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed) || Object.keys(parsed).sort().join(',') !== 'accountId,id,lastMessageAt,q,v,view' || parsed.v !== 1 || !['all','selected','active','paused','available','connected','excluded'].includes(parsed.view) || typeof parsed.q !== 'string' || !parsed.q.isWellFormed() || parsed.q.length > 100 || (parsed.lastMessageAt !== null && (typeof parsed.lastMessageAt !== 'string' || !/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,6})?(?:Z|[+-]\d{2}:\d{2})$/.test(parsed.lastMessageAt) || !Number.isFinite(Date.parse(parsed.lastMessageAt))))) return invalid();
     if (assertUuid(parsed.accountId, 'after') !== parsed.accountId || assertUuid(parsed.id, 'after') !== parsed.id) return invalid();
     if (Buffer.from(JSON.stringify(parsed)).toString('base64url') !== value) return invalid();
     return parsed;
@@ -40,6 +40,7 @@ export function decodeHistoryCursor(value) {
 export function telegramHistoryAction(pool, identity, org, input) {
     const action = historyStaffAction(input);
     return staff(pool, identity, org, async ({ client }) => {
+        if (['exclude', 'excludeMany', 'restore'].includes(action.action)) return (await client.query('select app.telegram_chat_exclusion_v1($1::jsonb) as result', [JSON.stringify(action)])).rows[0].result;
         const modern = (await client.query("select to_regprocedure('app.telegram_candidate_start_v1(jsonb)') is not null as ready")).rows[0].ready;
         const coordinatedPause = action.action === 'pause' && (await client.query("select to_regprocedure('app.telegram_candidate_pause_v1(jsonb)') is not null as ready")).rows[0].ready;
         const result = (await client.query(coordinatedPause ? 'select app.telegram_candidate_pause_v1($1::jsonb) as result' : action.action === 'start' && modern ? 'select app.telegram_candidate_start_v1($1::jsonb) as result' : 'select app.telegram_history_action_v1($1::jsonb) as result', [JSON.stringify(action)])).rows[0].result;
