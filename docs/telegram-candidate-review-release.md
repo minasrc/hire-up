@@ -15,7 +15,7 @@ Telegram is an intake source. The main flow is Connect → Choose chats → Revi
 
 ## Release
 
-Apply `20261013180000_telegram_candidate_review.sql`, `20261014100000_telegram_onboarding.sql`, `20261014110000_telegram_review_archive.sql`, `20261014120000_candidate_ranked_directory.sql`, and `20261014130000_telegram_chat_groups.sql` before deploying these application changes. Keep the existing Telegram connector, extraction worker, semantic worker/local embedding service, and maintenance worker running. This change does not replace the embedding model or deploy any services.
+Apply `20261013180000_telegram_candidate_review.sql`, `20261014100000_telegram_onboarding.sql`, `20261014110000_telegram_review_archive.sql`, `20261014120000_candidate_ranked_directory.sql`, `20261014130000_telegram_chat_groups.sql`, and `20261014140000_candidate_hybrid_search.sql` before deploying these application changes. Keep the existing Telegram connector, extraction worker, semantic worker/local embedding service, and maintenance worker running. This change does not replace the embedding model or deploy any services.
 
 ## Focused verification
 
@@ -40,3 +40,5 @@ The candidate table allows a null current document; the older upload workflow re
 ## Unified search locally
 
 The current interactive demo has a semantic worker using the pinned MiniLM model on `127.0.0.1:8827`. This is separate from the older E5 service on 8817. Its private worker configuration is in ignored `.runtime/unified-search/semantic.json`; its demo credential expires when the disposable demo is stopped. For another workspace or a new demo run, follow `services/semantic-worker/README.md` to configure the current workspace worker credential and the matching local model. Search never presents unavailable inference as an empty successful result.
+
+Candidate directory search matches names, emails, titles, locations, and profile summaries before using semantic fallback. Explicit year constraints use recorded profile experience (word and numeric forms); bare years mean an exact value, while “at least” and “6+” mean a minimum. Unknown experience is excluded. Semantic directory results require cosine similarity of at least 0.2 and at least 90% of the best candidate score for the query (the same cutoff on every page); this is a tunable relevance floor, not a match probability.

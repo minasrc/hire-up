@@ -1,4 +1,5 @@
 import { randomUUID } from 'node:crypto';
+import { candidateSearchIntent } from './candidate-search-query.js';
 import { candidateDirectoryQuery } from './staff-directory-query.js';
 
 import { withStaffTransaction } from './staff-authorization.js';
@@ -148,8 +149,8 @@ export async function listCandidateProfileDirectory(pool, identity, organization
     return withStaffTransaction(
         pool, identity, organizationId, CANDIDATE_READ, async ({ client }) => {
             const { rows } = await client.query(
-                'select app.list_candidate_profile_directory_v1($1::text, $2::integer) as result',
-                [filters.query, filters.page]);
+                'select app.list_candidate_profile_directory_v2($1::text, $2::integer, $3::jsonb) as result',
+                [filters.query, filters.page, JSON.stringify(candidateSearchIntent(filters.query))]);
             return rows[0].result;
         });
 }

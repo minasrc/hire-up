@@ -21,6 +21,7 @@ import {
 import {
     type CandidateProfileOptions,
 } from './candidate-profile-dialog';
+import { candidateSearchIntent } from '@/lib/candidate-search-query';
 import { candidateDirectoryQuery } from '@/lib/staff-directory-query';
 import { useDirectoryNavigation } from '../use-directory-navigation';
 import { CandidateUploadDialog } from './candidate-upload-dialog';
@@ -82,7 +83,7 @@ export function CandidatesBrowser({
     const query = filters.query;
     const updateQuery = (value: string, debounce = false) =>
         navigate({ query: value, page: 1 }, debounce);
-    const rankedMode = semanticSearchEnabled && profileOptions?.canWrite === true && query.trim().length >= 3 && total === 0;
+    const rankedMode = semanticSearchEnabled && profileOptions?.canWrite === true && query.trim().length >= 3 && total === 0 && !candidateSearchIntent(query).experience;
     const ranked = useCandidateSearch(query.trim(), rankedMode && !pending);
     const rows = rankedMode ? ranked.state?.rows ?? [] : candidates;
     const searching = pending || (rankedMode && (!ranked.state || ranked.state.status === 'searching'));

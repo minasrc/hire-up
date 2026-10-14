@@ -259,8 +259,8 @@ test('Candidate intake has a compact chat picker and approve/edit/reject review 
     const semanticId = randomUUID();
     await page.route('**/api/staff/profile-search*', route => {
         meaningRequests.push(route.request().url());
-        if (route.request().method() === 'POST') { meaningQuery = route.request().postDataJSON(); return route.fulfill({ json: { queryId: semanticId, status: 'queued' } }); }
-        if (new URL(route.request().url()).searchParams.has('queryId')) return route.fulfill({ json: { status: 'completed', workerAvailable: true, results: [{ sourceType: 'candidate', sourceId: savedAlice.candidateId, directoryRow: { candidateId: savedAlice.candidateId, fullName: 'Alice Candidate', email: 'alice@example.test', headline: 'Accepted update', ownerName: null, applicationCount: 0, hasCv: false, createdAt: new Date().toISOString() } }], nextAfter: null } });
+        if (route.request().method() === 'POST') { const action = route.request().postDataJSON(); if (action.action === 'cancel') return route.fulfill({ json: { status: 'cancelled' } }); meaningQuery = action; return route.fulfill({ json: { queryId: semanticId, status: 'queued' } }); }
+        if (new URL(route.request().url()).searchParams.has('queryId')) return route.fulfill({ json: { status: 'completed', workerAvailable: true, results: [{ sourceType: 'candidate', score: 0.7, sourceId: savedAlice.candidateId, directoryRow: { candidateId: savedAlice.candidateId, fullName: 'Alice Candidate', email: 'alice@example.test', headline: 'Accepted update', ownerName: null, applicationCount: 0, hasCv: false, createdAt: new Date().toISOString() } }], nextAfter: null } });
         return route.fulfill({ json: { workerAvailable: true, cvAvailable: false } });
     });
     await page.goto(`${baseURL}/staff/candidates/search`);
@@ -280,6 +280,14 @@ test('Candidate intake has a compact chat picker and approve/edit/reject review 
     await expect(page.getByRole('table').getByText('alice@example.test', { exact: true })).toBeVisible();
     await expect(page.getByText('1 match · Best matches first', { exact: true })).toBeVisible();
     assert.equal(new URL(page.url()).pathname, '/staff/candidates');
+    await unifiedSearch.fill('six years');
+    await expect(page).toHaveURL(/q=six\+years/);
+    await expect(page.getByText('0 candidates', { exact: true })).toBeVisible();
+    await expect(page.getByRole('table').getByRole('link', { name: 'Alice Candidate', exact: true })).toHaveCount(0);
+    assert.equal(meaningQuery.query, 'Remote Ethereum engineer', 'experience constraints never fall back to unconstrained similarity');
+    await unifiedSearch.fill('Accepted update');
+    await expect(page.getByRole('table').getByRole('link', { name: 'Alice Candidate', exact: true })).toBeVisible();
+
     await page.screenshot({ path: join(root, 'test-results/candidate-unified-search.png'), fullPage: true });
     await page.goto(`${baseURL}/staff/telegram-intake`);
     await page.getByRole('button', { name: /Carol Candidate/ }).click();

@@ -8,7 +8,7 @@ import { AUTHZ_ID, installStaffFixture, staffPoolOptions } from '../support/staf
 import { CJ_SUBJECTS, clientJobFixtureSql } from '../support/client-job-workflows.js';
 import { createTelegramDraft, listTelegramDrafts, getTelegramDraft, decideTelegramDraft, updateTelegramDraft, refreshTelegramReview, registerTelegramWorker, matchTelegramReview, telegramReviewMatches } from '../../src/lib/telegram-intake-operations.js';
 import { withStaffTransaction } from '../../src/lib/staff-authorization.js';
-import { saveCandidateProfile, getCandidateProfile } from '../../src/lib/candidate-profile-operations.js';
+import { saveCandidateProfile, getCandidateProfile, listCandidateProfileDirectory } from '../../src/lib/candidate-profile-operations.js';
 import { telegramHistoryAction, telegramHistoryStatus, telegramHistoryRecentStatus, telegramOnboardingComplete } from '../../src/lib/telegram-history-operations.js';
 import { normalizeTelegramDraftFields } from '../../src/lib/telegram-intake-contracts.js';
 
@@ -45,6 +45,22 @@ test('Telegram proposals create candidates without CVs, update exact matches, fe
     assert.equal(rankedRows[0].candidateId, existingId);
     assert.equal(rankedRows[0].email, 'existing.flow@example.test');
     assert.equal(rankedRows[0].headline, 'Original');
+    const solidityId = randomUUID(), staffId = randomUUID(), sixYearsId = randomUUID();
+    for (const [candidateId, fields] of [
+        [solidityId, { fullName: 'Search Alex', email: 'search-alex@example.test', headline: 'Senior Solidity engineer', professionalSummary: 'Five years of Ethereum experience; open to remote roles.' }],
+        [staffId, { fullName: 'Search Maya', email: 'search-maya@example.test', headline: 'Staff backend engineer', professionalSummary: 'Leads a Go and Python platform team.' }],
+        [sixYearsId, { fullName: 'Search Morgan', email: 'search-morgan@example.test', headline: 'Python backend engineer', professionalSummary: 'Six years of experience; fully remote.' }],
+    ]) await saveCandidateProfile(...args, { candidateId, fields, expectedVersion: null, operationId: randomUUID() });
+    const searchIds = async q => (await listCandidateProfileDirectory(...args, { q })).rows.map(row => row.candidateId);
+    assert.deepEqual(await searchIds('Solidity'), [solidityId]);
+    assert.deepEqual(await searchIds('staff engineer'), [staffId]);
+    assert.deepEqual(await searchIds('6 years'), [sixYearsId]);
+    assert.deepEqual(await searchIds('six years of experience'), [sixYearsId]);
+    assert.deepEqual(await searchIds('Solidity engineer with at least five years of experience'), [solidityId]);
+    assert.deepEqual(await searchIds('Solidity engineer with six years'), []);
+    assert.deepEqual(await searchIds('seven years'), [], 'unknown or different experience does not satisfy an explicit constraint');
+    assert.deepEqual(await searchIds('search-alex@example.test'), [solidityId]);
+
     const update = await createTelegramDraft(...args, { fields: { firstName: 'Existing', lastName: 'Person', primaryEmail: 'existing.flow@example.test', headline: 'Updated' } });
     let review = await getTelegramDraft(...args, update.id);
     assert.equal(review.existingCandidate.id, existingId);

@@ -1,3 +1,4 @@
+import { relevantCandidateResults } from './candidate-search-query.js';
 import { withStaffTransaction } from './staff-authorization.js';
 import { assertUuid } from './candidate-profile-contracts.js';
 import { ClientJobContractError } from './client-job-contracts.js';
@@ -12,6 +13,14 @@ export function profileSearchStatus(pool, identity, org, { scope = 'approved', r
     return staff(pool, identity, org, async ({ client }) => {
         const response = await result(client, 'select app.cv_search_status_v1($1,$2,$3,$4::jsonb,$5) as result', [scope, readyOnly, queryId, cursor && JSON.stringify(cursor), includeCv]);
         if (directory && response.status === 'completed' && response.results?.length) {
+            const firstPage = cursor
+                ? await result(client, 'select app.cv_search_status_v1($1,$2,$3,$4::jsonb,$5) as result', [scope, readyOnly, queryId, null, includeCv])
+                : response;
+            if (firstPage.status !== 'completed') return firstPage;
+            const bestScore = Math.max(0, ...(firstPage.results ?? []).filter(row => row.sourceType === 'candidate').map(row => row.score));
+            response.results = relevantCandidateResults(response.results, bestScore);
+            // Results below the cutoff cannot reappear through pagination.
+            if (!response.results.length) response.nextAfter = null;
             const ids = response.results.filter(row => row.sourceType === 'candidate').map(row => row.sourceId);
             const rows = await result(client, 'select app.candidate_ranked_directory_rows_v1($1::uuid[]) as result', [ids]);
             const byId = new Map(rows.map(row => [row.candidateId, row]));
