@@ -1,3 +1,4 @@
+import { profileLinksImports } from '../support/ui-port-fixtures.js';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import test from 'node:test';
@@ -92,6 +93,7 @@ function formSubject(respond, { clientId = id, initial = client, onSaved } = {})
     });
     const hooks = persistentReact();
     const imports = {
+        ...profileLinksImports,
         './job-form': { JobForm: 'JobForm' },
         'react/jsx-runtime': jsxRuntime,
         react: hooks.react,
@@ -312,11 +314,12 @@ function detailSubject(initialClient = client, capabilities = {
     const detailCode = compile('../../src/app/staff/clients/[clientId]/client-detail.tsx');
     const hooks = persistentReact();
     const imports = {
+        ...profileLinksImports,
         './job-form': { JobForm: 'JobForm' },
         'react/jsx-runtime': jsxRuntime,
         react: hooks.react,
         'next/link': { default: 'Link' },
-        'lucide-react': { ArrowLeft: 'ArrowLeft' },
+        'lucide-react': { ArrowLeft: 'ArrowLeft', Pencil: 'Pencil' },
         '@/lib/client-job-contracts': { SOCIAL_PLATFORM_NAMES: contracts.SOCIAL_PLATFORM_NAMES },
         '@/lib/workspace-types': {},
         '@/components/staff-preview/shared': componentImports([

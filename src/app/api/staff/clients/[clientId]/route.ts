@@ -1,3 +1,4 @@
+import { readClientView } from '@/lib/client-view.server';
 import { randomUUID } from 'node:crypto';
 import { saveClientWithDetails } from '@/lib/client-job-operations';
 import {
@@ -38,4 +39,15 @@ export async function POST(
     } catch (error) {
         return privateResponse(staffErrorResponse(error));
     }
+}
+
+export async function GET(_request: Request, { params }: { params: Promise<{ clientId: string }> }) {
+    const context = await staffApiContext();
+    const denied = staffGateResponse(context);
+    if (denied) return privateResponse(denied);
+    try {
+        const { clientId } = await params;
+        const result = await readClientView({ pool: context.pool, identity: context.identity, organizationId: context.organizationId }, clientId);
+        return privateResponse(Response.json({ result }));
+    } catch (error) { return privateResponse(staffErrorResponse(error)); }
 }

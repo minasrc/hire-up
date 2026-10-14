@@ -96,6 +96,33 @@ test('staff directory pages filter all records and preserve authorization', asyn
         assert.equal((await jobs({ state: 'unlisted' })).total, 0);
         assert.equal((await jobs({ client: '93000000-0000-4000-8000-000000000001' })).total, 0);
     });
+    await t.test('client role cards return scoped locations and permission-gated application counts', async () => {
+        const read = (actor, clientId, ids, applications) => withStaffTransaction(pool, actor, AUTHZ_ID.ORG_B,
+            ['clients.read', 'jobs.read'], async ({ client }) => {
+                const { rows } = await client.query('select app.client_role_card_metadata_v1($1::uuid,$2::uuid[],$3::boolean) as result', [clientId, ids, applications]);
+                return rows[0].result;
+            });
+        const cards = await read(admin, CJ_ID.CLIENT_LEGACY_B, [CJ_ID.JOB_LEGACY_B], true);
+        assert.equal(cards.length, 1);
+        assert.equal(cards[0].id, CJ_ID.JOB_LEGACY_B);
+        assert.equal(cards[0].locationDisplay, 'Berlin');
+        assert.equal(cards[0].applications, 1);
+        assert.equal((await read(admin, CJ_ID.CLIENT_LEGACY_B, [CJ_ID.JOB_LEGACY_B], false))[0].applications, null);
+        assert.deepEqual(await read(admin, CJ_ID.CLIENT_LEGACY_B, ['92000000-0000-4000-8000-000000000001'], true), []);
+        await assert.rejects(read(admin, '93000000-0000-4000-8000-000000000001', [CJ_ID.JOB_LEGACY_B], true));
+        await assert.rejects(read(admin, CJ_ID.CLIENT_LEGACY_B, Array(51).fill(CJ_ID.JOB_LEGACY_B), true), error => error.code === '22023');
+        psql(container, `update app.candidates set lifecycle='restricted' where id='${CJ_ID.CANDIDATE_B}';`);
+        try { assert.equal((await read(admin, CJ_ID.CLIENT_LEGACY_B, [CJ_ID.JOB_LEGACY_B], true))[0].applications, 0); }
+        finally { psql(container, `update app.candidates set lifecycle='active' where id='${CJ_ID.CANDIDATE_B}';`); }
+        psql(container, `delete from app.role_permissions where organization_id='${AUTHZ_ID.ORG_B}' and role_id='${AUTHZ_ID.ROLE_B_ADMIN}' and permission_key='applications.read';`);
+        try {
+            assert.equal((await read(admin, CJ_ID.CLIENT_LEGACY_B, [CJ_ID.JOB_LEGACY_B], false))[0].applications, null);
+            await assert.rejects(read(admin, CJ_ID.CLIENT_LEGACY_B, [CJ_ID.JOB_LEGACY_B], true), error => error.code === 'FORBIDDEN' || error.code === '42501');
+        } finally {
+            psql(container, `insert into app.role_permissions(organization_id,role_id,permission_key) values('${AUTHZ_ID.ORG_B}','${AUTHZ_ID.ROLE_B_ADMIN}','applications.read') on conflict do nothing;`);
+        }
+    });
+
     await t.test('base tables are authorized once instead of rescanned for every join row', async () => {
         const migration = readFileSync(new URL('20261002120000_staff_list_pagination.sql', migrationRoot), 'utf8');
         let sql = migration.split('create function app.list_job_directory_v1')[1].split('    return (')[1].split('    );')[0];
@@ -157,6 +184,7 @@ test('staff directory pages filter all records and preserve authorization', asyn
 
         const second = await candidates({ q: 'Page candidate', page: '2' });
         assert.equal(first.total, 620);
+
         assert.equal(first.rows.length, 50);
         assert.equal(first.rows[0].fullName, 'Page candidate 620');
         assert.equal(first.profileOptions.canWrite, true);
@@ -208,6 +236,11 @@ test('staff directory pages filter all records and preserve authorization', asyn
         assert.equal(exchanges, 5);
         assert.equal(first.total, 620);
         assert.equal(first.scopeTotal, 620);
+        for (const alias of ['active', 'to_review', 'closed']) {
+            const filtered = await listApplicationDirectory(pool, admin, AUTHZ_ID.ORG_B, { q: 'Page candidate', stage: alias });
+            const expected = first.stages.filter((stage) => alias === 'active' ? stage.kind === 'active' : alias === 'closed' ? ['hired', 'rejected', 'withdrawn'].includes(stage.kind) : ['new', 'review', 'reviewing'].includes(stage.key)).reduce((sum, stage) => sum + stage.count, 0);
+            assert.equal(filtered.total, expected, `${alias} preserves global counts before pagination`);
+        }
         assert.equal(first.rows.length, 50);
         assert.equal(first.rows[0].candidateName, 'Page candidate 620');
         assert.equal(first.stages.reduce((sum, stage) => sum + stage.count, 0), 620);

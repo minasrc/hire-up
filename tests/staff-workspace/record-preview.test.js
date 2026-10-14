@@ -53,6 +53,7 @@ const migrations = [
     '20261009090000_document_preview_versions.sql',
     '20261010090000_staff_notifications.sql',
     '20261014190000_application_review_filters.sql',
+    '20261014191000_client_role_card_metadata.sql',
 ];
 
 async function waitForServer(url) {

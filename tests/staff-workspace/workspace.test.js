@@ -75,12 +75,13 @@ const MIGRATIONS = [
     '20261004100000_staff_candidate_directory.sql',
     '20261014140000_candidate_hybrid_search.sql',
     '20261004110000_staff_application_directory.sql',
+    '20261014190000_application_review_filters.sql',
+    '20261014191000_client_role_card_metadata.sql',
     '20261003090000_staff_mfa_backup_codes.sql',
     '20261006090000_staff_totp_stable_enrollment.sql',
     '20261007090000_staff_mfa_admin_recovery.sql',
     '20261010090000_staff_notifications.sql',
     '20261011090000_staff_time_zone.sql',
-    '20261014190000_application_review_filters.sql',
 ];
 
 const NEXTAUTH_SECRET = 'synthetic-workspace-secret';
@@ -516,10 +517,8 @@ test('staff workspace end-to-end in a real browser', async (t) => {
             for (const directory of ['candidates', 'applications']) {
                 await gotoStaff(page, `${baseURL}/staff/${directory}?q=Paging+UI`);
                 await expect(page.getByRole('table').locator('tbody tr')).toHaveCount(50);
-                if (['candidates', 'applications'].includes(directory)) {
-                    const viewport = await page.getByRole('table').evaluate(table => ({ height: table.parentElement.clientHeight, scrollHeight: table.parentElement.scrollHeight }));
-                    assert.ok(viewport.height <= 640 && viewport.scrollHeight > viewport.height);
-                }
+                const viewport = await page.getByRole('table').evaluate(table => ({ height: table.parentElement.clientHeight, scrollHeight: table.parentElement.scrollHeight }));
+                assert.ok(viewport.height <= 640 && viewport.scrollHeight > viewport.height, 'large directories stay bounded and scroll within the table');
                 const pages = page.getByRole('navigation', { name: 'Directory pages' });
                 await expect(pages).toHaveText(/Page 1 of 2.*1–50 of 51/);
                 await pages.getByRole('button', { name: 'Next', exact: true }).click();
@@ -882,11 +881,13 @@ test('staff workspace end-to-end in a real browser', async (t) => {
         createdClientId = page.url().split('/').pop();
         await page.getByText('Synthetic Browser Client').first().waitFor();
 
-        await page.reload({ waitUntil: 'domcontentloaded' });
+        await page.reload({ waitUntil: 'networkidle' });
         const body = page.getByRole('main').last();
         await expect(body).toContainText('Synthetic Browser Client');
         await expect(body).toContainText('Casey Example');
-        await expect(body).toContainText('LinkedIn · https://linkedin.com/company/synthetic');
+        await expect(page.getByRole('link', { name: 'LinkedIn (opens in a new tab)' })).toHaveAttribute('href', 'https://linkedin.com/company/synthetic');
+        await page.getByRole('button', { name: 'Edit client', exact: true }).click();
+        await expect(page.getByRole('dialog', { name: 'Edit client', exact: true })).toBeVisible();
         await expect(page.getByRole('combobox', { name: 'Social link 1 platform' }))
             .toContainText('LinkedIn');
         await expect(page.locator('#social-url-0').filter({ visible: true }))
@@ -907,6 +908,7 @@ test('staff workspace end-to-end in a real browser', async (t) => {
         page.on('request', trackRsc);
         try {
             await gotoStaff(page, `${baseURL}/staff/clients/${createdClientId}`);
+            await page.getByRole('button', { name: 'Edit client', exact: true }).click();
             await fillWhenReady(
                 page.locator('#client-name'), 'Synthetic Browser Client Renamed');
             const updated = page.waitForResponse(
@@ -919,12 +921,13 @@ test('staff workspace end-to-end in a real browser', async (t) => {
             assert.equal(firstPayload.result.client.version, '2');
             assert.equal(firstPayload.result.client.name, 'Synthetic Browser Client Renamed');
             assert.equal(firstResponse.headers()['cache-control'], 'private, no-store');
-            await page.getByRole('status').filter({ hasText: 'Changes saved.' })
+            await page.getByRole('status').filter({ hasText: 'Client updated.' })
                 .waitFor();
             await expect(page.getByRole('heading', {
                 name: 'Synthetic Browser Client Renamed', exact: true,
             })).toBeVisible();
 
+            await page.getByRole('button', { name: 'Edit client', exact: true }).click();
             await fillWhenReady(page.locator('#client-contact-name'), 'Casey Updated');
             const secondUpdated = page.waitForResponse(
                 (response) => response.url().includes('/api/staff/clients')
@@ -935,12 +938,14 @@ test('staff workspace end-to-end in a real browser', async (t) => {
             const secondPayload = await secondResponse.json();
             assert.equal(secondPayload.result.client.version, '3');
             await expect(page.getByText('Casey Updated', { exact: true })).toBeVisible();
-            await page.getByRole('status').filter({ hasText: 'Changes saved.' })
+            await page.getByRole('status').filter({ hasText: 'Client updated.' })
                 .waitFor();
             await page.waitForLoadState('networkidle');
             assert.equal(rscRequests.length, 0);
 
-            await page.reload({ waitUntil: 'domcontentloaded' });
+            await page.reload({ waitUntil: 'networkidle' });
+            await page.getByRole('button', { name: 'Edit client', exact: true }).click();
+            await expect(page.getByRole('dialog', { name: 'Edit client', exact: true })).toBeVisible();
             // Streaming can briefly leave both the placeholder and its replacement
             // in the DOM; wait for one field before making a strict value assertion.
             await expect(page.locator('#client-name')).toHaveCount(1);
@@ -1581,7 +1586,7 @@ test('staff workspace end-to-end in a real browser', async (t) => {
         assert.equal(jobsUrl.searchParams.get('intake'), 'open');
         await gotoStaff(page, `${baseURL}/staff`);
         await page.getByRole('link', { name: /^Candidates \d+$/ }).click();
-        await page.waitForURL(/\/staff\/candidates$/);
+        await page.waitForURL(url => url.pathname === '/staff/candidates');
         await gotoStaff(page, `${baseURL}/staff`);
         await page.getByLabel('Application review tasks')
             .getByRole('link', { name: 'Synthetic Candidate B' }).click();
@@ -1646,6 +1651,24 @@ test('staff workspace end-to-end in a real browser', async (t) => {
             'true',
         );
         await page.getByText('Synthetic Candidate B').waitFor();
+    });
+
+    await runCase('client counters stay inside their backgrounds at desktop and mobile widths', async () => {
+        await gotoStaff(page, `${baseURL}/staff/clients/${CJ_ID.CLIENT_LEGACY_B}`);
+        await page.getByText('Interviewing', { exact: true }).waitFor();
+        try {
+            for (const width of [1280, 390]) {
+                await page.setViewportSize({ width, height: 1000 });
+                await expect(async () => {
+                    const overflow = await page.locator('dt').filter({ hasText: /Open roles|Applications|Interviewing/ }).evaluateAll(labels => labels.some(label => {
+                        const box = label.getBoundingClientRect();
+                        const background = label.parentElement.getBoundingClientRect();
+                        return label.scrollWidth > label.clientWidth || box.left < background.left || box.right > background.right;
+                    }));
+                    assert.equal(overflow, false);
+                }).toPass();
+            }
+        } finally { await page.setViewportSize({ width: 1280, height: 1000 }); }
     });
 
     await runCase('job locations respect workplace mode and preview each place once', async () => {
@@ -2198,7 +2221,9 @@ test('staff workspace end-to-end in a real browser', async (t) => {
             await gotoStaff(page, `${baseURL}/staff/jobs/new`);
             await expect(page.locator('#job-client')).toBeVisible();
             await gotoStaff(page, `${baseURL}/staff/clients/${CJ_ID.CLIENT_LEGACY_B}`);
+            await page.getByRole('button', { name: 'Edit client', exact: true }).click();
             await expect(page.locator('#client-name')).toBeVisible();
+            await page.getByRole('dialog', { name: 'Edit client', exact: true }).getByRole('button', { name: 'Cancel', exact: true }).click();
             await expect(page.getByRole('link', { name: 'Add job', exact: true })).toBeVisible();
             await gotoStaff(page, `${baseURL}/staff/jobs/${CJ_ID.JOB_LEGACY_B}`);
             await expect(page.getByRole('heading', { name: 'Legacy Synthetic Job', exact: true })).toBeVisible();
@@ -2243,16 +2268,48 @@ test('staff workspace end-to-end in a real browser', async (t) => {
         await page.getByRole('link', { name: /^Candidates \d+$/ }).waitFor();
     });
 
+    await runCase('client preview preserves the list and the editor safely discards unsaved changes', async () => {
+        await gotoStaff(page, `${baseURL}/staff/clients?q=Synthetic+Browser`);
+        const listUrl = page.url();
+        const clientLink = page.getByRole('link', { name: 'Synthetic Browser Client Renamed', exact: true });
+        await clientLink.click();
+        const preview = page.getByRole('dialog', { name: 'Synthetic Browser Client Renamed', exact: true });
+        await expect(preview).toBeVisible();
+        await expect(page).toHaveURL(listUrl);
+        await expect(preview.getByRole('heading', { name: 'Client details' })).toBeVisible();
+        await expect(preview.getByRole('link', { name: 'LinkedIn (opens in a new tab)' })).toBeVisible();
+        await preview.getByRole('link', { name: 'Open full client' }).click();
+        await page.waitForURL(`${baseURL}/staff/clients/${createdClientId}`);
+        await expect(page.locator('#client-name')).toHaveCount(0);
+        await expect(page.getByRole('heading', { name: 'Recent applications' })).toBeVisible();
+        await page.getByRole('button', { name: 'Edit client', exact: true }).click();
+        const editor = page.getByRole('dialog', { name: 'Edit client', exact: true });
+        await expect(editor).toBeVisible();
+        await editor.locator('#client-name').fill('Unsaved client name');
+        await editor.getByRole('button', { name: 'Cancel', exact: true }).click();
+        const discard = page.getByRole('dialog', { name: 'Discard unsaved changes?' });
+        await expect(discard).toBeVisible();
+        await discard.getByRole('button', { name: 'Keep editing' }).click();
+        await expect(editor.locator('#client-name')).toHaveValue('Unsaved client name');
+        await editor.getByRole('button', { name: 'Cancel', exact: true }).click();
+        await discard.getByRole('button', { name: 'Discard changes' }).click();
+        await expect(editor).toBeHidden();
+        await expect(page.getByRole('heading', { name: 'Synthetic Browser Client Renamed', exact: true })).toBeVisible();
+        await page.getByRole('button', { name: 'Edit client', exact: true }).click();
+        await expect(page.locator('#client-name')).toHaveValue('Synthetic Browser Client Renamed');
+        await page.getByRole('dialog', { name: 'Edit client', exact: true }).getByRole('button', { name: 'Cancel', exact: true }).click();
+    });
+
     await runCase('client navigation opens saved links, filtered applications and a preselected job form on mobile', async () => {
         const jobsBefore = psql(container, `select count(*) from app.jobs where organization_id = '${ORG_ID}'`);
         await page.setViewportSize({ width: 390, height: 1000 });
         try {
             await gotoStaff(page, `${baseURL}/staff/clients/${createdClientId}`);
-            const social = page.getByRole('list', { name: 'Client social links' }).getByRole('link');
+            const social = page.getByRole('list', { name: 'Company profiles' }).getByRole('link', { name: 'LinkedIn (opens in a new tab)', exact: true });
             await expect(social).toHaveAttribute('href', 'https://linkedin.com/company/synthetic');
             await expect(social).toHaveAttribute('target', '_blank');
-            await expect(social).toHaveAttribute('rel', 'noreferrer');
-            await expect(social).toContainText('LinkedIn');
+            await expect(social).toHaveAttribute('rel', 'noopener noreferrer');
+            await expect(social).toHaveAttribute('aria-label', 'LinkedIn (opens in a new tab)');
             await expect(social).toBeVisible();
             assert.equal(await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth), 0);
             await page.screenshot({ path: join(resultsDir, 'staff-client-navigation-mobile.png') });
@@ -2343,6 +2400,7 @@ test('staff workspace end-to-end in a real browser', async (t) => {
         page.on('request', countPosts);
         try {
             await gotoStaff(page, `${baseURL}/staff/clients/${fixtureId}`);
+            await page.getByRole('button', { name: 'Edit client', exact: true }).click();
             await fillWhenReady(
                 page.locator('#client-contact-name'), 'Casey Valid');
             await fillWhenReady(
@@ -2411,11 +2469,13 @@ test('staff workspace end-to-end in a real browser', async (t) => {
                     && response.request().method() === 'POST' && response.ok());
             await page.getByRole('button', { name: 'Save changes' }).click();
             await saved;
-            await page.getByRole('status').filter({ hasText: 'Changes saved.' })
+            await page.getByRole('status').filter({ hasText: 'Client updated.' })
                 .waitFor();
             assert.equal(clientPosts.length, 1);
 
-            await page.reload({ waitUntil: 'domcontentloaded' });
+            await page.reload({ waitUntil: 'networkidle' });
+            await page.getByRole('button', { name: 'Edit client', exact: true }).click();
+            await expect(page.getByRole('dialog', { name: 'Edit client', exact: true })).toBeVisible();
             await expect(page.locator('#client-telegram')).toHaveValue('valid_user');
             await expect(page.locator('#client-website'))
                 .toHaveValue('https://www.google.com');
@@ -2433,6 +2493,8 @@ test('staff workspace end-to-end in a real browser', async (t) => {
             assert.equal(
                 enterResponse.request().postDataJSON()?.fields?.website,
                 'https://www.example.org');
+            await page.getByRole('status').filter({ hasText: 'Client updated.' }).waitFor();
+            await page.getByRole('button', { name: 'Edit client', exact: true }).click();
             await expect(page.locator('#client-website'))
                 .toHaveValue('https://www.example.org');
         } finally {
@@ -2470,6 +2532,7 @@ test('staff workspace end-to-end in a real browser', async (t) => {
         });
         try {
             await gotoStaff(page, `${baseURL}/staff/clients/${fixtureId}`);
+            await page.getByRole('button', { name: 'Edit client', exact: true }).click();
             await fillWhenReady(
                 page.locator('#client-contact-name'), 'Casey Server');
             await fillWhenReady(

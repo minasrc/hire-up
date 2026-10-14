@@ -150,10 +150,12 @@ export function ClientForm({
     clientId,
     initial,
     onSaved,
+    onStateChange,
 }: {
     clientId?: string;
     initial?: ClientFormValues;
     onSaved?: (client: SavedClient) => void;
+    onStateChange?: (state: { dirty: boolean; busy: boolean }) => void;
 }) {
     const router = useRouter();
     const formRef = useRef<HTMLFormElement>(null);
@@ -172,6 +174,7 @@ export function ClientForm({
     const [socialError, setSocialError] = useState<string | null>(null);
     const [values, setValues] = useState(() => clientFields(initial));
     const [links, setLinks] = useState(() => clientLinks(initial));
+    useEffect(() => { onStateChange?.({ dirty, busy }); }, [dirty, busy, onStateChange]);
     const newerSnapshot = initial && baseVersion
         && BigInt(initial.version) > BigInt(baseVersion);
 
