@@ -52,6 +52,7 @@ const migrations = [
     '20261014140000_candidate_hybrid_search.sql',
     '20261009090000_document_preview_versions.sql',
     '20261010090000_staff_notifications.sql',
+    '20261014190000_application_review_filters.sql',
 ];
 
 async function waitForServer(url) {
