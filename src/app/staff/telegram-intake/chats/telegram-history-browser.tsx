@@ -213,7 +213,7 @@ export function TelegramHistoryBrowser({ workspaceId, hostedEnabled = false, onb
     }, [snapshot, busy, loading, denied]);
 
     return <section className="flex w-full flex-col gap-3">
-        <header className="mx-auto flex w-full max-w-6xl flex-wrap items-center justify-between gap-2"><h1 className="text-[26px] leading-8 font-medium text-foreground">{onboarding ? 'Connect Telegram' : 'Choose chats'}</h1><div className="flex gap-2"><Button asChild size="sm" variant="outline"><Link href="/staff/telegram-intake">Proposals</Link></Button><Button asChild size="sm" variant="outline"><Link href="/staff/candidates">Search candidates</Link></Button></div></header>
+        <header className="mx-auto flex w-full max-w-6xl flex-wrap items-center justify-between gap-2"><h1 className="text-[26px] leading-8 font-medium text-foreground">{onboarding ? 'Connect Telegram' : 'Choose chats'}</h1><div className="flex gap-2">{proposalCount === 0 ? <Button asChild size="sm" variant="outline"><Link href="/staff/telegram-intake">Proposals</Link></Button> : null}<Button asChild size="sm" variant="outline"><Link href="/staff/candidates">Search candidates</Link></Button></div></header>
         {onboarding ? <ol aria-label="Telegram onboarding steps" className="flex w-full items-center gap-3 py-3 text-sm text-muted-foreground">
             {['Connect', 'Choose chats', 'Review'].map((label, index) => {
                 const active = proposalCount > 0 ? 2 : snapshot?.canImport ? 1 : 0;
