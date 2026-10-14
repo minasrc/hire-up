@@ -5,7 +5,7 @@ import { staffWorkspaceFetch } from '@/lib/staff-workspace-fetch';
 import { createStaffRefresh } from '@/lib/staff-refresh';
 import { staffAuthRecovery } from '@/lib/staff-auth-recovery';
 import { StaffAuthRecoveryPrompt, useStaffAuthRecovery } from './auth-recovery';
-import Link from 'next/link';
+import Link, { useLinkStatus } from 'next/link';
 import { usePathname } from 'next/navigation';
 import { signOut } from 'next-auth/react';
 import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
@@ -23,6 +23,7 @@ import {
     Settings,
     KeyRound,
     LogOut,
+    LoaderCircle,
     Send,
     UserCog,
     Users,
@@ -83,6 +84,12 @@ function useSection(pathname: string) {
     return { section, detail };
 }
 
+function NavLinkProgress({ label, compact }: { label: string; compact: boolean }) {
+    const { pending } = useLinkStatus();
+    if (!pending) return null;
+    return <span role="status" aria-label={`Opening ${label}`} className={compact ? 'absolute bottom-0 right-0 rounded-full bg-card p-0.5' : 'ml-auto'}><LoaderCircle aria-hidden="true" className="h-3.5 w-3.5 motion-safe:animate-spin" /></span>;
+}
+
 export function NavLinks({
     pathname,
     capabilities,
@@ -115,7 +122,7 @@ export function NavLinks({
                         aria-label={item.label}
                         title={compact ? item.label : undefined}
                         className={cn(
-                            'flex items-center gap-3 rounded-lg text-sm font-medium outline-none transition-colors focus-visible:ring-2 focus-visible:ring-ring',
+                            'relative flex items-center gap-3 rounded-lg text-sm font-medium outline-none transition-colors focus-visible:ring-2 focus-visible:ring-ring',
                             compact ? 'h-10 w-10 justify-center px-0' : 'px-3 py-2',
                             active
                                 ? 'bg-nav-active font-semibold text-foreground'
@@ -124,6 +131,7 @@ export function NavLinks({
                     >
                         <Icon className="h-4 w-4 shrink-0" aria-hidden="true" />
                         <span className={compact ? 'sr-only' : undefined}>{item.label}</span>
+                        <NavLinkProgress label={item.label} compact={compact} />
                     </Link>
                 );
             })}

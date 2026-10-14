@@ -142,7 +142,25 @@ test('Candidate intake has a compact chat picker and approve/edit/reject review 
     await page.setViewportSize({ width: 1440, height: 1000 });
     await page.screenshot({ path: join(root,'test-results/candidate-review-columns.png'), fullPage: true });
     await page.getByRole('button', { name: 'Save and approve', exact: true }).click();
-    await expect(page.getByText('Alice Candidate saved.', { exact: true })).toBeVisible();
+    try { await expect(page.getByText('Alice Candidate saved.', { exact: true })).toBeVisible(); } catch (error) {
+        t.diagnostic((await page.locator('body').innerText()).slice(-3500));
+        t.diagnostic(output.join('').split('\n').filter(line => line.includes('telegram operation failed')).join('\n'));
+        await page.screenshot({ path: join(root, 'test-results/approval-navigation-failure.png'), fullPage: true });
+        throw error;
+    }
+    let releaseNavigation;
+    const navigationReady = new Promise(resolve => { releaseNavigation = resolve; });
+    await page.route('**/staff/candidates?*', async route => {
+        if (route.request().headers().rsc === '1') await navigationReady;
+        await route.continue();
+    });
+    await sidebar.getByRole('link', { name: 'Candidates', exact: true }).click();
+    await expect(sidebar.getByRole('status', { name: 'Opening Candidates', exact: true })).toBeVisible();
+    await page.screenshot({ path: join(root, 'test-results/candidate-navigation-pending.png'), fullPage: true });
+    releaseNavigation();
+    await expect(page).toHaveURL(`${baseURL}/staff/candidates`);
+    await expect(page.getByRole('table').getByRole('link', { name: 'Alice Candidate', exact: true })).toBeVisible();
+    await page.unroute('**/staff/candidates?*');
     const savedAlice = (await (await context.request.get(`${draftsURL}/${first.id}`)).json()).result;
     const partial = await createDraft('Alice', 'Accepted update', { location: 'Rejected location', professionalSummary: 'Proposed summary' });
     await page.goto(`${baseURL}/staff/telegram-intake?draft=${partial.id}`);
