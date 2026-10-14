@@ -266,6 +266,7 @@ test('Candidate intake has a compact chat picker and approve/edit/reject review 
     await page.goto(`${baseURL}/staff/candidates/search`);
     await expect(page).toHaveURL(`${baseURL}/staff/candidates`);
     await expect(page.getByRole('heading', { name: 'Candidates', exact: true })).toBeVisible();
+    await expect(page.getByRole('link', { name: 'Review proposals (1)', exact: true })).toBeVisible();
     const unifiedSearch = page.getByRole('textbox', { name: 'Search candidates', exact: true });
     await unifiedSearch.fill('alice@example.test');
     await expect(page.getByRole('table').getByRole('link', { name: 'Alice Candidate', exact: true })).toBeVisible();
@@ -280,5 +281,11 @@ test('Candidate intake has a compact chat picker and approve/edit/reject review 
     await expect(page.getByText('1 match · Best matches first', { exact: true })).toBeVisible();
     assert.equal(new URL(page.url()).pathname, '/staff/candidates');
     await page.screenshot({ path: join(root, 'test-results/candidate-unified-search.png'), fullPage: true });
+    await page.goto(`${baseURL}/staff/telegram-intake`);
+    await page.getByRole('button', { name: /Carol Candidate/ }).click();
+    await page.getByRole('button', { name: 'Reject', exact: true }).click();
+    await expect(page.getByText('Proposal archived.', { exact: true })).toBeVisible();
+    await page.goto(`${baseURL}/staff/candidates`);
+    await expect(page.getByRole('link', { name: /Review proposals/ })).toHaveCount(0);
     assert.deepEqual(clientErrors, []);
 });

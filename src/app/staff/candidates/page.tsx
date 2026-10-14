@@ -1,3 +1,6 @@
+import { listTelegramDrafts } from '@/lib/telegram-intake-operations';
+import { loadStaffCapabilities } from '@/lib/workspace.server';
+import type { IntakeResult } from '../telegram-intake/intake-model';
 import { listCandidateProfileDirectory } from '@/lib/candidate-profile-operations';
 import { StaffAuthorizationError } from '@/lib/staff-authorization';
 import { requireStaffVerified } from '@/lib/staff-gate.server';
@@ -32,6 +35,17 @@ export default async function StaffCandidatesPage({ searchParams }: {
         if (!(error instanceof StaffAuthorizationError && error.code === 'FORBIDDEN')) throw error;
     }
 
+    let pendingProposalCount = 0;
+    if (candidates !== null && profileOptions?.canWrite && process.env.TELEGRAM_INTAKE_ENABLED === '1') {
+        const { capabilities } = await loadStaffCapabilities();
+        if (capabilities?.telegram) {
+            try {
+                const inbox: IntakeResult = await listTelegramDrafts(gate.pool, gate.identity, gate.organizationId, { view: 'all' });
+                pendingProposalCount = inbox.counts.all;
+            } catch { /* An unavailable inbox must not block the candidate directory. */ }
+        }
+    }
+
     return (
         <section className="mx-auto w-full max-w-7xl">
             {candidates === null ? (
@@ -52,6 +66,7 @@ export default async function StaffCandidatesPage({ searchParams }: {
                 <CandidatesBrowser
                     candidates={candidates}
                     semanticSearchEnabled={process.env.TELEGRAM_INTAKE_ENABLED === '1'}
+                    pendingProposalCount={pendingProposalCount}
                     total={total}
                     page={page}
                     pageSize={pageSize}

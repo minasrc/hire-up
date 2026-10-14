@@ -63,6 +63,7 @@ export function CandidatesBrowser({
     profileOptions = null,
     profileUnavailable = false,
     semanticSearchEnabled = false,
+    pendingProposalCount = 0,
 }: {
     candidates: CandidateRow[];
     total: number;
@@ -72,6 +73,7 @@ export function CandidatesBrowser({
     profileOptions?: CandidateProfileOptions | null;
     profileUnavailable?: boolean;
     semanticSearchEnabled?: boolean;
+    pendingProposalCount?: number;
 }) {
     const router = useRouter();
     const clientReady = useSyncExternalStore(subscribeToHydration, clientSnapshot, serverSnapshot);
@@ -117,7 +119,7 @@ export function CandidatesBrowser({
                         Clear
                     </Button>
                 ) : null}
-                {semanticSearchEnabled && profileOptions?.canWrite === true ? <><Button asChild variant="outline"><Link href="/staff/telegram-intake">Review proposals</Link></Button></> : null}
+                {pendingProposalCount > 0 && profileOptions?.canWrite === true ? <Button asChild variant="outline"><Link href="/staff/telegram-intake">Review proposals ({pendingProposalCount})</Link></Button> : null}
                 {canReviewDuplicates ? (
                     <Button asChild variant="outline">
                         <Link href="/staff/candidates/duplicates">Review matches</Link>
