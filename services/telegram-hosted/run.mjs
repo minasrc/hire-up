@@ -5,7 +5,7 @@ import { existsSync } from 'node:fs';
 import { join } from 'node:path';
 import { setTimeout as delay } from 'node:timers/promises';
 import { readPrivateJson, createServiceStore } from './store.mjs';
-import { createControlClient } from './http.mjs';
+import { createControlClient, serviceOrigin } from './http.mjs';
 import { createSupervisor } from './supervisor.mjs';
 import { acquireLock, unlockStoppedProcess } from '../telegram-connector/vault.mjs';
 import { createProcessingPool } from './processing-pool.mjs';
@@ -34,7 +34,7 @@ try {
     if (existsSync(join(store.root, 'connector.lock'))) unlockStoppedProcess(store.root);
     release = acquireLock(store.root);
     const processingPool = config.processing ? createProcessingPool({
-      createWorkers: await createProcessingWorkers({ ...config.processing, server: config.server }), output,
+      createWorkers: await createProcessingWorkers({ ...config.processing, server: serviceOrigin(config.server) }), output,
       ...(config.processing.limits ? { limits: config.processing.limits } : {}),
     }) : null;
     supervisor = createSupervisor({ control, store, api, processingPool,
