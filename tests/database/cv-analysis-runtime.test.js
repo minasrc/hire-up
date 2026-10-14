@@ -45,11 +45,14 @@ test('attachment-only CVs become reviewed candidates without losing field edits 
   });
   const dir = fileURLToPath(new URL('../../supabase/migrations/', import.meta.url));
   for (const name of readdirSync(dir).filter(name => name >= '20260922090000_foundation_roles.sql' && name <= '20261002210000_cv_search.sql' && name.endsWith('.sql')).sort()) psql(db, readFileSync(join(dir, name), 'utf8'));
+  psql(db, readFileSync(join(dir, '20261014160000_telegram_cv_recovery.sql'), 'utf8'));
   const password = installStaffFixture(db); psql(db, clientJobFixtureSql);
   pool = new pg.Pool(staffPoolOptions(db, password, 3));
   const workerPassword = randomUUID();
   psql(db, `create role extraction_runtime_test login noinherit nosuperuser nocreatedb nocreaterole nobypassrls password '${workerPassword}'; grant app_telegram_worker to extraction_runtime_test;`);
   workerPool = new pg.Pool({ ...staffPoolOptions(db, workerPassword, 3), user: 'extraction_runtime_test' });
+  assert.equal(psql(db, "select has_function_privilege('app_staff','app.telegram_cv_auto_bootstrap_v1(text)','EXECUTE') or has_function_privilege('app_telegram_worker','app.telegram_cv_auto_bootstrap_v1(text)','EXECUTE')").trim(), 'f', 'automatic bootstrap remains private to the authorized claim procedure');
+  await assert.rejects(cvAnalysisWorkerOperation(workerPool, randomBytes(48).toString('base64url'), 'claim', {}), error => error.code === '42501', 'unregistered tokens cannot create CV drafts');
   const staff = (sql, args = []) => withStaffTransaction(pool, owner, org, ['candidates.read', 'candidates.write'], async ({ client }) => (await client.query(sql, args)).rows[0]?.result);
   const token = randomBytes(48).toString('base64url');
   const registered = await staff('select app.telegram_register_worker_v1($1,$2) as result', ['Synthetic extraction Mac', token]);
@@ -83,8 +86,9 @@ test('attachment-only CVs become reviewed candidates without losing field edits 
   const records = documents.map((doc, index) => ({ messageId: String(index + 1), kind: 'message', sentAt: '2026-09-29T12:00:00.000Z', editedAt: null,
     sender: { peer, username: 'unrelated_recruiter', displayName: 'Recruiter sharing a CV' }, replyToMessageId: null, forwardedFrom: null, text: '',
     attachments: [{ id: String(index + 10), kind: 'document', filename: `Synthetic CV.${doc.extension}`, mimeType: doc.mimeType, sizeBytes: doc.bytes.length }] }));
+  records.push({ ...records[0], messageId: '3', attachments: [{ ...records[0].attachments[0], id: '30', filename: 'Talent NDA.pdf' }] });
   await history('complete', { jobId: importJob.id, jobLeaseToken: importJob.leaseToken, pageId: randomUUID(), fromCursor: importJob.cursor,
-    nextCursor: { beforeMessageId: '1', upperMessageId: '2' }, done: false, records });
+    nextCursor: { beforeMessageId: '1', upperMessageId: '3' }, done: false, records });
   const finalPage = (await history('claim')).job;
   await history('complete', { jobId: finalPage.id, jobLeaseToken: finalPage.leaseToken, pageId: randomUUID(), fromCursor: finalPage.cursor, nextCursor: finalPage.cursor, done: true, records: [] });
   await telegramExtractionAction(pool, owner, org, { action: 'enqueue', chatIds: [chat.id] });
@@ -92,6 +96,12 @@ test('attachment-only CVs become reviewed candidates without losing field edits 
   await telegramExtractionWorkerOperation(workerPool, token, 'complete', { jobId: textJob.id, leaseToken: textJob.leaseToken, sourceDigest: textJob.sourceDigest,
     result: { subjects: [] }, metadata: { model: 'synthetic-model', promptVersion: 'candidate-extraction-prompt-v1', reportedModel: null } });
   const batch = await telegramExtractionStatus(pool, owner, org, { jobId: textJob.id });
+  psql(db, `update app.telegram_extraction_jobs set status='failed',error_code='INVALID_RESULT' where id='${textJob.id}'`);
+  assert.equal((await cvAnalysisWorkerOperation(workerPool, token, 'claim', {})).job, null);
+  assert.equal(psql(db, 'select count(*) from app.telegram_cv_jobs').trim(), '2', 'failed chat extraction still queues both labelled CVs');
+  assert.equal(psql(db, "select count(*) from app.telegram_cv_jobs where source->>'messageId'='3'").trim(), '0', 'NDAs are not automatically treated as CVs');
+  await cvAnalysisWorkerOperation(workerPool, token, 'claim', {});
+  assert.equal(psql(db, 'select count(*) from app.telegram_cv_jobs').trim(), '2', 'repeated polling does not create duplicate drafts or retrievals');
   const maintenancePassword = randomUUID();
   psql(db, `create role maintenance_runtime_test login noinherit nosuperuser nocreatedb nocreaterole nobypassrls password '${maintenancePassword}'; grant app_telegram_maintenance to maintenance_runtime_test;`);
   maintenancePool = new pg.Pool({ ...staffPoolOptions(db, maintenancePassword, 1), user: 'maintenance_runtime_test' });
@@ -241,6 +251,7 @@ test('attachment-only CVs become reviewed candidates without losing field edits 
     assert.equal(objects.size, index + 1, 'Approved CV bytes survive private parsed-text cleanup');
     assert.ok(parsed.blocks.some(block => block.text.includes(email)), 'DOCX header email is included');
   }
+  psql(db, `update app.telegram_extraction_jobs set status='completed',error_code=null where id='${textJob.id}'`);
   const latestBatch = await telegramExtractionStatus(pool, owner, org, { jobId: textJob.id });
   await telegramExtractionAction(pool, owner, org, { action: 'sourceRetention', jobId: textJob.id, expectedSourceVersion: latestBatch.sourceRetention.version, mode: 'release_after_review' });
   await maintenance();

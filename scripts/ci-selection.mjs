@@ -20,6 +20,10 @@ const all = () => ({ selection: Object.fromEntries(JOBS.map((job) => [job, true]
 // applies this migration and checks its permissions, lifecycle and audit rules.
 // Pin its contents: editing or deleting it must restore full schema coverage.
 const SCOPED_MIGRATIONS = {
+    'supabase/migrations/20261014160000_telegram_cv_recovery.sql': {
+        sha256: 'f27346a70b242b7cb3fdd68c0840efef6c9fd55bd322d781196c15cea4bc287c',
+        jobs: ['cv-analysis', 'telegram-cv', 'telegram-extraction', 'telegram-intake'],
+    },
     'supabase/migrations/20261009090000_document_preview_versions.sql': {
         sha256: 'b4651b4fab822ef00bd063035cb8d437a2a759fc5b91b65b1127514da1d87577',
         jobs: ['staff-workspace'],
@@ -69,6 +73,8 @@ export function selectJobs(files, full = false, readFile = readRepoFile) {
         else if (file === 'tests/telegram-connector/native-sdk.test.js') jobs = ['telegram-source-updates'];
         else if (file === 'tests/telegram-connector/hosted-entrypoint.test.js') jobs = ['telegram-connection'];
         else if (/^tests\/evals\/telegram-context\//.test(file)) jobs = ['telegram-extraction'];
+        else if (file === 'services/telegram-extraction-worker/provider.mjs') jobs = ['telegram-extraction', 'telegram-intake'];
+        else if (file === 'src/app/staff/telegram-intake/processing-status.tsx') jobs = ['telegram-intake', 'telegram-history', 'profile-search'];
         else if (/^src\/app\/staff\/telegram-intake\/context\//.test(file)) jobs = ['telegram-context', 'telegram-connection'];
         else if (/^src\/app\/staff\/telegram-intake\/chats\//.test(file)) jobs = ['telegram-history', 'telegram-source-updates', 'telegram-connection'];
         else if (/^src\/app\/staff\/telegram-intake\/cv\//.test(file)) jobs = ['telegram-cv', 'cv-analysis'];

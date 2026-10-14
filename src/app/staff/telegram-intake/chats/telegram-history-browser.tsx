@@ -3,6 +3,7 @@
 import { staffWorkspaceFetch } from '@/lib/staff-workspace-fetch';
 
 import { useCallback, useEffect, useRef, useState } from 'react';
+import Link from 'next/link';
 import { CheckCircle2, LoaderCircle, MessageSquare, RefreshCw, Search } from 'lucide-react';
 import { Button } from '@/components/staff-ui/button';
 import { InitialsAvatar } from '@/components/staff-preview/shared';
@@ -212,7 +213,7 @@ export function TelegramHistoryBrowser({ workspaceId, hostedEnabled = false, onb
     }, [snapshot, busy, loading, denied]);
 
     return <section className="flex w-full flex-col gap-3">
-        <header className="mx-auto flex w-full max-w-6xl flex-wrap items-center justify-between gap-2"><h1 className="text-[26px] leading-8 font-medium text-foreground">{onboarding ? 'Connect Telegram' : 'Choose chats'}</h1></header>
+        <header className="mx-auto flex w-full max-w-6xl flex-wrap items-center justify-between gap-2"><h1 className="text-[26px] leading-8 font-medium text-foreground">{onboarding ? 'Connect Telegram' : 'Choose chats'}</h1><div className="flex gap-2"><Button asChild size="sm" variant="outline"><Link href="/staff/telegram-intake">Proposals</Link></Button><Button asChild size="sm" variant="outline"><Link href="/staff/candidates">Search candidates</Link></Button></div></header>
         {onboarding ? <ol aria-label="Telegram onboarding steps" className="flex w-full items-center gap-3 py-3 text-sm text-muted-foreground">
             {['Connect', 'Choose chats', 'Review'].map((label, index) => {
                 const active = proposalCount > 0 ? 2 : snapshot?.canImport ? 1 : 0;

@@ -275,6 +275,7 @@ test('Candidate intake has a compact chat picker and approve/edit/reject review 
     // A legacy chat can keep syncing while extraction is disabled. The row,
     // activity banner, and resume action must all reflect that same state.
     let processingResume;
+    let extractionFailed = false;
     chats[0].extractionEnabled = false;
     await page.route('**/api/staff/telegram-extraction*', async route => {
         if (route.request().method() === 'POST') {
@@ -289,7 +290,7 @@ test('Candidate intake has a compact chat picker and approve/edit/reject review 
             return route.fulfill({ json: { ok: true } });
         }
         const paused = chats.filter(chat => chat.selected && !chat.extractionEnabled).length;
-        return route.fulfill({ json: { counts: { active: 0, paused, queued: paused, leased: 0, waiting: 0, failed: 0, completed: 0, needsReview: 0 }, jobs: [] } });
+        return route.fulfill({ json: { counts: { active: 0, paused, queued: paused, leased: 0, waiting: 0, failed: extractionFailed ? 1 : 0, completed: 0, needsReview: 0 }, jobs: [] } });
     });
     await page.reload();
     await page.getByRole('tab', { name: 'Connected (2)', exact: true }).click();
@@ -309,6 +310,12 @@ test('Candidate intake has a compact chat picker and approve/edit/reject review 
     assert.equal(chats[0].import.status, 'completed', 'resume extraction does not restart an already synced history import');
     await expect(activity).not.toContainText('Processing paused');
     await expect(activity.getByRole('progressbar')).toHaveCount(0);
+    extractionFailed = true;
+    await expect(activity.getByRole('link', { name: 'Review issues', exact: true })).toBeVisible();
+    await expect(page.getByRole('link', { name: 'Proposals', exact: true })).toBeVisible();
+    await expect(page.getByRole('link', { name: 'Search candidates', exact: true })).toBeVisible();
+    await expect(activity.getByRole('progressbar')).toHaveCount(0);
+    extractionFailed = false;
     let meaningQuery;
     let meaningCoverage = { eligible: 4, indexed: 1, fullyIndexed: 1, pending: 2, failed: 1 };
     let emptyMeaningResults = false;
