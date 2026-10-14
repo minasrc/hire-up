@@ -6,9 +6,10 @@ import { TelegramHistoryBrowser } from './telegram-history-browser';
 export const dynamic = 'force-dynamic';
 export const metadata = { title: 'Telegram · Agora staff', robots: { index: false, follow: false } };
 
-export default async function TelegramHistoryPage() {
+export default async function TelegramHistoryPage({ searchParams }: { searchParams?: Promise<{ group?: string }> } = {}) {
     const gate = await requireStaffVerified();
     if (process.env.TELEGRAM_INTAKE_ENABLED !== '1') notFound();
     const onboarding = !await telegramOnboardingComplete(gate.pool, gate.identity, gate.organizationId);
-    return <TelegramHistoryBrowser onboarding={onboarding} key={gate.organizationId} workspaceId={gate.organizationId} hostedEnabled={process.env.TELEGRAM_HOSTED_ENABLED === '1'} />;
+    const group = (await searchParams)?.group === 'connected' ? 'connected' : 'available';
+    return <TelegramHistoryBrowser initialGroup={group} onboarding={onboarding} key={`${gate.organizationId}:${group}`} workspaceId={gate.organizationId} hostedEnabled={process.env.TELEGRAM_HOSTED_ENABLED === '1'} />;
 }

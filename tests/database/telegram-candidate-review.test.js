@@ -10,6 +10,7 @@ import { createTelegramDraft, listTelegramDrafts, getTelegramDraft, decideTelegr
 import { withStaffTransaction } from '../../src/lib/staff-authorization.js';
 import { saveCandidateProfile, getCandidateProfile, listCandidateProfileDirectory } from '../../src/lib/candidate-profile-operations.js';
 import { telegramHistoryAction, telegramHistoryStatus, telegramHistoryRecentStatus, telegramOnboardingComplete } from '../../src/lib/telegram-history-operations.js';
+import { telegramExtractionStatus } from '../../src/lib/telegram-extraction-operations.js';
 import { normalizeTelegramDraftFields } from '../../src/lib/telegram-intake-contracts.js';
 
 const owner = { provider: 'google', issuer: 'https://accounts.google.com', subject: CJ_SUBJECTS.ADMIN };
@@ -115,6 +116,36 @@ test('Telegram proposals create candidates without CVs, update exact matches, fe
     const approved = await approve(matched);
     assert.equal(approved.candidateId, existingId);
     assert.equal((await approve(matched)).replayed, true, 'lost approval acknowledgements replay safely');
+    // A background refresh must wait for an approval's owner lock before it
+    // locks another draft, otherwise the approval can deadlock reading it.
+    const concurrentA = await createTelegramDraft(...args, { fields: { firstName: 'Concurrent', lastName: 'A' } });
+    const concurrentB = await createTelegramDraft(...args, { fields: { firstName: 'Concurrent', lastName: 'B' } });
+    let firstLocked, continueFirst, secondStarted;
+    const locked = new Promise(resolve => { firstLocked = resolve; });
+    const continueRead = new Promise(resolve => { continueFirst = resolve; });
+    const startedSecond = new Promise(resolve => { secondStarted = resolve; });
+    let secondPrepared = false;
+    const firstTransaction = withStaffTransaction(...args, ['candidates.read', 'candidates.write'], async ({ client }) => {
+        await client.query('select app.telegram_review_decide_v1($1,$2,$3,$4)', [concurrentA.id, concurrentA.version, 'approve', randomUUID()]);
+        firstLocked(); await continueRead;
+        await client.query('select app.telegram_review_draft_v1($1)', [concurrentB.id]);
+    });
+    await locked;
+    const secondTransaction = withStaffTransaction(...args, ['candidates.read', 'candidates.write'], async ({ client }) => {
+        secondStarted();
+        await client.query('select app.telegram_review_draft_v1($1)', [concurrentB.id]);
+        secondPrepared = true;
+        await client.query('select app.telegram_review_decide_v1($1,$2,$3,$4)', [concurrentB.id, concurrentB.version, 'approve', randomUUID()]);
+    });
+    await startedSecond;
+    try {
+        await new Promise(resolve => setTimeout(resolve, 80));
+        assert.equal(secondPrepared, false, 'refresh waits before taking the draft row lock');
+    } finally {
+        continueFirst();
+        const outcomes = await Promise.allSettled([firstTransaction, secondTransaction]);
+        for (const outcome of outcomes) assert.equal(outcome.status, 'fulfilled', outcome.reason?.message);
+    }
     const registered = await registerTelegramWorker(...args, 'Synthetic intake worker');
     const connection = randomUUID(), account = randomUUID(), chat = randomUUID();
     const publicKey = generateKeyPairSync('rsa', { modulusLength: 2048 }).publicKey.export({ format: 'der', type: 'spki' }).toString('base64');
@@ -145,10 +176,25 @@ test('Telegram proposals create candidates without CVs, update exact matches, fe
     history = await telegramHistoryStatus(...args);
     assert.equal(history.chats[0].import.status, 'paused');
     assert.equal((await telegramHistoryRecentStatus(...args, { view: 'available' })).chats.length, 0, 'paused chats remain connected');
-    psql(db, `update app.telegram_history_chats set extraction_enabled=false where id='${chat}';`);
+    assert.equal(history.chats[0].extractionEnabled, false, 'Pause stops candidate processing as well as synchronization');
+    const idlePaused = await telegramExtractionStatus(...args);
+    assert.equal(idlePaused.counts.active, 0);
+    assert.equal(idlePaused.counts.paused, 1, 'a stopped chat stays visibly paused without queued work');
+    const pausedJob = randomUUID();
+    psql(db, `insert into app.telegram_extraction_jobs(id,organization_id,owner_user_id,chat_id,source,source_digest,message_count) values('${pausedJob}','${org}','${AUTHZ_ID.USER_ADMIN2}','${chat}','{"chat":{},"messages":[]}',sha256(convert_to('paused-test','UTF8')),0);`);
+    let activity = await telegramExtractionStatus(...args);
+    assert.equal(activity.counts.active, 0);
+    assert.equal(activity.counts.paused, 1);
+    assert.equal(activity.jobs.find(j => j.id === pausedJob).processingPaused, true);
+    const filteredActivity = await telegramExtractionStatus(...args, { view: 'needs_review' });
+    assert.equal(filteredActivity.counts.paused, 1, 'activity counts do not depend on the selected page or view');
     await telegramHistoryAction(...args, { action: 'resume', chatId: chat, expectedVersion: history.chats[0].version });
     history = await telegramHistoryStatus(...args);
     assert.equal(history.chats[0].extractionEnabled, true, 'Resume continues candidate extraction too');
+    activity = await telegramExtractionStatus(...args);
+    assert.equal(activity.counts.paused, 0);
+    assert.equal(activity.counts.active, 1);
+    assert.equal(activity.jobs.find(j => j.id === pausedJob).processingPaused, false);
     psql(db, `insert into app.telegram_extraction_subjects(organization_id,owner_user_id,identity_key,draft_id,reviewed_fields) values('${org}','${AUTHZ_ID.USER_ADMIN2}','email:existing.flow@example.test','${update.id}','{}');`);
     const addProposal = headline => {
         const job = randomUUID();
