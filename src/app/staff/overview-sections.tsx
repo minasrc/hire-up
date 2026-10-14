@@ -78,12 +78,12 @@ function PermissionNote({ permission }: { permission: string }) {
     );
 }
 
-export const overviewReviewLinkClass = 'flex items-center gap-3 rounded-md px-3 py-2 text-sm outline-none transition-colors hover:bg-hover focus-visible:bg-hover focus-visible:ring-2 focus-visible:ring-ring';
+export const overviewReviewLinkClass = 'flex min-w-0 items-center gap-3 rounded-md px-3 py-2 text-sm outline-none transition-colors hover:bg-hover focus-visible:bg-hover focus-visible:ring-2 focus-visible:ring-ring';
 
 export function ApplicationReviewTasks({ rows, total }: { rows: StaffWorkspaceRecentApplication[]; total: number }) {
     if (total === 0) return null;
     return (
-        <div aria-label="Application review tasks" className="rounded-lg border border-border p-2">
+        <div aria-label="Application review tasks" className="min-w-0 rounded-lg border border-border p-2">
             <Link href="/staff/applications?review=1" className={`${overviewReviewLinkClass} font-medium`}>
                 <Inbox className="h-4 w-4" aria-hidden="true" />
                 Application reviews
@@ -94,7 +94,7 @@ export function ApplicationReviewTasks({ rows, total }: { rows: StaffWorkspaceRe
                 {rows.map(row => (
                     <li key={row.applicationId}>
                         <Link href={`/staff/candidates/${row.candidateId}`} className={overviewReviewLinkClass}>
-                            <span className="flex min-w-0 flex-col">
+                            <span className="flex min-w-0 flex-1 flex-col">
                                 <span className="truncate">{row.candidateName}</span>
                                 <span className="truncate text-xs text-muted-foreground">{row.jobTitle} · {row.clientName}</span>
                             </span>
@@ -137,7 +137,7 @@ export function ClientsHiring({ summary }: { summary: StaffWorkspaceSummary }) {
                                 key={row.clientId}
                                 className="flex flex-col items-start gap-2 rounded-lg border border-border px-3 py-2.5 sm:flex-row sm:items-center sm:justify-between sm:gap-3"
                             >
-                                <div className="flex min-w-0 flex-col">
+                                <div className="flex min-w-0 flex-1 flex-col">
                                     <span className="flex min-w-0 flex-wrap items-center gap-2">
                                         <Link
                                             href={`/staff/clients/${row.clientId}`}

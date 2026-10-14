@@ -13,14 +13,17 @@ const version = (value) => {
 };
 const transact = (pool, identity, org, operation, required = permissions) => withStaffTransaction(pool, identity, org, required, operation);
 const result = async (client, sql, args) => (await client.query(sql, args)).rows[0].result;
-const read = (client, id) => result(client, 'select app.telegram_review_draft_v1($1::uuid) as result', [assertUuid(id, 'draftId')]);
+const reviewedSchema = async client => (await client.query("select to_regprocedure('app.telegram_review_draft_v1(uuid)') is not null as ready")).rows[0].ready;
+const read = async (client, id) => result(client, await reviewedSchema(client)
+    ? 'select app.telegram_review_draft_v1($1::uuid) as result'
+    : 'select app.telegram_get_draft_v1($1::uuid) as result', [assertUuid(id, 'draftId')]);
 
 export function listTelegramDrafts(pool, identity, org, filters = {}) {
     const { view = 'ready', missing = null, q = '', page = 1 } = filters;
     if (!['ready', 'needs_information', 'snoozed', 'duplicates', 'all', 'archived'].includes(view)) invalid('view', 'Choose a supported view.');
     if (missing != null && !['firstName', 'lastName', 'primaryEmail', 'cv', 'cvAnalysis'].includes(missing)) invalid('missing', 'Choose a required field.');
     if (typeof q !== 'string' || q.length > 200 || !Number.isInteger(page) || page < 1 || page > 10000) invalid('query', 'Invalid inbox query.');
-    return transact(pool, identity, org, ({ client }) => result(client, 'select app.telegram_review_list_v1($1,$2,$3,$4) as result', [view, missing, q, page]));
+    return transact(pool, identity, org, async ({ client }) => result(client, await reviewedSchema(client) ? 'select app.telegram_review_list_v1($1,$2,$3,$4) as result' : 'select app.telegram_list_drafts_v1($1,$2,$3,$4) as result', [view, missing, q, page]));
 }
 export function getTelegramDraft(pool, identity, org, draftId) {
     return transact(pool, identity, org, ({ client }) => read(client, draftId));
@@ -36,7 +39,7 @@ export function updateTelegramDraft(pool, identity, org, draftId, input) {
     return transact(pool, identity, org, async ({ client }) => {
         const current = await read(client, draftId);
         const fields = normalizeTelegramDraftFields({ ...current.fields, ...patch });
-        return result(client, 'select app.telegram_review_edit_v1($1,$2,$3::jsonb) as result', [draftId, version(input.expectedVersion), JSON.stringify(fields)]);
+        return result(client, await reviewedSchema(client) ? 'select app.telegram_review_edit_v1($1,$2,$3::jsonb) as result' : 'select app.telegram_update_draft_v1($1,$2,$3::jsonb) as result', [draftId, version(input.expectedVersion), JSON.stringify(fields)]);
     });
 }
 export function decideTelegramDraft(pool, identity, org, draftId, input) {

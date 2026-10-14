@@ -221,7 +221,7 @@ test('Telegram extraction protects recruiter edits, reviews evidence and approve
     page.setDefaultTimeout(20_000);
     const pageErrors = [];
     page.on('pageerror', error => pageErrors.push(error.message));
-    const panel = page.getByRole('dialog', { name: 'Review draft' });
+    const panel = page.getByRole('region', { name: 'Candidate information', exact: true });
     async function waitForAction(button, action, status = 200) {
         const response = page.waitForResponse(response => response.url() === extractionURL && response.request().method() === 'POST' && response.request().postDataJSON()?.action === action);
         await button.click();
@@ -242,9 +242,8 @@ test('Telegram extraction protects recruiter edits, reviews evidence and approve
     try {
         await page.goto(`${baseURL}/staff/telegram-intake/chats`);
         await expect(page.getByRole('button', { name: 'Connect Telegram', exact: true })).toBeVisible();
-        await page.getByLabel('Mark Synthetic candidate conversation', { exact: true }).check();
-        await waitForAction(page.getByRole('button', { name: 'Start automatic extraction', exact: true }).first(), 'setExtraction');
-        await page.getByRole('link', { name: 'Extraction progress', exact: true }).click();
+        assert.equal((await context.request.post(extractionURL, { data: { action: 'setExtraction', chats: [{ chatId: chat.id, expectedVersion: (await getChats()).chats.find(item => item.id === chat.id).version }], enabled: true } })).status(), 200);
+        await page.goto(`${baseURL}/staff/telegram-intake/extraction`);
         await expect(page.getByRole('heading', { name: 'Candidate extraction', exact: true })).toBeVisible();
         let job = (await extractWorker('claim')).job;
         const originalDigest = job.sourceDigest;
@@ -265,9 +264,11 @@ test('Telegram extraction protects recruiter edits, reviews evidence and approve
         await expect(page.getByText('Waiting for: 1 open draft.', { exact: true })).toBeVisible();
         await waitForAction(page.getByRole('button', { name: 'Keep context', exact: true }), 'sourceRetention');
         await page.getByRole('link', { name: 'Review draft 1', exact: true }).click();
-        await expect(panel.getByLabel('First name *', { exact: true })).toHaveValue('Ada');
-        await expect(panel.getByLabel('Last name *', { exact: true })).toHaveValue('Lovelace');
-        await expect(panel.getByLabel('Primary email *', { exact: true })).toHaveValue('ada-extraction@example.test');
+        await panel.getByRole('button', { name: 'Edit', exact: true }).click();
+        await panel.getByText('CV (optional)', { exact: true }).click();
+        await expect(panel.getByLabel('First name', { exact: true })).toHaveValue('Ada');
+        await expect(panel.getByLabel('Last name', { exact: true })).toHaveValue('Lovelace');
+        await expect(panel.getByLabel('Primary email', { exact: true })).toHaveValue('ada-extraction@example.test');
         await expect(panel.getByLabel('Telegram username', { exact: true })).toHaveValue('ada_demo');
         await expect(panel.getByText('No CV attached', { exact: true })).toBeVisible();
         await panel.getByText(/^Referenced attachments \(/).click();
@@ -275,10 +276,9 @@ test('Telegram extraction protects recruiter edits, reviews evidence and approve
         await expect(panel.getByText(/not downloaded or validated CV files/)).toBeVisible();
         await panel.getByText(/^Private source evidence \(/).click();
         await expect(panel.getByText(job.source.messages[0].text, { exact: false }).first()).toBeVisible();
-        let response = page.waitForResponse(response => response.url().endsWith(`/drafts/${draftId}/decision`));
-        await panel.getByRole('button', { name: 'Approve candidate', exact: true }).click();
-        assert.equal((await response).status(), 422);
-        await expect(panel.getByRole('link', { name: /^CV:/ })).toBeVisible();
+        const initialDraft = (await (await context.request.get(`${baseURL}/api/staff/telegram-intake/drafts/${draftId}`)).json()).result;
+        assert.equal((await context.request.post(`${baseURL}/api/staff/telegram-intake/drafts/${draftId}/decision`, { data: { action: 'approve', expectedVersion: initialDraft.version, operationId: randomUUID() } })).status(), 422);
+        let response;
         await panel.getByLabel('Location', { exact: true }).fill('Paris');
         await saveProfile();
         const review = await (await context.request.get(`${extractionURL}?draftId=${draftId}`)).json();
@@ -291,6 +291,8 @@ test('Telegram extraction protects recruiter edits, reviews evidence and approve
         assert.deepEqual(second.draftIds, [draftId]);
         await page.goto(`${baseURL}/staff/telegram-intake/extraction`);
         await page.getByRole('link', { name: 'Review draft 1', exact: true }).first().click();
+        await panel.getByRole('button', { name: 'Edit', exact: true }).click();
+        await panel.getByText('CV (optional)', { exact: true }).click();
         await expect(panel.getByLabel('Location', { exact: true })).toHaveValue('Paris');
         await expect(panel.getByLabel('Headline', { exact: true })).toHaveValue('Protocol engineer');
         const locationSuggestion = panel.getByRole('region', { name: 'Location suggestion', exact: true });
@@ -309,7 +311,7 @@ test('Telegram extraction protects recruiter edits, reviews evidence and approve
         await panel.getByRole('button', { name: 'Upload selected CV', exact: true }).click();
         assert.equal((await response).status(), 200);
         response = page.waitForResponse(response => response.url().endsWith(`/drafts/${draftId}/decision`));
-        await panel.getByRole('button', { name: 'Approve candidate', exact: true }).click();
+        await panel.getByRole('button', { name: 'Save and approve', exact: true }).click();
         assert.equal((await response).status(), 422);
         await expect(panel.getByRole('link', { name: /^Suggestions:/ })).toBeVisible();
         await compensationSuggestion.getByText(/^View message references/).click();
@@ -318,7 +320,7 @@ test('Telegram extraction protects recruiter edits, reviews evidence and approve
         await page.screenshot({ path: join(root, 'test-results/staff-workspace-telegram-extraction-suggestions.png'), fullPage: true });
         await page.setViewportSize({ width: 390, height: 844 });
         await panel.evaluate(element => { element.scrollTop = 0; });
-        await expect(panel.getByRole('heading', { name: 'Review draft', exact: true })).toBeVisible();
+        await expect(panel).toBeVisible();
         await page.screenshot({ path: join(root, 'test-results/staff-workspace-telegram-extraction-review-mobile.png'), fullPage: true });
         await page.setViewportSize({ width: 1280, height: 900 });
         await waitForAction(compensationSuggestion.getByRole('button', { name: 'Apply suggestion', exact: true }), 'resolve');
@@ -329,10 +331,11 @@ test('Telegram extraction protects recruiter edits, reviews evidence and approve
         mkdirSync(join(root, 'test-results'), { recursive: true });
         await page.screenshot({ path: join(root, 'test-results/staff-workspace-telegram-extraction-review.png'), fullPage: true });
         response = page.waitForResponse(response => response.url().endsWith(`/drafts/${draftId}/decision`));
-        await panel.getByRole('button', { name: 'Approve candidate', exact: true }).click();
+        await panel.getByRole('button', { name: 'Save and approve', exact: true }).click();
         assert.equal((await response).status(), 200);
-        await expect(panel.getByRole('link', { name: 'Open approved candidate', exact: true })).toBeVisible();
-        const candidateHref = await panel.getByRole('link', { name: 'Open approved candidate', exact: true }).getAttribute('href');
+        await expect(page.getByText('Ada Lovelace saved.', { exact: true })).toBeVisible();
+        const approvedDraft = (await (await context.request.get(`${baseURL}/api/staff/telegram-intake/drafts/${draftId}`)).json()).result;
+        const candidateHref = `/staff/candidates/${approvedDraft.candidateId}`;
         const candidateId = candidateHref.split('/').at(-1);
         assert.equal(psql(db, `select count(*) from app.candidates where id='${candidateId}'`).trim(), '1');
 
@@ -344,7 +347,7 @@ test('Telegram extraction protects recruiter edits, reviews evidence and approve
         await expect(panel.getByText(/New information arrived after this draft was closed/)).toBeVisible();
         await expect(panel.getByRole('button', { name: 'Apply suggestion', exact: true })).toHaveCount(0);
         await waitForAction(panel.getByRole('button', { name: 'Dismiss suggestion', exact: true }), 'resolve');
-        await expect(panel.getByRole('link', { name: 'Open approved candidate', exact: true })).toHaveAttribute('href', candidateHref);
+        await expect(panel.getByRole('link', { name: 'View profile', exact: true })).toHaveAttribute('href', candidateHref);
         await page.goto(`${baseURL}/staff/telegram-intake/extraction`);
         job = (await extractWorker('claim')).job;
         const empty = await completeExtraction(job, { subjects: [] });

@@ -226,7 +226,7 @@ test('CV analysis creates private drafts from attachment-only messages and suppo
     }
     const page = await context.newPage(); page.setDefaultTimeout(20_000);
     const pageErrors = []; page.on('pageerror', error => pageErrors.push(error.message));
-    const panel = page.getByRole('dialog', { name: 'Review draft' });
+    const panel = page.getByRole('region', { name: 'Candidate information', exact: true });
     const analysis = panel.getByRole('region', { name: 'CV analysis and review', exact: true });
     async function action(button, name, url = analysisURL) {
         const response = page.waitForResponse(response => response.url() === url && response.request().method() === 'POST' && response.request().postDataJSON()?.action === name);
@@ -245,7 +245,9 @@ test('CV analysis creates private drafts from attachment-only messages and suppo
         const initial = (await (await context.request.get(`${draftURL}/${draftId}`)).json()).result;
         assert.equal(initial.fields.firstName ?? '', ''); assert.equal(initial.fields.telegramUsername ?? '', ''); assert.equal(initial.fields.telegramUserId ?? '', '');
         await bootstrap.getByRole('link', { name: 'Review draft and retrieval', exact: true }).click();
-        await expect(panel.getByLabel('First name *', { exact: true })).toHaveValue('');
+        await panel.getByRole('button', { name: 'Edit', exact: true }).click();
+        await panel.getByText('CV (optional)', { exact: true }).click();
+        await expect(panel.getByLabel('First name', { exact: true })).toHaveValue('');
         await uploadRetrieved(await cvWorker(), pdf);
         await expect(panel.getByRole('link', { name: 'Open CV', exact: true })).toBeVisible();
         await expect(analysis.getByText('Queued for your Mac', { exact: true }).first()).toBeVisible();
@@ -255,7 +257,7 @@ test('CV analysis creates private drafts from attachment-only messages and suppo
         await panel.getByLabel('Location', { exact: true }).fill('Unsaved Paris');
         await facts(job, block, [['firstName', 'Ada'], ['lastName', 'Lovelace'], ['primaryEmail', 'ada-analysis@example.test']]);
         await refreshAnalysis();
-        await expect(panel.getByLabel('First name *', { exact: true })).toHaveValue('Ada');
+        await expect(panel.getByLabel('First name', { exact: true })).toHaveValue('Ada');
         await expect(panel.getByLabel('Location', { exact: true })).toHaveValue('Unsaved Paris');
         await expect(panel.getByText('Unsaved changes', { exact: true })).toBeVisible();
         const text = analysis.getByRole('region', { name: 'Review extracted CV text', exact: true });
@@ -266,13 +268,15 @@ test('CV analysis creates private drafts from attachment-only messages and suppo
         await analysis.scrollIntoViewIfNeeded(); await page.screenshot({ path: join(root, 'test-results/staff-workspace-cv-analysis.png'), fullPage: true });
         await page.setViewportSize({ width: 390, height: 844 }); await analysis.scrollIntoViewIfNeeded(); await page.screenshot({ path: join(root, 'test-results/staff-workspace-cv-analysis-mobile.png'), fullPage: true });
         const approval = page.waitForResponse(response => response.url().endsWith(`/drafts/${draftId}/decision`));
-        await panel.getByRole('button', { name: 'Approve candidate', exact: true }).click(); assert.equal((await approval).status(), 200);
-        await expect(panel.getByRole('link', { name: 'Open approved candidate', exact: true })).toBeVisible();
+        await panel.getByRole('button', { name: 'Save and approve', exact: true }).click(); assert.equal((await approval).status(), 200);
+        await expect(page.getByText('Ada Lovelace saved.', { exact: true })).toBeVisible();
         await expect(panel.getByRole('region', { name: 'Review extracted CV text', exact: true })).toHaveCount(0);
         await page.goto(`${baseURL}/staff/telegram-intake/extraction`);
         await page.getByRole('button', { name: 'Review source messages', exact: true }).click();
         const second = await action(createButton('Candidate-alternate.docx'), 'createDraft', cvURL);
         await page.goto(`${baseURL}/staff/telegram-intake?draft=${second.draftId}`);
+        await panel.getByRole('button', { name: 'Edit', exact: true }).click();
+        await panel.getByText('CV (optional)', { exact: true }).click();
         await uploadRetrieved(await cvWorker(), docx);
         await expect(panel.getByRole('link', { name: 'Open CV', exact: true })).toBeVisible();
         await expect(analysis.getByText('Queued for your Mac', { exact: true }).first()).toBeVisible();
@@ -283,11 +287,11 @@ test('CV analysis creates private drafts from attachment-only messages and suppo
         await panel.getByRole('button', { name: 'Upload selected CV', exact: true }).click(); assert.equal((await uploaded).status(), 200);
         await expect(analysis.getByRole('button', { name: 'Analyze attached CV', exact: true })).toBeEnabled();
         await action(analysis.getByRole('button', { name: 'Analyze attached CV', exact: true }), 'analyze');
-        await panel.getByLabel('First name *', { exact: true }).fill('Charles');
-        await panel.getByLabel('Last name *', { exact: true }).fill('Babbage');
-        await panel.getByLabel('Primary email *', { exact: true }).fill('charles-analysis@example.test');
+        await panel.getByLabel('First name', { exact: true }).fill('Charles');
+        await panel.getByLabel('Last name', { exact: true }).fill('Babbage');
+        await panel.getByLabel('Primary email', { exact: true }).fill('charles-analysis@example.test');
         const blocked = page.waitForResponse(response => response.url().endsWith(`/drafts/${second.draftId}/decision`));
-        await panel.getByRole('button', { name: 'Approve candidate', exact: true }).click(); assert.equal((await blocked).status(), 422);
+        await panel.getByRole('button', { name: 'Save and approve', exact: true }).click(); assert.equal((await blocked).status(), 422);
         await expect(panel.getByRole('link', { name: /^CV analysis review:/ })).toBeVisible();
         await expect(panel.getByRole('link', { name: /^First name:/ })).toHaveCount(0);
         await panel.getByLabel('Location', { exact: true }).fill('Manual Berlin');

@@ -538,7 +538,7 @@ test('staff workspace end-to-end in a real browser', async (t) => {
             && r.request().headers()['rsc'] === '1');
         await page.locator('#application-search').fill('no-such-directory-person');
         await expect(page.getByRole('table')).toBeVisible();
-        await expect(page.getByRole('status').filter({ hasText: 'Updating' })).toBeVisible();
+        await expect(page.getByRole('status').filter({ hasText: 'Searching…' })).toBeVisible();
         await response;
         await expect(page.getByText('No applications found', { exact: true })).toBeVisible();
         await page.getByRole('button', { name: 'Clear filters', exact: true }).click();
@@ -1546,7 +1546,9 @@ test('staff workspace end-to-end in a real browser', async (t) => {
         await gotoStaff(page, `${baseURL}/staff`);
         await page.getByLabel('Application review tasks')
             .getByRole('link', { name: 'Synthetic Candidate B' }).click();
-        await page.waitForURL(/\/staff\/candidates\/[0-9a-f-]{36}/);
+        await expect(page.getByRole('dialog', { name: 'Synthetic Candidate B' })).toBeVisible();
+        await expect(page).toHaveURL(`${baseURL}/staff`);
+        await page.getByRole('dialog', { name: 'Synthetic Candidate B' }).getByRole('button', { name: 'Close', exact: true }).click();
     });
 
     await runCase('candidate directory searches on the server while retaining the existing table', async () => {
@@ -1554,10 +1556,12 @@ test('staff workspace end-to-end in a real browser', async (t) => {
         const search = page.locator('#candidate-search');
         const response = page.waitForResponse((r) => r.url().includes('/staff/candidates?q=')
             && r.request().headers()['rsc'] === '1');
+        await page.route('**/staff/candidates?q=*', async route => { await new Promise(resolve => setTimeout(resolve, 1000)); await route.continue(); });
         await search.fill('no-such-directory-person');
         await expect(page.getByRole('table')).toBeVisible();
         await expect(page.getByRole('status').filter({ hasText: 'Updating' })).toBeVisible();
         await response;
+        await page.unroute('**/staff/candidates?q=*');
         await expect(page.getByText('No candidates found', { exact: true })).toBeVisible();
         await page.getByRole('button', { name: 'Clear', exact: true }).click();
         await expect(page.getByRole('table')).toBeVisible();

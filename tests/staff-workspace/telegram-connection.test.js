@@ -102,7 +102,7 @@ test('Telegram browser connects with QR and encrypted 2FA, waits for logout ackn
     try {
         await page.goto(`${baseURL}/staff/telegram-intake`);
         await page.goto(`${baseURL}/staff/telegram-intake/connect`);
-        await expect(page.getByRole('heading', { name: 'Telegram', exact: true })).toBeVisible();
+        await expect(page.getByRole('heading', { name: 'Connect Telegram', exact: true })).toBeVisible();
         await expect(page.getByLabel('Mac connector', { exact: true })).toContainText('Synthetic Mac — Online');
         psql(db, `update app.telegram_connector_workers set last_seen_at=now()-interval '5 minutes' where id='${registered.id}'`);
         await page.reload();
@@ -130,11 +130,11 @@ test('Telegram browser connects with QR and encrypted 2FA, waits for logout ackn
         await update({ status: 'qr_pending', qrLoginUrl: 'tg://login?token=synthetic_refreshed_token', qrExpiresAt: new Date(Date.now() + 90_000).toISOString() });
         await expect(page.getByRole('img', { name: 'Telegram sign-in QR code' })).toBeVisible();
         await update({ status: 'awaiting_password', passwordHint: 'Synthetic hint' });
-        const password = page.getByLabel('Telegram two-step verification password', { exact: true });
+        const password = page.getByLabel('Password', { exact: true });
         await expect(password).toBeVisible();
         await password.fill('synthetic browser secret 🔒');
         const submission = page.waitForResponse(response => response.url() === connectionURL && response.request().postDataJSON()?.action === 'password');
-        await page.getByRole('button', { name: 'Continue securely' }).click();
+        await page.getByRole('button', { name: 'Continue', exact: true }).click();
         const submissionResponse = await submission;
         assert.equal(submissionResponse.status(), 200);
         const submitted = submissionResponse.request().postDataJSON();
@@ -152,12 +152,13 @@ test('Telegram browser connects with QR and encrypted 2FA, waits for logout ackn
         await expect(password).toBeEnabled();
         await password.fill('synthetic corrected secret');
         const retry = page.waitForResponse(response => response.url() === connectionURL && response.request().postDataJSON()?.action === 'password');
-        await page.getByRole('button', { name: 'Continue securely' }).click();
+        await page.getByRole('button', { name: 'Continue', exact: true }).click();
         assert.equal((await retry).status(), 200);
         await update({ status: 'connected', profile: { telegramUserId: '123456789', username: 'synthetic_recruiter', displayName: 'Synthetic Recruiter' } });
+        await page.getByText('Telegram connected', { exact: true }).first().click();
         await expect(page.getByRole('heading', { name: 'Telegram connected', exact: true })).toBeVisible();
         await expect(page.getByText('@synthetic_recruiter', { exact: true })).toBeVisible();
-        await expect(page.getByRole('button', { name: 'Discover chats', exact: true })).toBeEnabled();
+        await expect(page.getByRole('tab', { name: /^Available/ })).toBeVisible();
         await expect(page.getByRole('button', { name: 'Choose chats to import', exact: true })).toHaveCount(0);
         await page.getByRole('button', { name: 'Disconnect Telegram', exact: true }).click();
         await expect(page.getByRole('heading', { name: 'Waiting for Telegram to disconnect' })).toBeVisible();

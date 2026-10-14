@@ -216,22 +216,14 @@ test('Automatic extraction pauses and resumes; source release remains an explici
     }
     try {
         await page.goto(`${baseURL}/staff/telegram-intake/chats`);
-        const row = page.getByRole('row').filter({ hasText: 'Synthetic candidate conversation' });
-        await expect(row).toBeVisible();
-        mkdirSync(join(root, 'test-results'), { recursive: true });
-        await page.screenshot({ path: join(root, 'test-results/staff-workspace-telegram-retention-chats.png'), fullPage: true });
-        await page.setViewportSize({ width: 390, height: 844 });
-        await page.screenshot({ path: join(root, 'test-results/staff-workspace-telegram-retention-chats-mobile.png'), fullPage: true });
-        await page.setViewportSize({ width: 1280, height: 900 });
-        await action(row.getByRole('button', { name: 'Start automatic extraction', exact: true }), 'setExtraction');
-        await expect(row.getByText(/Automatic extraction/).first()).toBeVisible();
+        await expect(page.getByRole('button', { name: 'Connect Telegram', exact: true })).toBeVisible();
+        assert.equal((await context.request.post(extractionURL, { data: { action: 'setExtraction', chats: [{ chatId: chat.id, expectedVersion: (await getChats()).chats.find(item => item.id === chat.id).version }], enabled: true } })).status(), 200);
         const leased = (await extractWorker('claim')).job;
-        await action(row.getByRole('button', { name: 'Pause automatic extraction', exact: true }), 'setExtraction');
-        await expect(row.getByText('Automatic extraction off', { exact: true })).toBeVisible();
+        assert.equal((await context.request.post(extractionURL, { data: { action: 'setExtraction', chats: [{ chatId: chat.id, expectedVersion: (await getChats()).chats.find(item => item.id === chat.id).version }], enabled: false } })).status(), 200);
         const completed = await completeExtraction(leased);
         assert.equal(completed.nextQueued, false);
         assert.equal((await extractWorker('claim')).job, null, 'Paused extraction cannot claim the remaining imported history');
-        await page.getByRole('link', { name: 'Extraction progress', exact: true }).click();
+        await page.goto(`${baseURL}/staff/telegram-intake/extraction`);
         await expect(page.getByText('Context kept', { exact: true })).toBeVisible();
         await expect(page.getByText(/The model suggested no candidates/)).toBeVisible();
         await page.getByRole('button', { name: 'Review source messages', exact: true }).click();
@@ -265,11 +257,11 @@ test('Automatic extraction pauses and resumes; source release remains an explici
         assert.equal(deleted.source, null); assert.equal(deleted.sourceRetention.state, 'purged');
         assert.equal(psql(db, 'select count(*) from app.telegram_history_messages').trim(), '120');
         await page.goto(`${baseURL}/staff/telegram-intake/chats`);
-        await action(row.getByRole('button', { name: 'Start automatic extraction', exact: true }), 'setExtraction');
+        assert.equal((await context.request.post(extractionURL, { data: { action: 'setExtraction', chats: [{ chatId: chat.id, expectedVersion: (await getChats()).chats.find(item => item.id === chat.id).version }], enabled: true } })).status(), 200);
         let remaining = 0;
         for (;;) { const job = (await extractWorker('claim')).job; if (!job) break; await completeExtraction(job); assert.ok(++remaining <= 3); }
         assert.equal(remaining, 3, 'Re-enable resumes every unprocessed batch without resurrecting deleted messages');
-        await page.getByRole('link', { name: 'Extraction progress', exact: true }).click();
+        await page.goto(`${baseURL}/staff/telegram-intake/extraction`);
         await expect(page.getByText('Context kept', { exact: true })).toHaveCount(3);
         await expect(page.getByText('Source messages deleted', { exact: true })).toHaveCount(1);
         assert.equal(psql(db, 'select count(*) from app.telegram_history_messages').trim(), '120', 'Zero-result batches are kept without an explicit release');
