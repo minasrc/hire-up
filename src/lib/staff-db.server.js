@@ -13,8 +13,17 @@ export function getStaffPool() {
         return null;
     }
     if (!staffPool) {
+        // Vercel functions share transaction-scoped actors, not database sessions.
+        // Session pooling reserves a backend per warm function and exhausts the
+        // Supabase session limit even when the queries themselves are idle.
+        const endpoint = new URL(connectionString);
+        if (process.env.VERCEL === '1'
+            && endpoint.hostname.endsWith('.pooler.supabase.com')
+            && endpoint.port === '5432') {
+            endpoint.port = '6543';
+        }
         staffPool = new pg.Pool({
-            connectionString,
+            connectionString: endpoint.toString(),
             max: 2,
             idleTimeoutMillis: 10_000,
             connectionTimeoutMillis: 5_000,
@@ -109,4 +118,3 @@ export async function resolveOrClaimStaffAccess(pool, identity, email, organizat
     await claimStaffInvite(pool, identity, email, organizationId);
     return readStaffAccess(pool, identity, organizationId);
 }
-
