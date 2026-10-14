@@ -257,11 +257,14 @@ test('Candidate intake has a compact chat picker and approve/edit/reject review 
     let meaningQuery;
     let meaningCoverage = { eligible: 4, indexed: 1, fullyIndexed: 1, pending: 2, failed: 1 };
     let emptyMeaningResults = false;
+    let meaningStarts = 0;
+    let meaningPending = false;
     const meaningRequests = [];
     const semanticId = randomUUID();
     await page.route('**/api/staff/profile-search*', route => {
         meaningRequests.push(route.request().url());
-        if (route.request().method() === 'POST') { const action = route.request().postDataJSON(); if (action.action === 'cancel') return route.fulfill({ json: { status: 'cancelled' } }); meaningQuery = action; return route.fulfill({ json: { queryId: semanticId, status: 'queued' } }); }
+        if (route.request().method() === 'POST') { const action = route.request().postDataJSON(); if (action.action === 'cancel') return route.fulfill({ json: { status: 'cancelled' } }); meaningQuery = action; meaningStarts += 1; return route.fulfill({ json: { queryId: semanticId, status: 'queued' } }); }
+        if (meaningPending && new URL(route.request().url()).searchParams.has('queryId')) return route.fulfill({ json: { status: 'queued', workerAvailable: true, coverage: meaningCoverage, results: [] } });
         if (new URL(route.request().url()).searchParams.has('queryId')) return route.fulfill({ json: { status: 'completed', workerAvailable: true, coverage: meaningCoverage, results: emptyMeaningResults ? [] : [{ sourceType: 'candidate', score: 0.7, sourceId: savedAlice.candidateId, directoryRow: { candidateId: savedAlice.candidateId, fullName: 'Alice Candidate', email: 'alice@example.test', headline: 'Accepted update', ownerName: null, applicationCount: 0, hasCv: false, createdAt: new Date().toISOString() } }], nextAfter: null } });
         return route.fulfill({ json: { workerAvailable: true, cvAvailable: false, coverage: meaningCoverage } });
     });
@@ -282,23 +285,42 @@ test('Candidate intake has a compact chat picker and approve/edit/reject review 
     await expect(page.getByRole('table').getByText('alice@example.test', { exact: true })).toBeVisible();
     await expect(page.getByText('1 match · Best matches first', { exact: true })).toBeVisible();
     const indexingNotice = page.getByRole('status', { name: 'Search indexing status' });
-    await expect(indexingNotice.getByText('Indexing 2 profiles · 1 profile needs attention', { exact: true })).toBeVisible();
-    await expect(indexingNotice.getByText('Results may be incomplete', { exact: true })).toBeVisible();
+    await expect(indexingNotice.getByText('2 profiles processing for search', { exact: true })).toBeVisible();
+    await expect(indexingNotice.getByText('· Some profiles need attention', { exact: true })).toBeVisible();
+    await expect(indexingNotice.getByText('· Results may be incomplete', { exact: true })).toBeVisible();
     await page.screenshot({ path: join(root, 'test-results/candidate-search-indexing.png'), fullPage: true });
+    const beforeIndexFinished = meaningStarts;
+    meaningPending = true;
     meaningCoverage = { eligible: 4, indexed: 4, fullyIndexed: 4, pending: 0, failed: 0 };
-    await indexingNotice.getByRole('button', { name: 'Refresh results', exact: true }).click();
     await expect(indexingNotice).toHaveCount(0);
+    await expect.poll(() => meaningStarts).toBe(beforeIndexFinished + 1);
+    await expect(page.getByRole('table').getByRole('link', { name: 'Alice Candidate', exact: true })).toBeVisible();
+    await expect(page.getByText('Searching…', { exact: true })).toHaveCount(0);
+    meaningPending = false;
     await expect(page.getByText('1 match · Best matches first', { exact: true })).toBeVisible();
     meaningCoverage = { eligible: 4, indexed: 2, fullyIndexed: 2, pending: 0, failed: 2 };
     emptyMeaningResults = true;
+    await page.goto(`${baseURL}/staff/candidates`);
+    await expect(page.getByRole('status', { name: 'Search indexing status' }).getByText('Some profiles need attention', { exact: true })).toBeVisible();
+    await expect(page.getByText('· Results may be incomplete', { exact: true })).toHaveCount(0);
     await unifiedSearch.fill('Remote blockchain engineer');
-    await expect(indexingNotice.getByText('2 profiles need attention', { exact: true })).toBeVisible();
-    await expect(page.getByText('No matches in indexed profiles', { exact: true })).toBeVisible();
+    await expect(indexingNotice.getByText('Some profiles need attention', { exact: true })).toBeVisible();
+    await expect(page.getByText('No matches in searchable profiles', { exact: true })).toBeVisible();
     await expect(page.getByText('No candidates found', { exact: true })).toHaveCount(0);
     meaningCoverage = { eligible: 4, indexed: 4, fullyIndexed: 4, pending: 0, failed: 0 };
     emptyMeaningResults = false;
-    await indexingNotice.getByRole('button', { name: 'Refresh results', exact: true }).click();
+    await indexingNotice.getByRole('button', { name: 'Refresh', exact: true }).click();
     await expect(indexingNotice).toHaveCount(0);
+    await expect(page.getByText('1 match · Best matches first', { exact: true })).toBeVisible();
+
+    // A stalled query ends without disabling the search field or keeping a spinner forever.
+    meaningPending = true;
+    await unifiedSearch.fill('Slow descriptive search');
+    await expect(page.getByText('Search is taking too long. Try again.', { exact: true })).toBeVisible({ timeout: 25000 });
+    await expect(unifiedSearch).toBeEnabled();
+    await expect(page.getByRole('button', { name: 'Retry search', exact: true })).toBeEnabled();
+    meaningPending = false;
+    await page.getByRole('button', { name: 'Retry search', exact: true }).click();
     await expect(page.getByText('1 match · Best matches first', { exact: true })).toBeVisible();
 
     assert.equal(new URL(page.url()).pathname, '/staff/candidates');
@@ -306,7 +328,7 @@ test('Candidate intake has a compact chat picker and approve/edit/reject review 
     await expect(page).toHaveURL(/q=six\+years/);
     await expect(page.getByText('0 candidates', { exact: true })).toBeVisible();
     await expect(page.getByRole('table').getByRole('link', { name: 'Alice Candidate', exact: true })).toHaveCount(0);
-    assert.equal(meaningQuery.query, 'Remote blockchain engineer', 'experience constraints never fall back to unconstrained similarity');
+    assert.equal(meaningQuery.query, 'Slow descriptive search', 'experience constraints never fall back to unconstrained similarity');
     await unifiedSearch.fill('Accepted update');
     await expect(page.getByRole('table').getByRole('link', { name: 'Alice Candidate', exact: true })).toBeVisible();
 

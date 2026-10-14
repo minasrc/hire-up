@@ -5,7 +5,7 @@ import { staffWorkspaceUrl } from '@/lib/staff-workspace-fetch';
 import Link from 'next/link';
 import { useSyncExternalStore } from 'react';
 import { useRouter } from 'next/navigation';
-import { AlertCircle, FileText, LoaderCircle, Search, X } from 'lucide-react';
+import { AlertCircle, Clock3, FileText, LoaderCircle, Search, X } from 'lucide-react';
 
 import { Button } from '@/components/staff-ui/button';
 import { Input } from '@/components/staff-ui/input';
@@ -26,6 +26,7 @@ import { candidateDirectoryQuery } from '@/lib/staff-directory-query';
 import { useDirectoryNavigation } from '../use-directory-navigation';
 import { CandidateUploadDialog } from './candidate-upload-dialog';
 import { searchIndexingStatus } from './search/search-model';
+import { useSearchIndexing } from './use-search-indexing';
 import { useCandidateSearch } from './use-candidate-search';
 import { StaffDate } from '../staff-date';
 
@@ -85,8 +86,9 @@ export function CandidatesBrowser({
     const updateQuery = (value: string, debounce = false) =>
         navigate({ query: value, page: 1 }, debounce);
     const rankedMode = semanticSearchEnabled && profileOptions?.canWrite === true && query.trim().length >= 3 && total === 0 && !candidateSearchIntent(query).experience;
-    const ranked = useCandidateSearch(query.trim(), rankedMode && !pending);
-    const indexing = rankedMode ? searchIndexingStatus(ranked.state?.coverage) : null;
+    const backgroundIndexing = useSearchIndexing(semanticSearchEnabled && profileOptions?.canWrite === true, total);
+    const ranked = useCandidateSearch(query.trim(), rankedMode && !pending, backgroundIndexing.revision);
+    const indexing = searchIndexingStatus(backgroundIndexing.coverage ?? (rankedMode ? ranked.state?.coverage : null));
     const rows = rankedMode ? ranked.state?.rows ?? [] : candidates;
     const searching = pending || (rankedMode && (!ranked.state || ranked.state.status === 'searching'));
     const totalPages = Math.max(1, Math.ceil(total / pageSize));
@@ -143,27 +145,30 @@ export function CandidatesBrowser({
                 </p>
             ) : null}
 
-            <span role="status" className="text-xs text-muted-foreground">
-                {searching ? <span className="flex items-center gap-2"><LoaderCircle aria-hidden="true" className="h-3.5 w-3.5 motion-safe:animate-spin" />Searching…</span> : rankedMode ? ranked.state?.status === 'unavailable' ? 'Search temporarily unavailable' : ranked.state?.status === 'failed' ? ranked.state.error : `${rows.length} match${rows.length === 1 ? '' : 'es'} · Best matches first` : `${total} candidate${total === 1 ? '' : 's'}`}
-                {rankedMode && ['unavailable', 'failed'].includes(ranked.state?.status ?? '') ? <Button variant="ghost" size="sm" onClick={ranked.retry}>Retry</Button> : null}
-            </span>
-
-            {indexing ? (
-                <div role="status" aria-label="Search indexing status" className="flex flex-wrap items-center gap-2 rounded-lg bg-hover px-3 py-2 text-sm">
-                    {indexing.pending ? <LoaderCircle aria-hidden="true" className="h-4 w-4 motion-safe:animate-spin" /> : <AlertCircle aria-hidden="true" className="h-4 w-4" />}
-                    <span>{indexing.label}</span>
-                    {indexing.incomplete ? <span className="text-xs text-muted-foreground">Results may be incomplete</span> : null}
-                    <Button variant="ghost" size="sm" className="ml-auto" disabled={searching} onClick={ranked.retry}>Refresh results</Button>
-                </div>
-            ) : null}
+            <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-muted-foreground">
+                <span role="status">
+                    {searching ? <span className="flex items-center gap-2"><LoaderCircle aria-hidden="true" className="h-3.5 w-3.5 motion-safe:animate-spin" />Searching…</span> : rankedMode ? ranked.state?.status === 'unavailable' ? 'Search temporarily unavailable' : ranked.state?.status === 'failed' ? ranked.state.error : `${rows.length} match${rows.length === 1 ? '' : 'es'} · Best matches first` : `${total} candidate${total === 1 ? '' : 's'}`}
+                </span>
+                {indexing ? (
+                    <span role="status" aria-label="Search indexing status" className="flex flex-wrap items-center gap-1.5">
+                        {backgroundIndexing.animated ? <LoaderCircle aria-hidden="true" className="h-3.5 w-3.5 motion-safe:animate-spin" /> : indexing.failed ? <AlertCircle aria-hidden="true" className="h-3.5 w-3.5" /> : <Clock3 aria-hidden="true" className="h-3.5 w-3.5" />}
+                        <span>{indexing.pending ? `${indexing.pending} profile${indexing.pending === 1 ? '' : 's'} processing for search` : indexing.failed ? 'Some profiles need attention' : indexing.label}</span>
+                        {indexing.pending && indexing.failed ? <span>· Some profiles need attention</span> : null}
+                        {rankedMode && indexing.incomplete ? <span>· Results may be incomplete</span> : null}
+                        <Button variant="ghost" size="sm" onClick={() => { backgroundIndexing.refresh(); if (rankedMode) ranked.retry(); }}>Refresh</Button>
+                    </span>
+                ) : null}
+                {rankedMode && ranked.state?.status === 'completed' && ranked.state.error ? <span role="status">{ranked.state.error}</span> : null}
+                {rankedMode && (['unavailable', 'failed'].includes(ranked.state?.status ?? '') || ranked.state?.error) ? <Button variant="ghost" size="sm" onClick={ranked.retry}>Retry search</Button> : null}
+            </div>
 
             {!rows.length && !searching ? (
                 <div className="flex flex-col items-center gap-2 rounded-lg border border-dashed border-border bg-card px-6 py-12 text-center">
-                    <p className="text-sm font-medium text-foreground">{rankedMode && ranked.state?.status !== 'completed' ? 'Try searching by name or email' : indexing?.incomplete ? 'No matches in indexed profiles' : 'No candidates found'}</p>
+                    <p className="text-sm font-medium text-foreground">{rankedMode && ranked.state?.status !== 'completed' ? 'Try searching by name or email' : rankedMode && indexing?.incomplete ? 'No matches in searchable profiles' : 'No candidates found'}</p>
                     <p className="max-w-sm text-sm text-muted-foreground">
                         {!query
                             ? 'Add a candidate or import from Telegram.'
-                            : indexing?.incomplete ? 'Search by name or email.' : 'Try clearing the search.'}
+                            : rankedMode && indexing?.incomplete ? 'Search by name or email.' : 'Try clearing the search.'}
                     </p>
                 </div>
             ) : (

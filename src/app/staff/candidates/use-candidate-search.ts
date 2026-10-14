@@ -2,18 +2,20 @@
 
 import { useEffect, useRef, useState } from 'react';
 import { searchAction, searchEndpoint, searchRequest } from './search/search-api';
-import { safeSearchSnapshot, searchGuidance } from './search/search-model';
+import { safeSearchSnapshot, searchGuidance, searchInvalidated } from './search/search-model';
 import type { CandidateRow } from './candidates-browser';
 
-type SearchCoverage = { eligible: number; indexed: number; fullyIndexed?: number; pending: number; failed: number; corpusChanged?: boolean };
+import type { SearchCoverage } from './use-search-indexing';
 
 type SearchState = { query: string; after: string; status: 'searching' | 'completed' | 'unavailable' | 'failed'; rows: CandidateRow[]; next: string | null; error?: string; coverage?: SearchCoverage | null };
 
-export function useCandidateSearch(query: string, enabled: boolean) {
+export function useCandidateSearch(query: string, enabled: boolean, indexRevision = 0) {
     const [state, setState] = useState<SearchState | null>(null);
     const [paging, setPaging] = useState<{ query: string; cursors: string[] }>({ query: '', cursors: [''] });
     const [revision, setRevision] = useState(0);
     const current = useRef<{ query: string; id: string; includeCv: boolean } | null>(null);
+    const lastResult = useRef<SearchState | null>(null);
+    const indexedRevision = useRef(indexRevision);
     const cursors = paging.query === query ? paging.cursors : [''];
     const after = cursors[cursors.length - 1];
 
@@ -27,19 +29,38 @@ export function useCandidateSearch(query: string, enabled: boolean) {
             void searchAction({ action: 'cancel', queryId: previous.id }).catch(() => {});
         }
         if (!enabled) return () => controller.abort();
+        if (indexedRevision.current !== indexRevision) {
+            indexedRevision.current = indexRevision;
+            if (current.current) void searchAction({ action: 'cancel', queryId: current.current.id }).catch(() => {});
+            current.current = null;
+        }
+        const previousResult = lastResult.current;
+        const refreshing = previousResult?.query === query && previousResult.after === after && previousResult.status === 'completed';
+        const deadline = setTimeout(() => {
+            stopped = true; clearTimeout(timer); clearTimeout(deadline); controller.abort();
+            if (current.current) void searchAction({ action: 'cancel', queryId: current.current.id }).catch(() => {});
+            current.current = null;
+            setState(existing => existing?.query === query && existing.after === after && existing.rows.length
+                ? { ...existing, status: 'completed', error: 'Search refresh delayed. Try again.' }
+                : { query, after, status: 'failed', rows: [], next: null, error: 'Search is taking too long. Try again.' });
+        }, 20000);
         const publish = (next: Omit<SearchState, 'query' | 'after'>) => {
-            if (!stopped) setState({ query, after, ...next });
+            if (!stopped) { lastResult.current = { query, after, ...next }; setState(lastResult.current); }
         };
-        let coverage: SearchCoverage | null = null;
+        let coverage: SearchCoverage | null = previousResult?.query === query ? previousResult.coverage ?? null : null;
+        const fail = (status: 'failed' | 'unavailable', error: string) => {
+            if (refreshing && previousResult.rows.length) publish({ ...previousResult, status: 'completed', error, coverage });
+            else publish({ status, error, rows: [], next: null, coverage });
+        };
         async function run() {
-            publish({ status: 'searching', rows: [], next: null });
+            if (!refreshing) publish({ status: 'searching', rows: [], next: null });
             try {
                 let active = current.current;
                 if (!active || active.query !== query) {
                     const availability = await searchRequest(`${searchEndpoint}?scope=approved&includeCv=false`, { signal: controller.signal });
                     if (stopped) return;
                     coverage = availability.coverage ?? null;
-                    if (!availability.workerAvailable) { publish({ status: 'unavailable', rows: [], next: null, coverage }); return; }
+                    if (!availability.workerAvailable) { clearTimeout(deadline); fail('unavailable', 'Search temporarily unavailable'); return; }
                     const includeCv = availability.cvAvailable === true;
                     const started = await searchRequest(searchEndpoint, { method: 'POST', signal: AbortSignal.any([controller.signal, AbortSignal.timeout(15000)]), headers: { 'content-type': 'application/json' }, body: JSON.stringify({ action: 'search', operationId: crypto.randomUUID(), query, scope: 'approved', readyOnly: false, includeCv }) });
                     if (stopped) { void searchAction({ action: 'cancel', queryId: started.queryId }).catch(() => {}); return; }
@@ -51,24 +72,28 @@ export function useCandidateSearch(query: string, enabled: boolean) {
                 if (stopped) return;
                 coverage = snapshot.coverage ?? coverage;
                 if (snapshot.status === 'completed') {
+                    clearTimeout(deadline);
                     publish({ status: 'completed', rows: (snapshot.results ?? []).filter((row: { directoryRow?: CandidateRow }) => row.directoryRow).map((row: { directoryRow: CandidateRow }) => row.directoryRow), next: snapshot.nextAfter ?? null, coverage });
                 } else if (snapshot.status === 'queued' || snapshot.status === 'running') {
-                    publish({ status: snapshot.workerAvailable ? 'searching' : 'unavailable', rows: [], next: null, coverage });
+                    if (!refreshing) publish({ status: snapshot.workerAvailable ? 'searching' : 'unavailable', rows: [], next: null, coverage });
                     timer = setTimeout(() => void run(), 1500);
                 } else {
+                    clearTimeout(deadline);
                     current.current = null;
-                    publish({ status: 'failed', rows: [], next: null, error: searchGuidance(snapshot.errorCode) || 'Search again.', coverage });
+                    if (searchInvalidated(snapshot.errorCode)) publish({ status: 'failed', error: searchGuidance(snapshot.errorCode), rows: [], next: null, coverage });
+                    else fail('failed', searchGuidance(snapshot.errorCode) || 'Search again.');
                 }
             } catch {
-                if (!stopped && !controller.signal.aborted) publish({ status: 'failed', rows: [], next: null, error: 'Search unavailable. Try again.', coverage });
+                clearTimeout(deadline);
+                if (!stopped && !controller.signal.aborted) fail('failed', 'Search unavailable. Try again.');
             }
         }
         // Wait until typing settles before creating a ranked search job.
         timer = setTimeout(() => void run(), 500);
-        const lost = () => { stopped = true; clearTimeout(timer); controller.abort(); current.current = null; setState(null); };
+        const lost = () => { stopped = true; clearTimeout(timer); clearTimeout(deadline); controller.abort(); current.current = null; lastResult.current = null; setState(null); };
         window.addEventListener('staff-session-invalidated', lost);
-        return () => { stopped = true; clearTimeout(timer); controller.abort(); window.removeEventListener('staff-session-invalidated', lost); };
-    }, [query, enabled, after, revision]);
+        return () => { stopped = true; clearTimeout(timer); clearTimeout(deadline); controller.abort(); window.removeEventListener('staff-session-invalidated', lost); };
+    }, [query, enabled, after, revision, indexRevision]);
 
     useEffect(() => () => {
         if (current.current) void searchAction({ action: 'cancel', queryId: current.current.id }).catch(() => {});
