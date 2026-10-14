@@ -160,9 +160,14 @@ test('attachment-only CVs become reviewed candidates without losing field edits 
     let draft = await getTelegramDraft(pool, owner, org, boot.draftId);
     assert.equal(draft.fields.telegramUsername ?? '', '', 'The sender is not the candidate');
     assert.equal(draft.fields.primaryEmail ?? '', '');
+    if (index === 0) psql(db, `delete from app.cv_bootstraps where draft_id='${boot.draftId}'`);
     const cvJob = (await telegramCvWorkerOperation(workerPool, token, 'claim', proof)).job;
     await uploadTelegramCv(workerPool, token, { ...proof, jobId: cvJob.id, jobLeaseToken: cvJob.leaseToken, sourceDigest: cvJob.sourceDigest,
       sha256: createHash('sha256').update(doc.bytes).digest('hex'), sizeBytes: doc.bytes.length }, async () => doc.bytes, storage);
+    if (index === 0) {
+      assert.equal(psql(db, `select count(*) from app.cv_analyses where draft_id='${boot.draftId}'`).trim(), '1', 'retrieval starts analysis even for an already-linked draft without a bootstrap');
+      psql(db, `delete from app.cv_analyses where draft_id='${boot.draftId}'`);
+    }
     if (index) {
       draft = await getTelegramDraft(pool, owner, org, boot.draftId);
       draft = await updateTelegramDraft(pool, owner, org, draft.id, { expectedVersion: draft.version,

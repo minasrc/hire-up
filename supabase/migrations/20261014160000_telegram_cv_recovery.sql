@@ -48,6 +48,19 @@ declare ex app.telegram_extraction_jobs;b app.cv_bootstraps;op app.cv_analysis_o
  return jsonb_build_object('draftId',d.id,'cvJobId',got#>'{job,id}','analysisId',null,'candidateId',null,'replayed',false);
 end $$;
 
+
+-- Retrieval into an existing chat-created draft needs the same analysis as a
+-- CV-only bootstrap; the original gate missed those attachments.
+create or replace function app.cv_analysis_retrieved_v1() returns trigger
+language plpgsql security definer set search_path=pg_catalog,app,pg_temp as $$
+begin
+ if new.status='completed' and new.receipt is not null and old.receipt is distinct from new.receipt then
+ perform app.cv_analysis_actor_v1();
+ perform app.cv_analysis_enqueue_v1(new.draft_id,(new.receipt->>'documentRevision')::bigint,new.extraction_job_id);
+ end if;
+ return new;
+end $$;
+
 -- Discover clearly labelled CVs separately from candidate text extraction.
 -- Existing attachment links are reused; reviewed profiles are never modified.
 create function app.telegram_cv_auto_bootstrap_v1(p_token text) returns integer
@@ -93,6 +106,19 @@ begin
  started:=started+1;
  exception when check_violation or serialization_failure or insufficient_privilege then continue;
  end;
+ end loop;
+ -- Recover completed retrievals from before automatic analysis was enabled.
+ for item in
+ select v.draft_id,v.extraction_job_id,draft.document_revision
+ from app.telegram_cv_jobs v join app.telegram_drafts draft on draft.id=v.draft_id
+ join app.telegram_extraction_jobs j on j.id=v.extraction_job_id
+ join app.telegram_history_chats h on h.id=j.chat_id and h.extraction_enabled
+ where v.status='completed' and draft.status in('pending','snoozed','duplicate')
+ and draft.document is not null and draft.document_revision=(v.receipt->>'documentRevision')::bigint
+ and not exists(select 1 from app.cv_analyses analysis where analysis.draft_id=draft.id and analysis.document_revision=draft.document_revision)
+ order by v.created_at,v.id limit 5
+ loop
+ perform app.cv_analysis_enqueue_v1(item.draft_id,item.document_revision,item.extraction_job_id);
  end loop;
  return started;
 end $$;
