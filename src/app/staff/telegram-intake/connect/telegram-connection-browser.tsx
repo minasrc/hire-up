@@ -227,6 +227,7 @@ function ConnectionBrowser({ workspaceId, hostedEnabled, blocked, onConnectionCh
 
     const ConnectionCard = hostedEnabled ? 'div' : Card;
     const requestErrorPanel = error ? <div role="alert" className="rounded-lg border border-border p-4 text-sm"><p>{error}</p><Button className="mt-3" variant="outline" disabled={busy} onClick={() => { mutationError.current = false; setAccessDenied(false); setRefresh(value => value + 1); }}><RefreshCw />Retry status</Button></div> : null;
+    if (!loaded) return requestErrorPanel || <div role="status" className="py-4 text-sm text-muted-foreground">Loading connection…</div>;
     const passwordAction = connection?.status === 'awaiting_password' ? <Button type="submit" form={passwordFormId} disabled={busy || accessDenied || connection.passwordPending || !worker?.online || !password}>{busy || connection.passwordPending ? 'Checking password…' : 'Continue'}</Button> : null;
     const connectionActions = connection ? <>
         {passwordAction}

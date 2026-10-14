@@ -186,6 +186,8 @@ test('Candidate intake has a compact chat picker and approve/edit/reject review 
     const chats = Array.from({ length: 60 }, (_, index) => ({ id: `a0000000-0000-4000-8000-${String(index + 1).padStart(12, '0')}`, peer: { kind: 'user', id: String(index+1) }, title: `Chat ${index+1}`, username: null, selected: false, version: 1, extractionEnabled: false, extractionPending: false, import: null }));
     let started;
     let releaseStart;
+    let releaseHistory;
+    const historyReady = new Promise(resolve => { releaseHistory = resolve; });
     await page.route('**/api/staff/telegram-history*', async route => {
         const req = route.request();
         if (req.method() === 'POST') {
@@ -199,6 +201,7 @@ test('Candidate intake has a compact chat picker and approve/edit/reject review 
             }
             return route.fulfill({ json: { ok: true } });
         }
+        await historyReady;
         const params = new URL(req.url()).searchParams;
         const available = chats.filter(chat => !chat.selected);
         const connected = chats.filter(chat => chat.selected);
@@ -208,6 +211,11 @@ test('Candidate intake has a compact chat picker and approve/edit/reject review 
         return route.fulfill({ json: { connection: { id: 'b0000000-0000-4000-8000-000000000001', generation: 1, status: 'connected', accountUserId: '123' }, account: { id: 'c0000000-0000-4000-8000-000000000001', accountUserId: '123' }, canImport: true, blockedReason: null, discovery: { status: 'completed', jobs: [] }, totals: { chats: 60, selected: connected.length, available: available.length, connected: connected.length, messages: 0, bytes: 0, maxMessages: 100000, maxBytes: 10000000 }, chats: rows, nextCursor: !params.get('after') && filtered.length > 50 ? 'next-page' : null } });
     });
     await page.goto(`${baseURL}/staff/telegram-intake/chats`);
+    await expect(page.getByRole('status', { name: 'Loading Telegram chats' })).toBeVisible();
+    await expect(page.getByLabel('Mac device pairing')).toHaveCount(0);
+    releaseHistory();
+    await expect(page.getByRole('status', { name: 'Loading Telegram chats' })).not.toBeVisible();
+    await expect(page.getByRole('heading', { name: 'Pair your Mac', exact: true })).not.toBeVisible();
     await expect(page.getByRole('heading', { name: 'Choose chats', exact: true })).toBeVisible();
     await expect(page.getByRole('list', { name: 'Telegram onboarding steps' })).not.toBeVisible();
     await page.getByRole('checkbox', { name: 'Select Chat 1', exact: true }).check();

@@ -3,7 +3,7 @@
 import { staffWorkspaceFetch } from '@/lib/staff-workspace-fetch';
 
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { CheckCircle2, MessageSquare, RefreshCw, Search } from 'lucide-react';
+import { CheckCircle2, LoaderCircle, MessageSquare, RefreshCw, Search } from 'lucide-react';
 import { Button } from '@/components/staff-ui/button';
 import { InitialsAvatar } from '@/components/staff-preview/shared';
 import { Badge } from '@/components/staff-ui/badge';
@@ -221,7 +221,7 @@ export function TelegramHistoryBrowser({ workspaceId, hostedEnabled = false, onb
         </ol> : null}
         <div className="mx-auto flex w-full max-w-6xl flex-col gap-3">
         {error ? <div role="alert" className="flex flex-wrap items-center justify-between gap-3 rounded-lg border p-4 text-sm"><p>{error}</p><Button variant="outline" onClick={refreshStatus} disabled={busy}>Retry</Button></div> : null}
-        {snapshot?.canImport ? <details className="rounded-lg border bg-card px-3 py-2"><summary className="cursor-pointer text-sm font-medium"><CheckCircle2 className="mr-2 inline h-4 w-4 text-primary" />Telegram connected</summary><div className="mt-4"><TelegramConnectionBrowser workspaceId={workspaceId} hostedEnabled={hostedEnabled} blocked={denied} onConnectionChange={connectionChanged} onDenied={denyRemovalAccess} onChooseChats={chooseChats} chooseChatsLabel={null} /></div></details>
+        {!snapshot ? loading && !denied ? <div role="status" aria-label="Loading Telegram chats" className="flex items-center gap-2 py-4 text-sm text-muted-foreground"><LoaderCircle className="h-4 w-4 motion-safe:animate-spin" aria-hidden="true" />Loading chats…</div> : null : snapshot.canImport ? <details className="rounded-lg border bg-card px-3 py-2"><summary className="cursor-pointer text-sm font-medium"><CheckCircle2 className="mr-2 inline h-4 w-4 text-primary" />Telegram connected</summary><div className="mt-4"><TelegramConnectionBrowser workspaceId={workspaceId} hostedEnabled={hostedEnabled} blocked={denied} onConnectionChange={connectionChanged} onDenied={denyRemovalAccess} onChooseChats={chooseChats} chooseChatsLabel={null} /></div></details>
             : <TelegramConnectionBrowser workspaceId={workspaceId} hostedEnabled={hostedEnabled} blocked={denied} onConnectionChange={connectionChanged} onDenied={denyRemovalAccess} onChooseChats={chooseChats} chooseChatsLabel="Choose chats" />}
         {snapshot?.canImport || starting ? <ProcessingStatus key={importRevision} starting={starting} imported={imported} reviewLink onProposalCount={setProposalCount} /> : null}
         {snapshot?.canImport ? <Tabs value={view} onValueChange={value => {
