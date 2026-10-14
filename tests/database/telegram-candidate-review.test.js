@@ -116,6 +116,36 @@ test('Telegram proposals create candidates without CVs, update exact matches, fe
     const approved = await approve(matched);
     assert.equal(approved.candidateId, existingId);
     assert.equal((await approve(matched)).replayed, true, 'lost approval acknowledgements replay safely');
+    // A background refresh must wait for an approval's owner lock before it
+    // locks another draft, otherwise the approval can deadlock reading it.
+    const concurrentA = await createTelegramDraft(...args, { fields: { firstName: 'Concurrent', lastName: 'A' } });
+    const concurrentB = await createTelegramDraft(...args, { fields: { firstName: 'Concurrent', lastName: 'B' } });
+    let firstLocked, continueFirst, secondStarted;
+    const locked = new Promise(resolve => { firstLocked = resolve; });
+    const continueRead = new Promise(resolve => { continueFirst = resolve; });
+    const startedSecond = new Promise(resolve => { secondStarted = resolve; });
+    let secondPrepared = false;
+    const firstTransaction = withStaffTransaction(...args, ['candidates.read', 'candidates.write'], async ({ client }) => {
+        await client.query('select app.telegram_review_decide_v1($1,$2,$3,$4)', [concurrentA.id, concurrentA.version, 'approve', randomUUID()]);
+        firstLocked(); await continueRead;
+        await client.query('select app.telegram_review_draft_v1($1)', [concurrentB.id]);
+    });
+    await locked;
+    const secondTransaction = withStaffTransaction(...args, ['candidates.read', 'candidates.write'], async ({ client }) => {
+        secondStarted();
+        await client.query('select app.telegram_review_draft_v1($1)', [concurrentB.id]);
+        secondPrepared = true;
+        await client.query('select app.telegram_review_decide_v1($1,$2,$3,$4)', [concurrentB.id, concurrentB.version, 'approve', randomUUID()]);
+    });
+    await startedSecond;
+    try {
+        await new Promise(resolve => setTimeout(resolve, 80));
+        assert.equal(secondPrepared, false, 'refresh waits before taking the draft row lock');
+    } finally {
+        continueFirst();
+        const outcomes = await Promise.allSettled([firstTransaction, secondTransaction]);
+        for (const outcome of outcomes) assert.equal(outcome.status, 'fulfilled', outcome.reason?.message);
+    }
     const registered = await registerTelegramWorker(...args, 'Synthetic intake worker');
     const connection = randomUUID(), account = randomUUID(), chat = randomUUID();
     const publicKey = generateKeyPairSync('rsa', { modulusLength: 2048 }).publicKey.export({ format: 'der', type: 'spki' }).toString('base64');
