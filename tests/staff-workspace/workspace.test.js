@@ -515,6 +515,10 @@ test('staff workspace end-to-end in a real browser', async (t) => {
             for (const directory of ['candidates', 'applications']) {
                 await gotoStaff(page, `${baseURL}/staff/${directory}?q=Paging+UI`);
                 await expect(page.getByRole('table').locator('tbody tr')).toHaveCount(50);
+                if (directory === 'candidates') {
+                    const viewport = await page.getByRole('table').evaluate(table => ({ height: table.parentElement.clientHeight, scrollHeight: table.parentElement.scrollHeight }));
+                    assert.ok(viewport.height <= 640 && viewport.scrollHeight > viewport.height);
+                }
                 const pages = page.getByRole('navigation', { name: 'Directory pages' });
                 await expect(pages).toHaveText(/Page 1 of 2.*1–50 of 51/);
                 await pages.getByRole('button', { name: 'Next', exact: true }).click();
@@ -1664,6 +1668,17 @@ test('staff workspace end-to-end in a real browser', async (t) => {
         await expect(page.getByRole('button', { name: 'Remove New York', exact: true })).toHaveCount(2);
     });
 
+    await runCase('candidate names preview and arrows open the full profile', async () => {
+        await gotoStaff(page, `${baseURL}/staff/candidates`);
+        await page.getByRole('link', { name: 'Synthetic Candidate B', exact: true }).click();
+        await expect(page.getByRole('dialog')).toBeVisible();
+        await page.getByRole('dialog').getByRole('button', { name: 'Close', exact: true }).click();
+        await page.getByRole('link', { name: 'Open full profile for Synthetic Candidate B', exact: true }).click();
+        await page.waitForURL(new RegExp(`/staff/candidates/${CJ_ID.CANDIDATE_B}$`));
+        await expect(page.getByRole('heading', { name: 'Synthetic Candidate B', exact: true })).toBeVisible();
+        await expect(page.getByRole('dialog')).toHaveCount(0);
+    });
+
     await runCase('same-path workspace links re-sync filters and history restores them', async () => {
         await gotoStaff(page, `${baseURL}/staff/applications`);
         const reviewToggle = page.getByRole('button', { name: 'Awaiting review' });
@@ -1693,7 +1708,7 @@ test('staff workspace end-to-end in a real browser', async (t) => {
         // gotoStaff's existing network-idle check proves this private read no
         // longer blocks the browser; cancellation need not be transport success.
         await expect(page.getByLabel('Private Telegram provenance', { exact: true })).toHaveCount(0);
-        await expect(page.getByRole('tab', { name: /Applications/ })).toHaveAttribute('aria-selected', 'true');
+        await expect(page.getByRole('tab', { name: 'Overview', exact: true })).toHaveAttribute('aria-selected', 'true');
     });
 
     await runCase('candidate provenance authentication denials finish their private reads', async () => {
@@ -1711,7 +1726,7 @@ test('staff workspace end-to-end in a real browser', async (t) => {
     });
 
     await runCase('candidate stage select is readable and the transition persists', async () => {
-        await gotoStaff(page, `${baseURL}/staff/candidates/${CJ_ID.CANDIDATE_B}`);
+        await gotoStaff(page, `${baseURL}/staff/candidates/${CJ_ID.CANDIDATE_B}?tab=applications`);
         const trigger = page.getByRole('combobox', {
             name: 'Stage for application AG-AAAA00000001',
         });
@@ -1775,7 +1790,7 @@ test('staff workspace end-to-end in a real browser', async (t) => {
         const notesTab = page.getByRole('tab', { name: /Notes/ });
         const documentsTab = page.getByRole('tab', { name: /Documents/ });
         await expect(
-            page.getByRole('tab', { name: /Applications/ }),
+            page.getByRole('tab', { name: 'Overview', exact: true }),
         ).toHaveAttribute('aria-selected', 'true');
 
         await documentsTab.click();

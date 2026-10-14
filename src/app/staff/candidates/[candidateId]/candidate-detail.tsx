@@ -95,7 +95,7 @@ interface CandidateApplication {
     history: ApplicationHistory[];
 }
 
-interface Workspace {
+export interface Workspace {
     candidate: {
         candidateId: string;
         fullName: string | null;
@@ -223,7 +223,7 @@ function StageSelect({
     );
 }
 
-function NoteComposer({ candidateId }: { candidateId: string }) {
+export function NoteComposer({ candidateId, onDirtyChange, onAdded }: { candidateId: string; onDirtyChange?: (dirty: boolean) => void; onAdded?: () => void }) {
     const router = useRouter();
     const [body, setBody] = useState('');
     const [saving, setPending] = useState(false);
@@ -248,7 +248,7 @@ function NoteComposer({ candidateId }: { candidateId: string }) {
             if (!response.ok) {
                 setMessage('Note could not be saved.');
             } else {
-                setBody('');
+                setBody(''); onDirtyChange?.(false); onAdded?.();
                 setMessage('Note added.');
                 window.dispatchEvent(new CustomEvent('staff-workspace-updated', {
                     detail: { scope: 'workspace' },
@@ -271,7 +271,7 @@ function NoteComposer({ candidateId }: { candidateId: string }) {
                 placeholder="Interview feedback, context, next steps…"
                 rows={3}
                 value={body}
-                onChange={(event) => setBody(event.target.value)}
+                onChange={(event) => { setBody(event.target.value); onDirtyChange?.(Boolean(event.target.value.trim())); }}
             />
             <div className="flex items-center gap-3">
                 <Button size="sm" onClick={submit} disabled={pending || !body.trim()}>
@@ -285,7 +285,7 @@ function NoteComposer({ candidateId }: { candidateId: string }) {
     );
 }
 
-const DETAIL_TABS = ['applications', 'documents', 'notes'] as const;
+const DETAIL_TABS = ['overview', 'applications', 'documents', 'notes'] as const;
 
 export function CandidateDetail({
     workspace: serverWorkspace,
@@ -326,10 +326,10 @@ export function CandidateDetail({
     const requestedTab = searchParams.get('tab') ?? '';
     const tab = (DETAIL_TABS as readonly string[]).includes(requestedTab)
         ? requestedTab
-        : 'applications';
+        : 'overview';
     const setTab = (value: string) => {
         const params = new URLSearchParams(searchParams.toString());
-        if (value === 'applications') {
+        if (value === 'overview') {
             params.delete('tab');
         } else {
             params.set('tab', value);
@@ -431,23 +431,11 @@ export function CandidateDetail({
 
             {profileMessage && savedProfile?.candidate.candidateId === candidate.candidateId ? <p role="status" className="text-sm text-muted-foreground">{profileMessage}</p> : null}
 
-            {candidate.professionalSummary ? (
-                <Card>
-                    <CardHeader>
-                        <CardTitle className="text-base">Summary</CardTitle>
-                    </CardHeader>
-                    <CardContent>
-                        <p className="text-sm whitespace-pre-wrap">
-                            {candidate.professionalSummary}
-                        </p>
-                    </CardContent>
-                </Card>
-            ) : null}
-
             <PrivateTelegramProvenance key={candidate.candidateId} candidateId={candidate.candidateId} />
 
             <Tabs value={tab} onValueChange={setTab}>
                 <TabsList>
+                    <TabsTrigger value="overview">Overview</TabsTrigger>
                     <TabsTrigger value="applications">
                         Applications
                         <Badge variant="secondary">{applications.length}</Badge>
@@ -461,6 +449,16 @@ export function CandidateDetail({
                         <Badge variant="secondary">{notes.length}</Badge>
                     </TabsTrigger>
                 </TabsList>
+
+                <TabsContent value="overview" className="flex flex-col gap-4 pt-4">
+                    <Card>
+                        <CardHeader><CardTitle className="text-base">Profile</CardTitle></CardHeader>
+                        <CardContent className="flex flex-col gap-2">
+                            <h3 className="text-xs font-semibold uppercase">Summary</h3>
+                            <p className="whitespace-pre-wrap text-sm leading-6 text-muted-foreground">{candidate.professionalSummary || 'No summary recorded.'}</p>
+                        </CardContent>
+                    </Card>
+                </TabsContent>
 
                 <TabsContent value="applications" className="flex flex-col gap-4 pt-4">
                     {!capabilities.readApplications ? (

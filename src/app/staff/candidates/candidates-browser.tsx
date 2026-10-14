@@ -5,8 +5,10 @@ import { staffWorkspaceUrl } from '@/lib/staff-workspace-fetch';
 import Link from 'next/link';
 import { useSyncExternalStore } from 'react';
 import { useRouter } from 'next/navigation';
-import { AlertCircle, Clock3, FileText, LoaderCircle, Search, X } from 'lucide-react';
+import { AlertCircle, Clock3, ChevronRight, LoaderCircle, Search, X } from 'lucide-react';
 
+import { InitialsAvatar, PageHeader } from '@/components/staff-preview/shared';
+import { Badge } from '@/components/staff-ui/badge';
 import { Button } from '@/components/staff-ui/button';
 import { Input } from '@/components/staff-ui/input';
 import { Label } from '@/components/staff-ui/label';
@@ -95,9 +97,13 @@ export function CandidatesBrowser({
 
     return (
         <div className="flex flex-col gap-6">
-            <div className="flex flex-col gap-1.5">
-                <h1 className="text-[26px] leading-8 font-medium text-foreground">Candidates</h1>
-            </div>
+            <PageHeader eyebrow="Workspace" title="Candidates" actions={profileOptions?.canWrite === true ? (
+                    <CandidateUploadDialog
+                        options={profileOptions}
+                        onCreated={(candidateId) =>
+                            router.push(staffWorkspaceUrl(`/staff/candidates/${candidateId}`))}
+                    />
+                ) : null} />
 
             <div className="flex flex-wrap items-end gap-3 rounded-lg border border-border bg-card p-4">
                 <div className="flex flex-1 flex-col gap-1.5">
@@ -130,13 +136,7 @@ export function CandidatesBrowser({
                         <Link href="/staff/candidates/duplicates">Review matches</Link>
                     </Button>
                 ) : null}
-                {profileOptions?.canWrite === true ? (
-                    <CandidateUploadDialog
-                        options={profileOptions}
-                        onCreated={(candidateId) =>
-                            router.push(staffWorkspaceUrl(`/staff/candidates/${candidateId}`))}
-                    />
-                ) : null}
+
             </div>
 
             {profileUnavailable ? (
@@ -173,52 +173,45 @@ export function CandidatesBrowser({
                 </div>
             ) : (
                 <div aria-busy={searching} className="overflow-hidden rounded-lg border border-border bg-card">
-                    <Table>
-                    <TableHeader>
+                    <Table containerClassName="max-h-[min(65vh,640px)] overflow-y-auto overscroll-contain" aria-label="Candidates">
+                    <TableHeader className="sticky top-0 z-10 bg-card">
                         <TableRow>
                             <TableHead>Name</TableHead>
-                            <TableHead>Email</TableHead>
+                            <TableHead>Role</TableHead>
                             <TableHead>Owner</TableHead>
                             <TableHead>Applications</TableHead>
                             <TableHead>CV</TableHead>
-                            <TableHead>Added</TableHead>
+                            <TableHead className="hidden xl:table-cell">Added</TableHead>
+                            <TableHead><span className="sr-only">Open candidate</span></TableHead>
                         </TableRow>
                     </TableHeader>
                     <TableBody>
                         {rows.map((row) => (
                             <TableRow key={row.candidateId}>
                                 <TableCell>
-                                    <a
-                                        href={`/staff/candidates/${row.candidateId}`}
-                                        className="font-medium text-foreground underline-offset-4 hover:underline"
-                                    >
-                                        {row.fullName ?? 'Unnamed'}
-                                    </a>
-                                    {row.headline ? (
-                                        <div className="text-xs text-muted-foreground">
-                                            {row.headline}
+                                    <div className="flex items-center gap-3">
+                                        <InitialsAvatar name={row.fullName ?? 'Unnamed candidate'} />
+                                        <div className="min-w-0">
+                                            <a data-preview-trigger href={staffWorkspaceUrl(`/staff/candidates/${row.candidateId}`)} className="font-medium text-foreground underline-offset-4 hover:underline">{row.fullName ?? 'Unnamed'}</a>
+                                            {row.email && <p className="mt-0.5 text-xs text-muted-foreground">{row.email}</p>}
                                         </div>
-                                    ) : null}
+                                    </div>
+                                </TableCell>
+                                <TableCell>
+                                    <p>{row.headline ?? '—'}</p>
+                                    {row.location && <p className="mt-0.5 text-xs text-muted-foreground">{row.location}</p>}
                                 </TableCell>
                                 <TableCell className="text-muted-foreground">
-                                    {row.email ?? '—'}
-                                </TableCell>
-                                <TableCell className="text-muted-foreground">
-                                    {row.ownerName ?? '—'}
+                                    {row.ownerName ? <span className="inline-flex items-center gap-2"><InitialsAvatar name={row.ownerName} size="sm" />{row.ownerName}</span> : 'Unassigned'}
                                 </TableCell>
                                 <TableCell className="text-muted-foreground">
                                     {row.applicationCount}
                                 </TableCell>
                                 <TableCell>
-                                    {row.hasCv ? (
-                                        <FileText className="h-4 w-4 text-muted-foreground" aria-label="CV on file" />
-                                    ) : (
-                                        <span className="text-muted-foreground">—</span>
-                                    )}
+                                    <Badge variant={row.hasCv ? 'success' : 'secondary'}>{row.hasCv ? 'CV on file' : 'No documents'}</Badge>
                                 </TableCell>
-                                <TableCell className="text-muted-foreground">
-                                    {formatDate(row.createdAt)}
-                                </TableCell>
+                                <TableCell className="hidden text-muted-foreground xl:table-cell">{formatDate(row.createdAt)}</TableCell>
+                                <TableCell><a href={staffWorkspaceUrl(`/staff/candidates/${row.candidateId}`)} data-full-page title="Open full profile" aria-label={`Open full profile for ${row.fullName ?? 'candidate'}`} className="inline-flex rounded-md p-1 hover:bg-secondary"><ChevronRight className="size-4" aria-hidden="true" /></a></TableCell>
                             </TableRow>
                         ))}
                     </TableBody>
