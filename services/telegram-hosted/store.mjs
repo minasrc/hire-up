@@ -107,7 +107,7 @@ export function createServiceStore(config) {
       if (!existsSync(configPath)) writeNewJson(configPath, childConfig);
       const saved = readPrivateJson(configPath);
       if (Object.keys(childConfig).some(key => saved[key] !== childConfig[key])) throw new Error('LOCAL_CONFIG_CONFLICT');
-      return { requestId: item.requestId, workerId: record.workerId, tokenSha256, configPath, stateDirectory };
+      return { requestId: item.requestId, organizationId: item.organizationId, ownerUserId: item.ownerUserId, workerId: record.workerId, tokenSha256, credentialPath: recordPath, configPath, stateDirectory };
     },
     listLocal() { return readdirSync(workers).filter(name => UUID.test(name)); },
   };

@@ -312,7 +312,9 @@ test('Candidate intake has a compact chat picker and approve/edit/reject review 
     await expect(activity.getByRole('progressbar')).toHaveCount(0);
     extractionFailed = true;
     await expect(activity.getByRole('link', { name: 'Review issues', exact: true })).toBeVisible();
-    await expect(page.getByRole('link', { name: 'Proposals', exact: true })).toBeVisible();
+    await expect(page.getByRole('link', { name: 'Proposals', exact: true })).toHaveCount(0);
+    await expect(page.getByRole('link', { name: 'Review proposals', exact: true })).toHaveCount(1);
+    await expect(page.getByRole('link', { name: 'Review proposals', exact: true })).toBeVisible();
     await expect(page.getByRole('link', { name: 'Search candidates', exact: true })).toBeVisible();
     await expect(activity.getByRole('progressbar')).toHaveCount(0);
     extractionFailed = false;
