@@ -21,7 +21,7 @@ const all = () => ({ selection: Object.fromEntries(JOBS.map((job) => [job, true]
 // Pin its contents: editing or deleting it must restore full schema coverage.
 const SCOPED_MIGRATIONS = {
     'supabase/migrations/20261014160000_telegram_cv_recovery.sql': {
-        sha256: 'f27346a70b242b7cb3fdd68c0840efef6c9fd55bd322d781196c15cea4bc287c',
+        sha256: '37013bc65c3cbd644c5f3da0f13cbff633fbb6576b82f2432b801cb7af6ee329',
         jobs: ['cv-analysis', 'telegram-cv', 'telegram-extraction', 'telegram-intake'],
     },
     'supabase/migrations/20261009090000_document_preview_versions.sql': {

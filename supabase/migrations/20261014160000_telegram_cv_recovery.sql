@@ -66,6 +66,7 @@ begin
  for item in
  select j.id job_id,j.source_version,m->>'messageId' message_id,(a.n-1)::integer attachment_index,a.value metadata
  from app.telegram_extraction_jobs j
+ join app.telegram_history_chats h on h.id=j.chat_id and h.extraction_enabled
  cross join lateral jsonb_array_elements(j.source->'messages') m
  cross join lateral jsonb_array_elements(m->'attachments') with ordinality a(value,n)
  where j.source is not null and j.status in('completed','failed')

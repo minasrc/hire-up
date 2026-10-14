@@ -97,6 +97,10 @@ test('attachment-only CVs become reviewed candidates without losing field edits 
     result: { subjects: [] }, metadata: { model: 'synthetic-model', promptVersion: 'candidate-extraction-prompt-v1', reportedModel: null } });
   const batch = await telegramExtractionStatus(pool, owner, org, { jobId: textJob.id });
   psql(db, `update app.telegram_extraction_jobs set status='failed',error_code='INVALID_RESULT' where id='${textJob.id}'`);
+  psql(db, `update app.telegram_history_chats set extraction_enabled=false where id='${chat.id}'`);
+  await cvAnalysisWorkerOperation(workerPool, token, 'claim', {});
+  assert.equal(psql(db, 'select count(*) from app.telegram_cv_jobs').trim(), '0', 'paused chats do not start automatic CV processing');
+  psql(db, `update app.telegram_history_chats set extraction_enabled=true where id='${chat.id}'`);
   assert.equal((await cvAnalysisWorkerOperation(workerPool, token, 'claim', {})).job, null);
   assert.equal(psql(db, 'select count(*) from app.telegram_cv_jobs').trim(), '2', 'failed chat extraction still queues both labelled CVs');
   assert.equal(psql(db, "select count(*) from app.telegram_cv_jobs where source->>'messageId'='3'").trim(), '0', 'NDAs are not automatically treated as CVs');
