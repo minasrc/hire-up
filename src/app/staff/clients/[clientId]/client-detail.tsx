@@ -1,19 +1,17 @@
 'use client';
 
 import Link from 'next/link';
-import { useState } from 'react';
-import { ArrowLeft } from 'lucide-react';
-import { SOCIAL_PLATFORM_NAMES } from '@/lib/client-job-contracts';
+import { useEffect, useState } from 'react';
+import { ArrowLeft, Pencil } from 'lucide-react';
+import { ClientRoles } from '@/components/staff-ui/client-roles';
+import { ClientDetailsCard, ClientRecentApplications, type ClientView } from '@/components/staff-ui/client-overview';
+import { useDiscardConfirmation } from '@/components/staff-ui/discard-confirmation';
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/staff-ui/dialog';
 import type { StaffWorkspaceCapabilities } from '@/lib/workspace-types';
-import { FieldLabel, PageHeader, StatusBadge } from '@/components/staff-preview/shared';
+import { staffWorkspaceFetch, staffWorkspaceUrl } from '@/lib/staff-workspace-fetch';
+import { staffAuthRecovery } from '@/lib/staff-auth-recovery';
+import { PageHeader } from '@/components/staff-preview/shared';
 import { Button } from '@/components/staff-ui/button';
-import {
-    Card,
-    CardContent,
-    CardDescription,
-    CardHeader,
-    CardTitle,
-} from '@/components/staff-ui/card';
 import { ClientForm, type SavedClient } from '../../workspace-forms';
 
 export function ClientDetail({ initialClient, capabilities }: {
@@ -30,138 +28,55 @@ export function ClientDetail({ initialClient, capabilities }: {
     }
     const onSaved = (saved: SavedClient) => setClient(current =>
         saved.id === current.id && BigInt(saved.version) >= BigInt(current.version) ? saved : current);
+    const [editOpen, setEditOpen] = useState(false);
+    const [formState, setFormState] = useState({ dirty: false, busy: false });
+    const [view, setView] = useState<ClientView | null>(null);
+    const [loadError, setLoadError] = useState(false);
+    const [message, setMessage] = useState('');
+    const { requestDiscard, discardDialog } = useDiscardConfirmation();
     const canWrite = capabilities?.writeClients === true;
     const canReadJobs = capabilities?.jobs === true;
     const canWriteJobs = capabilities?.writeJobs === true;
     const canReadApplications = capabilities?.applications === true;
-
-    return (
-        <section className="mx-auto flex w-full max-w-5xl flex-col gap-6">
-            <Link
-                href="/staff/clients"
-                className="inline-flex w-fit items-center gap-1.5 text-sm text-muted-foreground underline-offset-4 hover:text-foreground"
-            >
-                <ArrowLeft className="h-4 w-4" aria-hidden="true" />
-                Back to clients
-            </Link>
-            <PageHeader
-                eyebrow="Clients"
-                title={client.name}
-                actions={
-                    <>
-                        <StatusBadge
-                            tone={client.status === 'active' ? 'success' : 'secondary'}
-                        >
-                            {client.status}
-                        </StatusBadge>
-                        {client.isStealth ? (
-                            <StatusBadge tone="warning">Stealth</StatusBadge>
-                        ) : null}
-                        {canReadJobs ? (
-                            <Button variant="outline" size="sm" asChild>
-                                <Link href={`/staff/jobs?client=${client.id}`}>
-                                    View jobs
-                                </Link>
-                            </Button>
-                        ) : null}
-                        {client.status === 'active' && canWriteJobs ? (
-                            <Button variant="outline" size="sm" asChild>
-                                <Link href={`/staff/jobs/new?client=${client.id}`}>
-                                    Add job
-                                </Link>
-                            </Button>
-                        ) : null}
-                        {canReadApplications ? (
-                            <Button variant="outline" size="sm" asChild>
-                                <Link href={`/staff/applications?client=${client.id}`}>
-                                    View applications
-                                </Link>
-                            </Button>
-                        ) : null}
-                    </>
-                }
-            />
-
-            <Card>
-                <CardHeader>
-                    <CardTitle className="text-base">Summary</CardTitle>
-                </CardHeader>
-                <CardContent>
-                    <dl className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-                        <FieldLabel label="Contact name">
-                            {client.contactName ?? '—'}
-                        </FieldLabel>
-                        <FieldLabel label="Contact email">
-                            {client.contactEmail ?? '—'}
-                        </FieldLabel>
-                        <FieldLabel label="Telegram">
-                            {client.telegramUsername
-                                ? `@${client.telegramUsername}`
-                                : '—'}
-                        </FieldLabel>
-                        <FieldLabel label="Website">
-                            {client.website ? (
-                                <a
-                                    href={client.website}
-                                    target="_blank"
-                                    rel="noreferrer"
-                                    className="underline underline-offset-4 hover:opacity-70"
-                                >
-                                    {client.website}
-                                </a>
-                            ) : (
-                                '—'
-                            )}
-                        </FieldLabel>
-                        <FieldLabel label="Visibility">
-                            {client.isStealth ? 'Stealth (identity hidden)' : 'Named'}
-                        </FieldLabel>
-                        <FieldLabel label="Social links">
-                            {client.socialLinks?.length ? (
-                                <ul aria-label="Client social links" className="flex flex-col gap-1">
-                                    {client.socialLinks.map((link: { platform: string; url: string }) => (
-                                        <li key={`${link.platform}:${link.url}`}>
-                                            <a
-                                                href={link.url}
-                                                target="_blank"
-                                                rel="noreferrer"
-                                                className="break-all underline underline-offset-4 hover:opacity-70"
-                                            >
-                                                {SOCIAL_PLATFORM_NAMES[
-                                                    link.platform as keyof typeof SOCIAL_PLATFORM_NAMES
-                                                ] ?? link.platform}
-                                                {' · '}
-                                                {link.url}
-                                            </a>
-                                        </li>
-                                    ))}
-                                </ul>
-                            ) : '—'}
-                        </FieldLabel>
-                    </dl>
-                </CardContent>
-            </Card>
-
-            <Card>
-                <CardHeader>
-                    <CardTitle className="text-base">Edit client</CardTitle>
-                    <CardDescription>
-                        Changes to the public profile require a job re-review before
-                        listings reflect them.
-                    </CardDescription>
-                </CardHeader>
-                <CardContent>
-                    {canWrite ? (
-                        <ClientForm clientId={client.id} initial={client} onSaved={onSaved} />
-                    ) : (
-                        <p className="py-4 text-center text-sm text-muted-foreground">
-                            {capabilities === null
-                                ? 'Editing is temporarily unavailable.'
-                                : 'Editing this client requires the clients.write permission.'}
-                        </p>
-                    )}
-                </CardContent>
-            </Card>
-        </section>
-    );
+    useEffect(() => {
+        const controller = new AbortController();
+        staffWorkspaceFetch(`/api/staff/clients/${client.id}`, { signal: controller.signal, cache: 'no-store' }).then(async response => {
+            if ([401, 428].includes(response.status)) staffAuthRecovery.require(response.status);
+            if (!response.ok) throw new Error('Client details unavailable');
+            const payload = await response.json();
+            if (!controller.signal.aborted) { setView(payload.result); setLoadError(false); }
+        }).catch(() => { if (!controller.signal.aborted) setLoadError(true); });
+        return () => controller.abort();
+    }, [client.id, client.version]);
+    const closeEditor = () => {
+        if (!formState.busy) requestDiscard(formState.dirty, () => { setEditOpen(false); setFormState({ dirty: false, busy: false }); });
+    };
+    return <section className="mx-auto flex w-full max-w-7xl flex-col gap-6">
+        <Link href={staffWorkspaceUrl('/staff/clients')} className="inline-flex w-fit items-center gap-1.5 text-sm text-muted-foreground hover:text-foreground"><ArrowLeft className="size-4" aria-hidden="true" />Back to clients</Link>
+        <PageHeader eyebrow="Client" title={client.name} actions={<>
+            {client.status === 'active' && canWriteJobs && <Button asChild><Link href={staffWorkspaceUrl(`/staff/jobs/new?client=${client.id}`)}>Add job</Link></Button>}
+            {canReadApplications && <Button variant="outline" asChild><Link href={staffWorkspaceUrl(`/staff/applications?client=${client.id}`)}>View applications</Link></Button>}
+            {canWrite && <Button variant="outline" onClick={() => { setMessage(''); setEditOpen(true); }}><Pencil className="size-4" aria-hidden="true" />Edit client</Button>}
+        </>} />
+        {!canWrite && <p className="text-sm text-muted-foreground">{capabilities === null ? 'Editing is temporarily unavailable.' : 'You have read-only access to this client.'}</p>}
+        {message && <p role="status" className="text-sm text-muted-foreground">{message}</p>}
+        <div className={canReadJobs ? 'grid items-start gap-6 lg:grid-cols-[minmax(0,2fr)_minmax(280px,1fr)]' : 'grid gap-6'}>
+            {canReadJobs ? <section aria-label="Roles" className="flex min-w-0 flex-col gap-3">
+                <div className="flex items-center justify-between"><h2 className="text-base font-semibold">Roles</h2><Button variant="ghost" size="sm" asChild><Link href={staffWorkspaceUrl(`/staff/jobs?client=${client.id}`)}>View jobs</Link></Button></div>
+                <ClientRoles key={`${client.id}:${client.version}`} clientId={client.id} roles={[]} canReadApplications={canReadApplications} />
+            </section> : null}
+            <ClientDetailsCard client={client} metrics={view ? { openRoles: canReadJobs ? view.metrics.openRoles : null, applications: canReadApplications ? view.metrics.applications : null, interviewing: canReadApplications ? view.metrics.interviewing : null } : null} />
+        </div>
+        {canReadApplications && <ClientRecentApplications clientId={client.id} rows={view?.recentApplications ?? null} total={view?.metrics.applications} failed={loadError || view?.errors.applications} />}
+        <Dialog open={editOpen} onOpenChange={open => { if (open) setEditOpen(true); else closeEditor(); }}>
+            <DialogContent className="max-h-[85vh] overflow-y-auto sm:max-w-2xl" onEscapeKeyDown={event => { if (formState.busy) event.preventDefault(); }} onInteractOutside={event => { if (formState.busy) event.preventDefault(); }}>
+                <DialogHeader><DialogTitle>Edit client</DialogTitle><DialogDescription>Update {client.name}&apos;s details.</DialogDescription></DialogHeader>
+                {canWrite && <ClientForm key={editOpen ? 'editing' : 'closed'} clientId={client.id} initial={client} onStateChange={setFormState} onSaved={saved => {
+                    onSaved(saved); setFormState({ dirty: false, busy: false }); setEditOpen(false); setMessage('Client updated.');
+                }} />}
+                <Button variant="ghost" disabled={formState.busy} onClick={closeEditor}>Cancel</Button>
+            </DialogContent>
+        </Dialog>
+        {discardDialog}
+    </section>;
 }

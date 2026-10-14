@@ -1,3 +1,4 @@
+import { profileLinksImports } from '../support/ui-port-fixtures.js';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import test from 'node:test';
@@ -19,12 +20,13 @@ function subject(path, capabilities, { emptyClients = false } = {}) {
     const workspace = { job: { id, clientId: id, title: 'Synthetic job', version: '1', publicationState: 'draft' }, draft: { id, title: 'Synthetic draft', version: '1', revisionNumber: 1 } };
     const forms = Object.fromEntries(['ClientForm', 'JobForm', 'JobListingToggle', 'NewRevisionButton', 'PublishButton'].map(name => [name, name]));
     const imports = {
+        ...profileLinksImports,
         './job-form': { JobForm: 'JobForm' },
         'react/jsx-runtime': jsxRuntime,
-        react: { useState: initial => [initial, () => {}] },
+        react: { useState: initial => [initial, () => {}], useEffect: () => {} },
         'next/link': { default: 'Link' },
         'next/navigation': { notFound: () => { throw new Error('notFound'); }, redirect: () => { throw new Error('redirect'); } },
-        'lucide-react': { ArrowLeft: 'ArrowLeft', Briefcase: 'Briefcase' },
+        'lucide-react': { ArrowLeft: 'ArrowLeft', Pencil: 'Pencil', Briefcase: 'Briefcase' },
         '@/lib/client-job-operations': { getClient: async () => ({ client }), getJobWorkspace: async () => workspace, previewJobPublic: async () => ({ projection: {}, clientVersion: '1', reviewHash: 'synthetic' }), listClients: async () => { calls.push('clients'); return emptyClients ? [] : [client]; } },
         '@/lib/client-job-contracts': { SOCIAL_PLATFORM_NAMES: {} },
         '@/lib/staff-authorization': { StaffAuthorizationError },
@@ -79,7 +81,7 @@ for (const path of paths) {
             assert.ok(!page.calls.includes('summary'));
             assert.ok(!page.calls.includes('clients'));
             if (capabilities === null && path !== 'jobs/[jobId]') assert.match(JSON.stringify(tree), /temporarily unavailable/);
-            if (capabilities !== null) assert.match(JSON.stringify(tree), /requires the .*write permission/);
+            if (capabilities !== null) assert.match(JSON.stringify(tree), path === 'clients/[clientId]' ? /read-only access/ : /requires the .*write permission/);
         });
     }
 }

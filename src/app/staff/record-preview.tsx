@@ -11,6 +11,7 @@ import { staffAuthRecovery } from '@/lib/staff-auth-recovery';
 import { StaffAuthRecoveryPrompt, useStaffAuthRecovery } from './auth-recovery';
 import { createStaffPreviewCache } from '@/lib/staff-preview-cache';
 
+import { ClientPreviewContent, ClientPreviewHeading, type ClientView } from '@/components/staff-ui/client-overview';
 import { JobDocumentView } from '@/components/staff-preview/job-document';
 import type { CandidateDocumentRecord } from '@/components/staff-preview/real-candidate-documents';
 import { Badge } from '@/components/staff-ui/badge';
@@ -35,7 +36,7 @@ const RealCandidateDocuments = dynamic(
     },
 );
 
-type Selection = { kind: 'candidate' | 'job'; id: string };
+type Selection = { kind: 'candidate' | 'job' | 'client'; id: string };
 
 interface CandidateRecord {
     candidate: {
@@ -204,7 +205,7 @@ function JobPreview({ record }: { record: JobRecord }) {
     </div>;
 }
 
-const recordPath = /^\/staff\/(candidates|jobs)\/([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})\/?$/i;
+const recordPath = /^\/staff\/(candidates|jobs|clients)\/([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})\/?$/i;
 
 export function RecordPreview({ children }: { children: ReactNode }) {
     const compact = usePathname()?.startsWith('/staff/telegram-intake');
@@ -220,7 +221,7 @@ export function RecordPreview({ children }: { children: ReactNode }) {
     const [loaded, setLoaded] = useState<{
         cache: ReturnType<typeof createStaffPreviewCache>;
         key: string;
-        value: CandidateRecord | JobRecord;
+        value: CandidateRecord | JobRecord | ClientView;
     } | null>(null);
     if (loaded && loaded.cache !== cache) setLoaded(null);
     const [revision, setRevision] = useState(0);
@@ -284,7 +285,7 @@ export function RecordPreview({ children }: { children: ReactNode }) {
         const authEpoch = staffAuthRecovery.requestEpoch();
         cache.load(selectionKey, async (signal: AbortSignal) => {
             const response = await staffWorkspaceFetch(
-                `/api/staff/${selection.kind === 'candidate' ? 'candidates' : 'jobs'}/${selection.id}`,
+                `/api/staff/${selection.kind === 'candidate' ? 'candidates' : selection.kind === 'client' ? 'clients' : 'jobs'}/${selection.id}`,
                 { signal, cache: 'no-store' },
             );
             if (signal.aborted) throw new DOMException('Preview request superseded', 'AbortError');
@@ -308,7 +309,7 @@ export function RecordPreview({ children }: { children: ReactNode }) {
             }
             staffAuthRecovery.accepted(authEpoch);
             return payload.result;
-        }).then((value: CandidateRecord | JobRecord) => {
+        }).then((value: CandidateRecord | JobRecord | ClientView) => {
             if (current && cache.peek(selectionKey) === value) {
                 setLoaded({ cache, key: selectionKey, value });
             }
@@ -338,8 +339,8 @@ export function RecordPreview({ children }: { children: ReactNode }) {
         const anchor = (event.target as HTMLElement).closest<HTMLAnchorElement>('a[href]');
         if (!anchor || !event.currentTarget.contains(anchor)
             || anchor.target || anchor.hasAttribute('download')
-            || anchor.hasAttribute('data-full-page')
-            || anchor.hasAttribute('data-application-review')) return;
+            || anchor.hasAttribute('data-application-review')
+            || anchor.hasAttribute('data-full-page')) return;
         const url = new URL(anchor.href);
         if (url.origin !== window.location.origin || url.search || url.hash) return;
         const match = recordPath.exec(url.pathname);
@@ -348,24 +349,24 @@ export function RecordPreview({ children }: { children: ReactNode }) {
         event.stopPropagation();
         triggerRef.current = anchor;
         const next: Selection = {
-            kind: match[1] === 'jobs' ? 'job' : 'candidate', id: match[2],
+            kind: match[1] === 'jobs' ? 'job' : match[1] === 'clients' ? 'client' : 'candidate', id: match[2],
         };
         const key = `${next.kind}:${next.id}`;
-        const cached = cache.peek(key) as CandidateRecord | JobRecord | undefined;
+        const cached = cache.peek(key) as CandidateRecord | JobRecord | ClientView | undefined;
         setLoaded(cached ? { cache, key, value: cached } : null);
         setError('');
         setSelection(next);
     };
 
     const fullUrl = selection
-        ? `/staff/${selection.kind === 'candidate' ? 'candidates' : 'jobs'}/${selection.id}`
+        ? `/staff/${selection.kind === 'candidate' ? 'candidates' : selection.kind === 'client' ? 'clients' : 'jobs'}/${selection.id}`
         : '';
     const title = selection?.kind === 'candidate'
         ? record ? (record as CandidateRecord).candidate.fullName ?? 'Unnamed candidate'
             : 'Candidate preview'
         : selection?.kind === 'job'
             ? record ? (record as JobRecord).job.title : 'Job preview'
-            : 'Record preview';
+            : selection?.kind === 'client' ? record ? (record as ClientView).client.name : 'Client preview' : 'Record preview';
     const subtitle = selection?.kind === 'candidate' && record
         ? (record as CandidateRecord).candidate.headline ?? 'Candidate profile'
         : selection?.kind === 'job' && record
@@ -397,10 +398,10 @@ export function RecordPreview({ children }: { children: ReactNode }) {
                 }}>
                 <div className="flex flex-wrap items-start justify-between gap-3 border-b border-border px-5 py-4 pr-12">
                     <div className="min-w-0 space-y-1">
-                        <SheetTitle className="break-words text-base">{title}</SheetTitle>
-                        <SheetDescription>{subtitle}</SheetDescription>
+                        <SheetTitle className="break-words text-base">{selection?.kind === 'client' ? <ClientPreviewHeading name={title} /> : title}</SheetTitle>
+                        <SheetDescription className={selection?.kind === 'client' ? 'sr-only' : undefined}>{selection?.kind === 'client' ? 'Client details and hiring activity' : subtitle}</SheetDescription>
                     </div>
-                    {selection ? <Button size="sm" variant="outline" asChild>
+                    {selection ? <Button size="sm" variant={selection.kind === 'client' ? 'default' : 'outline'} asChild>
                         <Link href={fullUrl}>Open full {selection.kind}</Link>
                     </Button> : null}
                 </div>
@@ -419,7 +420,7 @@ export function RecordPreview({ children }: { children: ReactNode }) {
                             Loading preview…</p>
                             : selection?.kind === 'candidate'
                                 ? <CandidatePreview key={selection.id} record={record as CandidateRecord} />
-                                : <JobPreview key={selection?.id} record={record as JobRecord} />}
+                                : selection?.kind === 'client' ? <ClientPreviewContent key={selection.id} view={record as ClientView} /> : <JobPreview key={selection?.id} record={record as JobRecord} />}
                 </div>
             </SheetContent>
         </Sheet>

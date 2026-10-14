@@ -1,11 +1,10 @@
 'use client';
 
 import Link from 'next/link';
-import { Building2, LayoutGrid, Search, Table2, X } from 'lucide-react';
+import { Building2, Search, X } from 'lucide-react';
 
 import { Badge } from '@/components/staff-ui/badge';
 import { Button } from '@/components/staff-ui/button';
-import { Card, CardContent } from '@/components/staff-ui/card';
 import { Input } from '@/components/staff-ui/input';
 import { Label } from '@/components/staff-ui/label';
 import {
@@ -52,21 +51,19 @@ export interface ClientFiltersState {
 }
 
 const STATUS_VALUES = ['all', 'active', 'draft'] as const;
-const VIEW_VALUES = ['cards', 'table'] as const;
 
 const parseFilters = (params: { get(name: string): string | null }): ClientFiltersState => ({
     page: /^\d+$/.test(params.get('page') ?? '')
         ? Math.min(1000000, Math.max(1, Number(params.get('page')))) : 1,
     query: textParam(params, 'q'),
     status: optionParam(params, 'status', STATUS_VALUES, 'all'),
-    view: optionParam(params, 'view', VIEW_VALUES, 'cards'),
+    view: 'table',
 });
 
 function serializeFilters(filters: ClientFiltersState) {
     const params = new URLSearchParams();
     if (filters.query.trim()) params.set('q', filters.query);
     if (filters.status !== 'all') params.set('status', filters.status);
-    if (filters.view !== 'cards') params.set('view', filters.view);
     if (filters.page > 1) params.set('page', String(filters.page));
     return params.toString();
 }
@@ -75,7 +72,6 @@ export function ClientsBrowser({
     clients,
     canCreate,
     canReadJobs = true,
-    canReadApplications = true,
     total,
     page,
     pageSize,
@@ -161,40 +157,7 @@ export function ClientsBrowser({
                     {total} client{total === 1 ? '' : 's'}
                     {pending ? ' · Updating…' : ''}
                 </p>
-                <div
-                    className="flex items-center rounded-lg border border-border"
-                    role="group"
-                    aria-label="Clients view"
-                >
-                    <button
-                        type="button"
-                        aria-pressed={filters.view === 'cards'}
-                        onClick={() => navigate({ ...filters, page, view: 'cards' }, false, true)}
-                        className={cn(
-                            'flex items-center gap-1.5 rounded-l-lg px-3 py-1.5 text-sm font-medium outline-none transition-colors focus-visible:ring-2 focus-visible:ring-ring',
-                            filters.view === 'cards'
-                                ? 'bg-accent text-accent-foreground'
-                                : 'text-muted-foreground hover:bg-hover',
-                        )}
-                    >
-                        <LayoutGrid className="h-4 w-4" aria-hidden="true" />
-                        Cards
-                    </button>
-                    <button
-                        type="button"
-                        aria-pressed={filters.view === 'table'}
-                        onClick={() => navigate({ ...filters, page, view: 'table' }, false, true)}
-                        className={cn(
-                            'flex items-center gap-1.5 rounded-r-lg border-l border-border px-3 py-1.5 text-sm font-medium outline-none transition-colors focus-visible:ring-2 focus-visible:ring-ring',
-                            filters.view === 'table'
-                                ? 'bg-accent text-accent-foreground'
-                                : 'text-muted-foreground hover:bg-hover',
-                        )}
-                    >
-                        <Table2 className="h-4 w-4" aria-hidden="true" />
-                        Table
-                    </button>
-                </div>
+
             </div>
 
             {clients.length === 0 ? (
@@ -210,7 +173,7 @@ export function ClientsBrowser({
                         ) : undefined
                     }
                 />
-            ) : filters.view === 'table' ? (
+            ) : (
                 <div className="overflow-hidden rounded-lg border border-border bg-card">
                     <Table>
                         <TableHeader>
@@ -232,6 +195,7 @@ export function ClientsBrowser({
                                         <div className="flex items-center gap-3">
                                             <InitialsAvatar name={client.name} size="sm" />
                                             <Link
+                                                data-preview-trigger
                                                 href={`/staff/clients/${client.id}`}
                                                 className="w-fit rounded-sm font-medium text-foreground outline-none hover:text-accent-foreground hover:underline focus-visible:ring-2 focus-visible:ring-ring"
                                             >
@@ -274,67 +238,7 @@ export function ClientsBrowser({
                         </TableBody>
                     </Table>
                 </div>
-            ) : (
-                <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
-                    {clients.map((client) => (
-                        <Card
-                            key={client.id}
-                            className={cn(
-                                'relative',
-                                client.status === 'draft' && 'bg-muted',
-                            )}
-                        >
-                            <CardContent className="flex flex-col gap-4 p-5">
-                                <div className="flex items-center gap-3">
-                                    <InitialsAvatar name={client.name} />
-                                    <div className="flex min-w-0 flex-col">
-                                        <Link
-                                            href={`/staff/clients/${client.id}`}
-                                            className="truncate rounded-sm text-sm font-semibold text-foreground outline-none after:absolute after:inset-0 hover:text-accent-foreground hover:underline focus-visible:ring-2 focus-visible:ring-ring"
-                                        >
-                                            {client.name}
-                                        </Link>
-                                        <span className="text-xs text-muted-foreground">
-                                            {client.status === 'draft' ? 'Draft client' : 'Active client'}
-                                        </span>
-                                    </div>
-                                    <div className="relative z-10 ml-auto flex w-fit flex-col items-end gap-1">
-                                        {client.status === 'draft' ? (
-                                            <StatusBadge tone="secondary">Draft</StatusBadge>
-                                        ) : null}
-                                        {client.isStealth ? (
-                                            <Badge variant="outline">
-                                                Identity hidden externally
-                                            </Badge>
-                                        ) : null}
-                                    </div>
-                                </div>
-                                <div className="flex flex-wrap items-center justify-between gap-2">
-                                    {canReadJobs ? (
-                                        <Link
-                                            href={`/staff/jobs?client=${client.id}`}
-                                            className="relative z-10 rounded-sm text-xs font-medium text-accent-foreground outline-none hover:underline focus-visible:ring-2 focus-visible:ring-ring"
-                                        >
-                                            {client.jobCount} job{client.jobCount === 1 ? '' : 's'}
-                                        </Link>
-                                    ) : (
-                                        <span className="text-xs text-muted-foreground">
-                                            {client.jobCount} job{client.jobCount === 1 ? '' : 's'}
-                                        </span>
-                                    )}
-                                    {canReadApplications && client.jobCount > 0 ? (
-                                        <Link
-                                            href={`/staff/applications?client=${client.id}`}
-                                            className="relative z-10 rounded-sm text-xs font-medium text-accent-foreground outline-none hover:underline focus-visible:ring-2 focus-visible:ring-ring"
-                                        >
-                                            Applications
-                                        </Link>
-                                    ) : null}
-                                </div>
-                            </CardContent>
-                        </Card>
-                    ))}
-                </div>
+
             )}
             <nav aria-label="Directory pages" className="flex items-center justify-between gap-3">
                 <Button variant="outline" size="sm" disabled={pending || page <= 1}

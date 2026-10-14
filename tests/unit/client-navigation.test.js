@@ -1,3 +1,4 @@
+import { profileLinksImports } from '../support/ui-port-fixtures.js';
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
 import { readFileSync } from 'node:fs';
@@ -27,11 +28,13 @@ function loadPage(path, options = {}) {
     const forms = [];
     const exports = {};
     const imports = {
+        ...profileLinksImports,
+        './job-form': { JobForm: 'JobForm' },
         'react/jsx-runtime': jsxRuntime,
         react: React,
         'next/link': { default: ({ children, ...props }) => jsx('a', { ...props, children }) },
         'next/navigation': { notFound: () => assert.fail('unexpected notFound') },
-        'lucide-react': { ArrowLeft: () => null, Briefcase: () => null },
+        'lucide-react': { ArrowLeft: () => null, Pencil: () => null, Briefcase: () => null },
         '@/lib/client-job-contracts': { SOCIAL_PLATFORM_NAMES },
         '@/lib/staff-authorization': { StaffAuthorizationError },
         '@/lib/staff-gate.server': {
@@ -121,9 +124,9 @@ test('client detail renders saved social URLs and permission-gated navigation li
     assert.ok(html.includes(`href="/staff/jobs?client=${activeClient.id}"`));
     assert.ok(html.includes(`href="/staff/jobs/new?client=${activeClient.id}"`));
     assert.ok(html.includes(`href="/staff/applications?client=${activeClient.id}"`));
-    assert.match(html, /aria-label="Client social links"/);
-    assert.match(html, /href="https:\/\/linkedin.com\/company\/synthetic" target="_blank" rel="noreferrer" class="break-all/);
-    assert.match(html, /LinkedIn · https:\/\/linkedin.com\/company\/synthetic/);
+    assert.match(html, /aria-label="Company profiles"/);
+    assert.match(html, /href="https:\/\/linkedin.com\/company\/synthetic" target="_blank" rel="noopener noreferrer"/);
+    assert.match(html, /aria-label="LinkedIn \(opens in a new tab\)"/);
     assert.doesNotMatch(html, /configured/);
 });
 

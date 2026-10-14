@@ -334,7 +334,7 @@ export function JobsBrowser({
                                     </TableCell>
                                     <TableCell>
                                         <Link
-                                            href={`/staff/clients/${job.clientId}`}
+                                            data-preview-trigger href={`/staff/clients/${job.clientId}`}
                                             className="rounded-sm text-muted-foreground outline-none hover:text-accent-foreground hover:underline focus-visible:ring-2 focus-visible:ring-ring"
                                         >
                                             {job.clientName}

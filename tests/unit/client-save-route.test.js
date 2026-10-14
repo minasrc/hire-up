@@ -14,8 +14,9 @@ stubModule('@/lib/staff-api.server', {
     staffApiContext: 'fn', staffGateResponse: 'fn', staffErrorResponse: 'fn',
 });
 stubModule('@/lib/client-job-operations', { saveClientWithDetails: 'fn' });
+stubModule('@/lib/client-view.server', { readClientView: 'fn' });
 
-const { POST } = await import('../../src/app/api/staff/clients/[clientId]/route.ts');
+const { GET, POST } = await import('../../src/app/api/staff/clients/[clientId]/route.ts');
 const id = '97000000-0000-4000-8000-000000000001';
 const otherId = '97000000-0000-4000-8000-000000000002';
 const fields = { name: 'Saved client' };
@@ -105,3 +106,24 @@ for (const [code, status] of [['FORBIDDEN', 403], ['40001', 409]]) {
         assert.equal(calls.length, 1);
     });
 }
+
+test('client preview read uses the verified workspace and private responses', async () => {
+    setup();
+    const calls = [];
+    const view = { client: snapshot, roles: null, recentApplications: null };
+    stubs.set('@/lib/client-view.server:readClientView', async (...args) => { calls.push(args); return view; });
+    const response = await GET(new Request(`http://localhost/api/staff/clients/${id}`), { params: Promise.resolve({ clientId: id }) });
+    assert.equal(response.status, 200);
+    assert.equal(response.headers.get('cache-control'), 'private, no-store');
+    assert.deepEqual(await response.json(), { result: view });
+    assert.deepEqual(calls, [[{ pool: verified.pool, identity: verified.identity, organizationId: verified.organizationId }, id]]);
+});
+test('client preview read does not load data before session and MFA gates pass', async () => {
+    for (const status of [401, 428, 503]) {
+        setup({ context: { status: 'denied', responseStatus: status } });
+        stubs.set('@/lib/client-view.server:readClientView', () => assert.fail('denied read must not load client data'));
+        const response = await GET(new Request(`http://localhost/api/staff/clients/${id}`), { params: Promise.resolve({ clientId: id }) });
+        assert.equal(response.status, status);
+        assert.equal(response.headers.get('cache-control'), 'private, no-store');
+    }
+});
