@@ -881,12 +881,13 @@ test('staff workspace end-to-end in a real browser', async (t) => {
         createdClientId = page.url().split('/').pop();
         await page.getByText('Synthetic Browser Client').first().waitFor();
 
-        await page.reload({ waitUntil: 'domcontentloaded' });
+        await page.reload({ waitUntil: 'networkidle' });
         const body = page.getByRole('main').last();
         await expect(body).toContainText('Synthetic Browser Client');
         await expect(body).toContainText('Casey Example');
         await expect(page.getByRole('link', { name: 'LinkedIn (opens in a new tab)' })).toHaveAttribute('href', 'https://linkedin.com/company/synthetic');
         await page.getByRole('button', { name: 'Edit client', exact: true }).click();
+        await expect(page.getByRole('dialog', { name: 'Edit client', exact: true })).toBeVisible();
         await expect(page.getByRole('combobox', { name: 'Social link 1 platform' }))
             .toContainText('LinkedIn');
         await expect(page.locator('#social-url-0').filter({ visible: true }))
@@ -942,8 +943,9 @@ test('staff workspace end-to-end in a real browser', async (t) => {
             await page.waitForLoadState('networkidle');
             assert.equal(rscRequests.length, 0);
 
-            await page.reload({ waitUntil: 'domcontentloaded' });
+            await page.reload({ waitUntil: 'networkidle' });
             await page.getByRole('button', { name: 'Edit client', exact: true }).click();
+            await expect(page.getByRole('dialog', { name: 'Edit client', exact: true })).toBeVisible();
             // Streaming can briefly leave both the placeholder and its replacement
             // in the DOM; wait for one field before making a strict value assertion.
             await expect(page.locator('#client-name')).toHaveCount(1);
@@ -1584,7 +1586,7 @@ test('staff workspace end-to-end in a real browser', async (t) => {
         assert.equal(jobsUrl.searchParams.get('intake'), 'open');
         await gotoStaff(page, `${baseURL}/staff`);
         await page.getByRole('link', { name: /^Candidates \d+$/ }).click();
-        await page.waitForURL(/\/staff\/candidates$/);
+        await page.waitForURL(url => url.pathname === '/staff/candidates');
         await gotoStaff(page, `${baseURL}/staff`);
         await page.getByLabel('Application review tasks')
             .getByRole('link', { name: 'Synthetic Candidate B' }).click();
@@ -2471,8 +2473,9 @@ test('staff workspace end-to-end in a real browser', async (t) => {
                 .waitFor();
             assert.equal(clientPosts.length, 1);
 
-            await page.reload({ waitUntil: 'domcontentloaded' });
+            await page.reload({ waitUntil: 'networkidle' });
             await page.getByRole('button', { name: 'Edit client', exact: true }).click();
+            await expect(page.getByRole('dialog', { name: 'Edit client', exact: true })).toBeVisible();
             await expect(page.locator('#client-telegram')).toHaveValue('valid_user');
             await expect(page.locator('#client-website'))
                 .toHaveValue('https://www.google.com');
