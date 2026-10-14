@@ -525,10 +525,10 @@ test('staff workspace end-to-end in a real browser', async (t) => {
                 await expect(page.getByRole('table').locator('tbody tr')).toHaveCount(50);
             }
             const cards = page.getByRole('group', { name: 'Stage filter cards' });
-            await expect(cards.getByRole('button', { name: /^All applications/ })).toHaveText(/Active applications\s*51/);
+            await expect(cards.getByRole('button', { name: /^All applications/ })).toHaveText(/All applications\s*51/);
             await cards.getByRole('button', { name: /^Interview/ }).click();
             await expect(page.getByRole('table').locator('tbody tr')).toHaveCount(26);
-            await expect(cards.getByRole('button', { name: /^All applications/ })).toHaveText(/Active applications\s*51/);
+            await expect(cards.getByRole('button', { name: /^All applications/ })).toHaveText(/All applications\s*51/);
             await expect(page.getByRole('status').filter({ hasText: '26 applications' })).toBeVisible();
         } finally {
             psql(container, `delete from app.applications where id::text like '96100000-%';
@@ -565,7 +565,7 @@ test('staff workspace end-to-end in a real browser', async (t) => {
             await gotoStaff(page, `${baseURL}/staff/applications?client=${emptyClient}`);
             await expect(page.getByRole('combobox', { name: 'Filter by client' })).toHaveText('Empty filter client');
             const cards = page.getByRole('group', { name: 'Stage filter cards' });
-            await expect(cards.getByRole('button', { name: /^All applications/ })).toHaveText(/Active applications\s*0/);
+            await expect(cards.getByRole('button', { name: /^All applications/ })).toHaveText(/All applications\s*0/);
             for (const card of await cards.getByRole('button').all()) await expect(card).toHaveText(/0$/);
             await expect(page.getByText('No applications found', { exact: true })).toBeVisible();
             await expect(page.getByText('Review candidates across your clients and open roles.')).toHaveCount(0);
@@ -577,11 +577,11 @@ test('staff workspace end-to-end in a real browser', async (t) => {
 
             await page.getByRole('button', { name: 'Clear filters' }).click();
             await expect(page).toHaveURL(`${baseURL}/staff/applications`);
-            await expect(cards.getByRole('button', { name: /^All applications/ })).toHaveText(/Active applications\s*1/);
+            await expect(cards.getByRole('button', { name: /^All applications/ })).toHaveText(/All applications\s*1/);
             await page.locator('#application-search').fill('no-such-candidate');
             for (const card of await cards.getByRole('button').all()) await expect(card).toHaveText(/0$/);
             await page.getByRole('button', { name: 'Clear filters' }).click();
-            await expect(cards.getByRole('button', { name: /^All applications/ })).toHaveText(/Active applications\s*1/);
+            await expect(cards.getByRole('button', { name: /^All applications/ })).toHaveText(/All applications\s*1/);
 
             await page.getByRole('button', { name: 'Awaiting review', exact: true }).click();
             await cards.getByRole('button', { name: /^All applications/ }).click();
@@ -591,7 +591,7 @@ test('staff workspace end-to-end in a real browser', async (t) => {
             await gotoStaff(page, `${baseURL}/staff/applications?client=${foreignClient}`);
             await expect(page.getByRole('combobox', { name: 'Filter by client' })).toHaveText('Unavailable client');
             await expect(page.getByText('Private foreign filter client')).toHaveCount(0);
-            await expect(cards.getByRole('button', { name: /^All applications/ })).toHaveText(/Active applications\s*0/);
+            await expect(cards.getByRole('button', { name: /^All applications/ })).toHaveText(/All applications\s*0/);
             await page.setViewportSize({ width: 390, height: 844 });
             await gotoStaff(page, `${baseURL}/staff/applications?client=${emptyClient}`);
             await expect(page.getByRole('combobox', { name: 'Filter by client' })).toHaveText('Empty filter client');
@@ -2195,7 +2195,8 @@ test('staff workspace end-to-end in a real browser', async (t) => {
             await expect(addJob).toHaveAttribute('href', `/staff/jobs/new?client=${createdClientId}`);
             await addJob.click();
             await page.waitForURL(`${baseURL}/staff/jobs/new?client=${createdClientId}`);
-            await expect(page.locator('#job-client')).toHaveValue(createdClientId);
+            await expect(page.locator('#job-client')).toHaveText('Synthetic Browser Client');
+            await expect(page.locator('input[type="hidden"][name="clientId"]')).toHaveValue(createdClientId);
             assert.equal(await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth), 0);
             assert.equal(psql(container, `select count(*) from app.jobs where organization_id = '${ORG_ID}'`), jobsBefore);
         } finally {
@@ -2211,7 +2212,8 @@ test('staff workspace end-to-end in a real browser', async (t) => {
         try {
             for (const query of ['not-a-uuid', randomUUID(), foreignClientId]) {
                 await gotoStaff(page, `${baseURL}/staff/jobs/new?client=${query}`);
-                await expect(page.locator('#job-client')).toHaveValue('');
+                await expect(page.locator('#job-client')).toHaveText('Select a client');
+                await expect(page.locator('input[type="hidden"][name="clientId"]')).toHaveValue('');
                 await expect(page.locator('#job-client')).not.toContainText(foreignName);
                 assert.equal(await page.getByText(foreignName, { exact: true }).count(), 0);
             }
