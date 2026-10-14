@@ -2195,7 +2195,8 @@ test('staff workspace end-to-end in a real browser', async (t) => {
             await expect(addJob).toHaveAttribute('href', `/staff/jobs/new?client=${createdClientId}`);
             await addJob.click();
             await page.waitForURL(`${baseURL}/staff/jobs/new?client=${createdClientId}`);
-            await expect(page.locator('#job-client')).toHaveText('Synthetic Browser Client');
+            await expect(page.locator('#job-client')).toHaveText(
+                psql(container, `select name from app.clients where id = '${createdClientId}'`));
             await expect(page.locator('input[type="hidden"][name="clientId"]')).toHaveValue(createdClientId);
             assert.equal(await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth), 0);
             assert.equal(psql(container, `select count(*) from app.jobs where organization_id = '${ORG_ID}'`), jobsBefore);
