@@ -290,3 +290,10 @@ test('conversation search and freshness retain separate workflow checks', () => 
     for (const suite of ['telegram-context','telegram-source-updates','telegram-extraction','telegram-cv','telegram-retention']) assert.ok(suites.includes(suite));
     assert.deepEqual(selected(['supabase/migrations/20261011120000_telegram_context_search.sql']), JOBS);
 });
+
+
+test('shared hosted processing covers Telegram and model workers without unrelated staff workflows', () => {
+    const jobs = selected(['services/telegram-hosted/processing-pool.mjs', 'services/telegram-hosted/supervisor.mjs']);
+    for (const job of ['telegram-connection', 'telegram-history', 'telegram-intake', 'telegram-extraction', 'telegram-cv', 'profile-search', 'cv-analysis', 'cv-search', 'worker-pairing']) assert.ok(jobs.includes(job), job);
+    for (const job of ['staff-workspace', 'database-client-jobs', 'database-privacy-foundation', 'browser-tests']) assert.ok(!jobs.includes(job), job);
+});

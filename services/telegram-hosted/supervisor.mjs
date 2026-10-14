@@ -56,10 +56,10 @@ export function terminateChild(child) {
 }
 
 export function createSupervisor({ control, store, api, connectorEntrypoint,
-  spawn = launchConnector, terminate = terminateChild, wall = Date.now,
+  processingPool = null, spawn = launchConnector, terminate = terminateChild, wall = Date.now,
   monotonic = () => performance.now(), output = () => {}, maxProcesses = 10, efficientPolling = false }) {
   const instanceId = randomUUID(), children = new Map(), backoff = new Map();
-  let pendingSnapshot = null, wakeCursor = null;
+  let pendingSnapshot = null, wakeCursor = null, processingRefreshing = false;
   let nextMaintenance = 0, maintaining = false;
   let cleaningRetired = false;
   const retiredRequests = new Set();
@@ -85,9 +85,9 @@ export function createSupervisor({ control, store, api, connectorEntrypoint,
   const stop = () => {
     if (shutdown) return shutdown;
     closed = true;
-    shutdown = Promise.all([...children.values()].map(async ({ child }) => {
+    shutdown = Promise.all([processingPool?.stop(), ...[...children.values()].map(async ({ child }) => {
       await terminate(child);
-    })).then(() => { children.clear(); output('SERVICE_STOPPED'); });
+    })]).then(() => { children.clear(); output('SERVICE_STOPPED'); });
     return shutdown;
   };
   const watch = () => {
@@ -169,11 +169,12 @@ export function createSupervisor({ control, store, api, connectorEntrypoint,
   const retiredCleanup = createRetiredCleanup({ control, store, instanceId, proof: () => proof, valid, wall, output,
     onLeaseLost: () => { void stop(); }, stopRequest: async id => {
       retiredRequests.add(id);
+      await processingPool?.remove(id);
       const entry = children.get(id);
       if (entry) { await terminate(entry.child); children.delete(id); output('CONNECTOR_STOPPED'); }
     } });
   const cleanupRetired = async () => {
-    if (cleaningRetired || reconciling || refreshing || closed) return;
+    if (cleaningRetired || reconciling || refreshing || processingRefreshing || closed) return;
     cleaningRetired = true;
     try { await retiredCleanup.tick(); } finally { cleaningRetired = false; }
   };
@@ -233,7 +234,36 @@ export function createSupervisor({ control, store, api, connectorEntrypoint,
       if (['ACCESS_DENIED', 'LEASE_CONFLICT', 'INVALID_HOST_RESPONSE'].includes(error.message)) await stop();
     } finally { reconciling = false; }
   };
-  return { refresh, reconcile, maintain, cleanupRetired, retiredCleanupHint: pending => retiredCleanup.hint(pending), watch, stop,
+  // Processing needs every registered owner, including dormant Telegram
+  // sessions: a semantic search must not depend on active chat synchronization.
+  const refreshProcessing = async () => {
+    if (!processingPool || processingRefreshing || cleaningRetired || !valid()) return;
+    processingRefreshing = true;
+    const token = proof;
+    try {
+      const records = [], seen = new Set(); let after = null;
+      do {
+        const response = await control('list', { instanceId, leaseToken: token, ...(after ? { after } : {}) });
+        if (!valid() || token !== proof) return;
+        if (!response || !Array.isArray(response.requests) || response.requests.length > 10
+          || (response.nextAfter !== null && !UUID.test(response.nextAfter ?? ''))) throw new Error('INVALID_HOST_RESPONSE');
+        for (const item of response.requests) {
+          validateRequest(item);
+          if (seen.has(item.requestId)) throw new Error('INVALID_HOST_RESPONSE');
+          seen.add(item.requestId);
+          if (!retiredRequests.has(item.requestId) && item.canRun && item.state === 'registered') records.push(store.prepare(item, api));
+        }
+        if (response.nextAfter !== null && (response.nextAfter === after || !seen.has(response.nextAfter))) throw new Error('INVALID_HOST_RESPONSE');
+        after = response.nextAfter;
+      } while (after !== null);
+      if (valid() && token === proof) await processingPool.reconcile(records);
+    } catch (error) {
+      await processingPool.suspend();
+      output('PROCESSING_REFRESH_DEFERRED');
+      if (['ACCESS_DENIED', 'LEASE_CONFLICT', 'INVALID_HOST_RESPONSE'].includes(error.message)) await stop();
+    } finally { processingRefreshing = false; }
+  };
+  return { refresh, reconcile, refreshProcessing, maintain, cleanupRetired, retiredCleanupHint: pending => retiredCleanup.hint(pending), watch, stop,
     wakeScope: () => valid() && wakeCursor ? { instanceId, leaseToken: proof, cursor: wakeCursor } : null,
     get stopped() { return closed; },
     snapshot: () => ({ leaseAcknowledged: valid(), runningConnectors: children.size, instanceId }),

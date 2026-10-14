@@ -5,7 +5,7 @@ import test from 'node:test';
 import pg from 'pg';
 import { POSTGRES_17_IMAGE, assertLocalTestEnvironment, psql, startPostgresContainer, stopAndRemoveContainer } from '../support/foundation-docker.js';
 import { AUTHZ_ID, installStaffFixture, staffPoolOptions } from '../support/staff-authorization.js';
-import { CJ_SUBJECTS, clientJobFixtureSql } from '../support/client-job-workflows.js';
+import { CJ_ID, CJ_SUBJECTS, clientJobFixtureSql } from '../support/client-job-workflows.js';
 import { createTelegramDraft, listTelegramDrafts, getTelegramDraft, decideTelegramDraft, updateTelegramDraft, refreshTelegramReview, registerTelegramWorker, matchTelegramReview, telegramReviewMatches } from '../../src/lib/telegram-intake-operations.js';
 import { withStaffTransaction } from '../../src/lib/staff-authorization.js';
 import { saveCandidateProfile, getCandidateProfile, listCandidateProfileDirectory } from '../../src/lib/candidate-profile-operations.js';
@@ -36,6 +36,46 @@ test('Telegram proposals create candidates without CVs, update exact matches, fe
     let profile = await getCandidateProfile(...args, { candidateId: saved.candidateId });
     assert.equal(profile.candidate.fullName, 'New Candidate');
     assert.equal(profile.candidate.headline, 'Engineer');
+    await t.test('another recruiter shares approved profiles but not imports, and reviews their own update field by field', async () => {
+        // This fixture's second role is intentionally minimal. Give it the
+        // production Recruiter grants rather than using an administrator actor.
+        psql(db, `insert into app.role_permissions(organization_id,role_id,permission_key)
+          values('${org}','${CJ_ID.ROLE_B_RECRUITER}','candidates.write'),
+          ('${org}','${CJ_ID.ROLE_B_RECRUITER}','documents.write'),
+          ('${org}','${CJ_ID.ROLE_B_RECRUITER}','documents.download') on conflict do nothing;`);
+        const recruiter = { ...owner, subject: CJ_SUBJECTS.RECRUITER };
+        const otherArgs = [pool, recruiter, org];
+        const privateDraft = await createTelegramDraft(...args, { fields: { firstName: 'Private', lastName: 'Person' }, sourceTitle: 'Private Telegram conversation' });
+        assert.equal((await listTelegramDrafts(...otherArgs, { view: 'all' })).drafts.some(d => d.id === privateDraft.id), false);
+        await assert.rejects(getTelegramDraft(...otherArgs, privateDraft.id), /unavailable/i);
+        const shared = await getCandidateProfile(...otherArgs, { candidateId: saved.candidateId });
+        assert.equal(shared.candidate.fullName, 'New Candidate');
+        const privateContext = await withStaffTransaction(pool, recruiter, org, ['candidates.read'], async ({ client }) =>
+          (await client.query('select app.telegram_candidate_context_v1($1,null) as result', [saved.candidateId])).rows[0].result);
+        assert.deepEqual(privateContext.sources, []);
+        assert.equal(privateContext.provenanceUnavailable, false, 'even existence of another owner source stays private');
+        // Existing shared profiles are matched by exact identity across owners.
+        const id = randomUUID();
+        await saveCandidateProfile(...args, { candidateId: id, expectedVersion: null, operationId: randomUUID(), fields: { fullName: 'Shared Person', email: 'shared-person@example.test', headline: 'Original role', location: 'Madrid' } });
+        const update = await createTelegramDraft(...otherArgs, { fields: { primaryEmail: 'shared-person@example.test', headline: 'Proposed role', location: 'Barcelona' }, sourceTitle: 'Second recruiter private chat' });
+        let review = await getTelegramDraft(...otherArgs, update.id);
+        assert.equal(review.existingCandidate.id, id);
+        await assert.rejects(getTelegramDraft(...args, update.id), /unavailable/i);
+        const reviewedFields = Object.fromEntries(Object.entries(normalizeTelegramDraftFields(review.proposedFields ?? review.fields)).filter(([key]) => !['telegramUserId', 'ownerMembershipId'].includes(key)));
+        reviewedFields.headline = 'Recruiter edited role'; // Edit one proposed field.
+        reviewedFields.location = 'Madrid'; // Reject another proposed field.
+        review = await updateTelegramDraft(...otherArgs, review.id, { expectedVersion: review.version, fields: reviewedFields });
+        await decideTelegramDraft(...otherArgs, review.id, { action: 'approve', expectedVersion: review.version, operationId: randomUUID(), reviewFlow: true, reviewedFields });
+        const updated = await getCandidateProfile(...args, { candidateId: id });
+        assert.equal(updated.candidate.headline, 'Recruiter edited role');
+        assert.equal(updated.candidate.location, 'Madrid');
+        assert.ok((await listCandidateProfileDirectory(...args, { q: 'Recruiter edited role' })).rows.some(row => row.candidateId === id));
+        const staleDraft = await createTelegramDraft(...otherArgs, { fields: { primaryEmail: 'shared-person@example.test', headline: 'Stale proposal' } });
+        const staleReview = await getTelegramDraft(...otherArgs, staleDraft.id);
+        await saveCandidateProfile(...args, { candidateId: id, expectedVersion: updated.candidate.version, operationId: randomUUID(), fields: { fullName: 'Shared Person', email: 'shared-person@example.test', headline: 'Concurrent owner edit', location: 'Madrid' } });
+        await assert.rejects(decideTelegramDraft(...otherArgs, staleReview.id, { action: 'approve', expectedVersion: staleReview.version, operationId: randomUUID(), reviewFlow: true, reviewedFields: Object.fromEntries(Object.entries(normalizeTelegramDraftFields(staleReview.proposedFields ?? staleReview.fields)).filter(([key]) => !['telegramUserId', 'ownerMembershipId'].includes(key))) }), /Candidate changed/i);
+    });
+
     const existingId = randomUUID();
     await saveCandidateProfile(...args, { candidateId: existingId, expectedVersion: null, operationId: randomUUID(), fields: { fullName: 'Existing Person', email: 'existing.flow@example.test', headline: 'Original', location: 'Madrid' } });
     const foreignCandidate = randomUUID();

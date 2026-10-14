@@ -8,10 +8,12 @@ import { readPrivateJson, createServiceStore } from './store.mjs';
 import { createControlClient } from './http.mjs';
 import { createSupervisor } from './supervisor.mjs';
 import { acquireLock, unlockStoppedProcess } from '../telegram-connector/vault.mjs';
+import { createProcessingPool } from './processing-pool.mjs';
+import { createProcessingWorkers } from './processing-workers.mjs';
 import { createWakeClient, listenForServiceWake } from './wake.mjs';
 
 const output = code => process.stderr.write(`${new Date().toISOString()} ${code}\n`);
-let release, supervisor, watchdog, renewal, wakeListener, stopping = false;
+let release, supervisor, watchdog, renewal, processingTimer, wakeListener, stopping = false;
 const abort = new AbortController();
 const stop = () => { stopping = true; abort.abort(); void supervisor?.stop(); };
 process.once('SIGINT', stop); process.once('SIGTERM', stop);
@@ -31,22 +33,28 @@ try {
   } else {
     if (existsSync(join(store.root, 'connector.lock'))) unlockStoppedProcess(store.root);
     release = acquireLock(store.root);
-    supervisor = createSupervisor({ control, store, api,
+    const processingPool = config.processing ? createProcessingPool({
+      createWorkers: await createProcessingWorkers({ ...config.processing, server: config.server }), output,
+      ...(config.processing.limits ? { limits: config.processing.limits } : {}),
+    }) : null;
+    supervisor = createSupervisor({ control, store, api, processingPool,
       efficientPolling: true, connectorEntrypoint: resolve(fileURLToPath(new URL('../telegram-connector/run.mjs', import.meta.url))), output });
     let syncing = null, syncAgain = false;
     const sync = () => {
       syncAgain = true;
       if (syncing) return syncing;
       syncing = (async () => {
-        do { syncAgain = false; await supervisor.refresh(); await supervisor.reconcile(); }
+        do { syncAgain = false; await supervisor.refresh(); await supervisor.reconcile(); await supervisor.refreshProcessing(); }
         while (syncAgain && !stopping && !supervisor.stopped);
       })().finally(() => { syncing = null; });
       return syncing;
     };
+    processingTimer = setInterval(() => processingPool?.tick(), 100);
     watchdog = setInterval(() => supervisor.watch(), 250);
     renewal = setInterval(() => { void sync().then(() => supervisor.maintain()).then(() => supervisor.cleanupRetired()); }, 10000);
     // Scheduled renewal remains the fallback when the notification channel fails.
     output('SERVICE_STARTED');
+    if (processingPool) output('SHARED_PROCESSING_ENABLED');
     await sync();
     wakeListener = listenForServiceWake({ listen: createWakeClient(config), scope: () => supervisor.wakeScope(),
       refresh: sync, stop, signal: abort.signal, output });
@@ -60,7 +68,7 @@ try {
     'UNSAFE_LOCAL_FILE', 'UNSAFE_LOCAL_DIRECTORY', 'CONNECTOR_ALREADY_LOCKED', 'CONNECTOR_STILL_RUNNING', 'INVALID_LOCK', 'CANNOT_VERIFY_LOCK']);
   output(safe.has(error.message) ? error.message : 'SERVICE_START_FAILED'); process.exitCode = 1;
 } finally {
-  clearInterval(watchdog); clearInterval(renewal); abort.abort();
+  clearInterval(watchdog); clearInterval(renewal); clearInterval(processingTimer); abort.abort();
   await wakeListener;
   await supervisor?.stop(); release?.();
   process.removeListener('SIGINT', stop); process.removeListener('SIGTERM', stop);

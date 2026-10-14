@@ -73,6 +73,8 @@ export function selectJobs(files, full = false, readFile = readRepoFile) {
         else if (file === 'tests/telegram-connector/native-sdk.test.js') jobs = ['telegram-source-updates'];
         else if (file === 'tests/telegram-connector/hosted-entrypoint.test.js') jobs = ['telegram-connection'];
         else if (/^tests\/evals\/telegram-context\//.test(file)) jobs = ['telegram-extraction'];
+        // Hosted supervision affects Telegram and shared processing, not job/client UI.
+        else if (/^services\/telegram-hosted\//.test(file)) jobs = [...TELEGRAM, 'profile-search', 'cv-analysis', 'cv-search', 'worker-pairing'];
         else if (file === 'services/telegram-extraction-worker/provider.mjs') jobs = ['telegram-extraction', 'telegram-intake'];
         else if (file === 'src/app/staff/telegram-intake/processing-status.tsx') jobs = ['telegram-intake', 'telegram-history', 'profile-search'];
         else if (/^src\/app\/staff\/telegram-intake\/context\//.test(file)) jobs = ['telegram-context', 'telegram-connection'];

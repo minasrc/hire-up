@@ -257,3 +257,47 @@ verified whole-scope purge can cover later work because retired credentials are
 permanently fenced. Migration repair reopens only still-removed completed chats
 with missing old-scope proof, preserving explicit fresh reimports. Private
 backups remain governed by the operator's backup retention policy.
+
+## Shared candidate processing
+
+Enable the bounded processing pool in the same supervisor by adding `processing`
+to its private configuration:
+
+```json
+{
+  "processing": {
+    "extractionConfigFile": "/absolute/private/extraction.json",
+    "cvAnalysisConfigFile": "/absolute/private/cv-analysis.json",
+    "semanticConfigFile": "/absolute/private/semantic.json",
+    "limits": { "extraction": 2, "cv": 1, "semantic": 2 }
+  }
+}
+```
+
+These use the existing worker configuration formats and shared model/embedding
+providers. Keep extraction and CV `providerModel` set to `gpt-6-luna`. Template
+account tokens are not used for processing: the supervisor automatically discovers
+registered users and authenticates each task with that user's credential. Pending
+results are encrypted in separate private directories per registration. Fixed
+concurrency limits apply across all users; semantic search has separate capacity
+so it can run while CVs or chats are being extracted. Removal, revocation, credential
+changes, and loss of the supervisor lease stop the affected work.
+
+Stop the standalone account-specific extraction, CV and semantic services before
+enabling the pool. Let any in-flight requests finish first, and retain their state
+for recovery. The supervisor needs Docker on its PATH for isolated PDF/DOCX parsing.
+It must remain online for processing and semantic searches.
+
+Recruiters review their own proposals and private Telegram evidence. Approved
+candidate profiles are visible within the workspace. Exact email/Telegram identity
+matches propose changes to the existing profile; ambiguous matches need explicit
+review. Field decisions and candidate version checks prevent unwanted changes and
+concurrent edits from being overwritten. Sharing a profile does not grant access
+to another recruiter's conversation or proposal inbox.
+
+To test a second user: invite them as Recruiter in Members, share the app URL (the
+invite does not send email), and have them sign in with the invited Google account.
+They connect Telegram, select a chat containing a candidate or a labelled CV, review
+the proposal, and approve it. Verify both recruiters can find the approved candidate,
+while only the importer can see the proposal/evidence. Import the same exact candidate
+identity again with changed details to test individual field review.
