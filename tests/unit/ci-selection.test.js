@@ -187,7 +187,7 @@ test('feature APIs retain all downstream workflow consumers without unrelated st
         'telegram-extraction': ['telegram-extraction', 'telegram-cv', 'telegram-retention', 'cv-analysis'],
         'telegram-cv': ['telegram-cv', 'cv-analysis'],
         'profile-search': ['profile-search', 'cv-search'],
-        'cv-analysis': ['cv-analysis', 'cv-search'],
+        'cv-analysis': ['cv-analysis', 'cv-search', 'telegram-cv'],
     };
     for (const [feature, suites] of Object.entries(dependents)) {
         for (const prefix of ['src/app/api/staff/', 'src/app/api/']) {

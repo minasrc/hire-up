@@ -87,7 +87,7 @@ export function selectJobs(files, full = false, readFile = readRepoFile) {
         else if (/^src\/app\/api\/(?:staff\/)?telegram-connection\//.test(file)) jobs = ['telegram-connection', 'telegram-history', 'telegram-context', 'telegram-source-updates', 'telegram-extraction', 'telegram-cv', 'telegram-retention', 'cv-analysis', 'worker-pairing'];
         else if (/^src\/app\/api\/(?:staff\/)?telegram-extraction\//.test(file)) jobs = ['telegram-extraction', 'telegram-cv', 'telegram-retention', 'cv-analysis'];
         else if (/^src\/app\/api\/(?:staff\/)?telegram-cv\//.test(file)) jobs = ['telegram-cv', 'cv-analysis'];
-        else if (/^src\/app\/api\/(?:staff\/)?cv-analysis\//.test(file)) jobs = ['cv-analysis', 'cv-search'];
+        else if (/^src\/app\/api\/(?:staff\/)?cv-analysis\//.test(file)) jobs = ['cv-analysis', 'cv-search', 'telegram-cv'];
         else if (/^src\/app\/api\/(?:staff\/)?profile-search\//.test(file)) jobs = ['profile-search', 'cv-search'];
         else if (/^src\/app\/api\/staff\//.test(file)) jobs = STAFF;
         else if (/^(src\/app\/staff\/|src\/components\/staff)/.test(file)) jobs = STAFF_BROWSER;
