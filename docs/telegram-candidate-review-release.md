@@ -15,7 +15,7 @@ Telegram is an intake source. The main flow is Connect → Choose chats → Revi
 
 ## Release
 
-Apply `20261013180000_telegram_candidate_review.sql`, `20261014100000_telegram_onboarding.sql`, `20261014110000_telegram_review_archive.sql`, `20261014120000_candidate_ranked_directory.sql`, `20261014130000_telegram_chat_groups.sql`, and `20261014140000_candidate_hybrid_search.sql` before deploying these application changes. Keep the existing Telegram connector, extraction worker, semantic worker/local embedding service, and maintenance worker running. This change does not replace the embedding model or deploy any services.
+Apply `20261014090000_telegram_candidate_review.sql`, `20261014100000_telegram_onboarding.sql`, `20261014110000_telegram_review_archive.sql`, `20261014120000_candidate_ranked_directory.sql`, `20261014130000_telegram_chat_groups.sql`, and `20261014140000_candidate_hybrid_search.sql` before deploying these application changes. Keep the existing Telegram connector, extraction worker, semantic worker/local embedding service, and maintenance worker running. This change does not replace the embedding model or deploy any services.
 
 ## Focused verification
 
