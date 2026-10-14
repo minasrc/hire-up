@@ -300,6 +300,9 @@ test('Telegram CV retrieval validates selected files and preserves profile edits
         mkdirSync(join(root, 'test-results'), { recursive: true });
         await retrieval.scrollIntoViewIfNeeded();
         await page.screenshot({ path: join(root, 'test-results/staff-workspace-telegram-cv-retrieved.png'), fullPage: true });
+        const analysis = await (await context.request.get(`${baseURL}/api/staff/cv-analysis?draftId=${ada.id}`)).json();
+        const skipAnalysis = await context.request.post(`${baseURL}/api/staff/cv-analysis`, { data: { action: 'cancel', analysisId: analysis.current.id, expectedAnalysisVersion: analysis.current.version } });
+        assert.equal(skipAnalysis.status(), 200, 'manual approval explicitly skips the automatically queued analysis');
         const approval = page.waitForResponse(response => response.url().endsWith(`/drafts/${ada.id}/decision`));
         await panel.getByRole('button', { name: 'Save and approve', exact: true }).click();
         assert.equal((await approval).status(), 200);

@@ -106,6 +106,7 @@ test('attachment-only CVs become reviewed candidates without losing field edits 
   assert.equal(psql(db, "select count(*) from app.telegram_cv_jobs where source->>'messageId'='3'").trim(), '0', 'NDAs are not automatically treated as CVs');
   await cvAnalysisWorkerOperation(workerPool, token, 'claim', {});
   assert.equal(psql(db, 'select count(*) from app.telegram_cv_jobs').trim(), '2', 'repeated polling does not create duplicate drafts or retrievals');
+  psql(db, "update app.telegram_cv_jobs set created_at=created_at+(source->>'messageId')::integer*interval '1 millisecond'");
   const maintenancePassword = randomUUID();
   psql(db, `create role maintenance_runtime_test login noinherit nosuperuser nocreatedb nocreaterole nobypassrls password '${maintenancePassword}'; grant app_telegram_maintenance to maintenance_runtime_test;`);
   maintenancePool = new pg.Pool({ ...staffPoolOptions(db, maintenancePassword, 1), user: 'maintenance_runtime_test' });
